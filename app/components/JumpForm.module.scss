@@ -1,0 +1,19 @@
+$visible-for: 3s;
+$fade-duration: 0.6s;
+
+.fadingNotice {
+  display: inline-block;
+  animation: fade-out $fade-duration ease-in $visible-for forwards;
+}
+
+@keyframes fade-out {
+  to {
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fadingNotice {
+    animation-duration: 0s;
+  }
+}

@@ -1,0 +1,11 @@
+$cool: #4aa3ff;
+$warm: #ff9a3c;
+$hot: #ff2d2d;
+
+.root {
+  --hot: #{$hot};
+  --heat-color: color-mix(in oklch,
+    color-mix(in oklch, #{$cool}, #{$warm} calc(min(var(--heat) * 2, 1) * 100%)),
+    #{$hot} calc(clamp(0, var(--heat) * 2 - 1, 1) * 100%));
+  --anim: calc(0.15s + var(--heat) * 2.2s);
+}

@@ -1,0 +1,234 @@
+"use client";
+
+import { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { bufferLabelsAreEstimated } from "@/lib/primes/rollingBuffer";
+import type { Batch, BufferStatus, ScrollInstruction } from "@/lib/primes/usePrimeBuffer";
+import styles from "./PrimeList.module.scss";
+
+const ROW_HEIGHT_PX = 44;
+/** Extra rows rendered above and below the viewport so fast scrolling doesn't flash blank space. */
+const EXTRA_ROWS_RENDERED = 10;
+
+/**
+ * The list has one status row above the primes ("it all begins here") and one
+ * below ("computing…"). So on screen, row 0 is the header and prime #0 in the
+ * buffer sits in row 1. These rows never change height, so adding or removing
+ * them never makes the content jump.
+ */
+const HEADER_ROWS = 1;
+const FOOTER_ROWS = 1;
+
+interface Props {
+  batches: Batch[];
+  status: BufferStatus;
+  reportView: (firstVisiblePrime: number, lastVisiblePrime: number) => void;
+  takeScrollInstruction: () => ScrollInstruction | null;
+}
+
+const numberFormatter = new Intl.NumberFormat("en-US");
+
+const PRIME_ROW_CLASSES =
+  "absolute inset-x-0 top-0 flex items-baseline justify-between gap-3 border-b border-rule px-4 leading-[44px] whitespace-nowrap tabular-nums sm:gap-4 sm:px-5";
+const STATUS_ROW_CLASSES = `${PRIME_ROW_CLASSES} justify-center! text-muted italic`;
+
+/** Converts a row position on screen to a position in the prime buffer. */
+function screenRowToPrimeIndex(screenRow: number): number {
+  return screenRow - HEADER_ROWS;
+}
+
+export function PrimeList({ batches, status, reportView, takeScrollInstruction }: Props) {
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const estimateBannerRef = useRef<HTMLParagraphElement>(null);
+  const bannerWasVisibleRef = useRef(false);
+  /** Remembered so we know how far to scroll back after the banner is removed from the DOM. */
+  const lastBannerHeightRef = useRef(0);
+  const [scrollTopPx, setScrollTopPx] = useState(0);
+  const [viewportHeightPx, setViewportHeightPx] = useState(0);
+
+  // Join the batches into one array so each screen row maps to one prime.
+  const { allPrimes, ordinalOfFirstPrime, labelsAreEstimated } = useMemo(() => {
+    const primeCount = batches.reduce((count, batch) => count + batch.primes.length, 0);
+    const joined = new Float64Array(primeCount);
+    let writePosition = 0;
+    for (const batch of batches) {
+      joined.set(batch.primes, writePosition);
+      writePosition += batch.primes.length;
+    }
+    return {
+      allPrimes: joined,
+      ordinalOfFirstPrime: batches[0]?.ordinalOfFirstPrime ?? 1,
+      // Drives both the "≈" on each label and the estimate banner.
+      labelsAreEstimated: bufferLabelsAreEstimated(batches),
+    };
+  }, [batches]);
+
+  const bufferStartsAtTwo = allPrimes[0] === 2;
+
+  /** Tells the buffer which primes are on screen so it can decide whether to fetch more. */
+  const reportVisiblePrimes = useCallback(() => {
+    const scrollContainer = scrollContainerRef.current;
+    if (!scrollContainer) return;
+
+    const scrollBottomPx = scrollContainer.scrollTop + scrollContainer.clientHeight;
+    const firstVisibleScreenRow = Math.floor(scrollContainer.scrollTop / ROW_HEIGHT_PX);
+    const lastVisibleScreenRow = Math.ceil(scrollBottomPx / ROW_HEIGHT_PX) - 1;
+
+    const firstVisiblePrime = Math.max(0, screenRowToPrimeIndex(firstVisibleScreenRow));
+    const lastVisiblePrime = screenRowToPrimeIndex(lastVisibleScreenRow);
+    reportView(firstVisiblePrime, lastVisiblePrime);
+  }, [reportView]);
+
+  // After the buffer changes, adjust the scroll position:
+  // - A batch dropped from the top (scrolling down) or added at the top
+  //   (scrolling up) moves every row below it. Scroll by the same amount so
+  //   the user keeps seeing the same primes.
+  // - After a jump, put the first prime found at the top of the viewport.
+  // - The estimate banner sits above the scroll container, so showing it
+  //   pushes the container's top edge down by the banner's height (and hiding
+  //   it pulls it back up). Scroll by the same amount so the visible primes
+  //   stay put on screen.
+  // Then check the thresholds again, because a new batch may already have
+  // crossed one.
+  useLayoutEffect(() => {
+    const scrollContainer = scrollContainerRef.current;
+    if (!scrollContainer) return;
+
+    const bannerJustAppeared = labelsAreEstimated && !bannerWasVisibleRef.current;
+    const bannerJustDisappeared = !labelsAreEstimated && bannerWasVisibleRef.current;
+    const heightOfDisappearedBanner = lastBannerHeightRef.current;
+    bannerWasVisibleRef.current = labelsAreEstimated;
+    if (labelsAreEstimated) {
+      lastBannerHeightRef.current = estimateBannerRef.current?.offsetHeight ?? 0;
+    }
+
+    const instruction = takeScrollInstruction();
+    if (instruction?.type === "showPrimeAtTop") {
+      // Absolute position inside the container, so it already lands below the banner.
+      scrollContainer.scrollTop = (HEADER_ROWS + instruction.primeIndex) * ROW_HEIGHT_PX;
+    } else {
+      if (instruction?.type === "keepPosition") {
+        scrollContainer.scrollTop += instruction.rowsAddedAbove * ROW_HEIGHT_PX;
+      }
+      if (bannerJustAppeared) scrollContainer.scrollTop += lastBannerHeightRef.current;
+      if (bannerJustDisappeared) scrollContainer.scrollTop -= heightOfDisappearedBanner;
+    }
+
+    setScrollTopPx(scrollContainer.scrollTop);
+    setViewportHeightPx(scrollContainer.clientHeight);
+    reportVisiblePrimes();
+  }, [batches, labelsAreEstimated, takeScrollInstruction, reportVisiblePrimes]);
+
+  useLayoutEffect(() => {
+    const scrollContainer = scrollContainerRef.current;
+    if (!scrollContainer) return;
+    const resizeObserver = new ResizeObserver(() =>
+      setViewportHeightPx(scrollContainer.clientHeight),
+    );
+    resizeObserver.observe(scrollContainer);
+    return () => resizeObserver.disconnect();
+  }, []);
+
+  const handleScroll = () => {
+    const scrollContainer = scrollContainerRef.current;
+    if (!scrollContainer) return;
+    setScrollTopPx(scrollContainer.scrollTop);
+    reportVisiblePrimes();
+  };
+
+  // Only rows near the viewport go into the DOM; the spacer div's height makes
+  // the scrollbar behave as if they were all there.
+  const totalScreenRows = HEADER_ROWS + allPrimes.length + FOOTER_ROWS;
+  const footerScreenRow = totalScreenRows - 1;
+  const firstRenderedRow = Math.max(
+    0,
+    Math.floor(scrollTopPx / ROW_HEIGHT_PX) - EXTRA_ROWS_RENDERED,
+  );
+  const lastRenderedRowExclusive = Math.min(
+    totalScreenRows,
+    Math.ceil((scrollTopPx + viewportHeightPx) / ROW_HEIGHT_PX) + EXTRA_ROWS_RENDERED,
+  );
+
+  const renderedRows = [];
+  for (let screenRow = firstRenderedRow; screenRow < lastRenderedRowExclusive; screenRow++) {
+    const positionStyle = {
+      transform: `translateY(${screenRow * ROW_HEIGHT_PX}px)`,
+      height: ROW_HEIGHT_PX,
+    };
+
+    if (screenRow === 0) {
+      const headerText =
+        allPrimes.length === 0 ? "" : bufferStartsAtTwo ? "it all begins here" : "recomputing the past…";
+      renderedRows.push(
+        <div key="header" className={STATUS_ROW_CLASSES} style={positionStyle}>
+          {headerText}
+        </div>,
+      );
+    } else if (screenRow === footerScreenRow) {
+      const footerText =
+        status === "overflow"
+          ? "you broke math"
+          : status === "error"
+            ? "the worker gave up"
+            : "computing…";
+      renderedRows.push(
+        <div key="footer" className={STATUS_ROW_CLASSES} style={positionStyle}>
+          {footerText}
+        </div>,
+      );
+    } else {
+      const primeIndex = screenRowToPrimeIndex(screenRow);
+      const prime = allPrimes[primeIndex];
+      // 2 is #1, 3 is #2, … After a jump this is estimated (see rollingBuffer.ts).
+      const ordinal = numberFormatter.format(ordinalOfFirstPrime + primeIndex);
+      renderedRows.push(
+        <div
+          key={prime}
+          data-testid="prime-row"
+          data-prime={prime}
+          className={PRIME_ROW_CLASSES}
+          style={positionStyle}
+        >
+          {labelsAreEstimated ? (
+            <span data-testid="prime-label" className="text-[0.8rem] text-muted opacity-70">
+              ≈ #{ordinal}
+            </span>
+          ) : (
+            <span data-testid="prime-label" className="text-[0.8rem] text-muted">
+              #{ordinal}
+            </span>
+          )}
+          {/* Scales down on narrow phones so a 16-digit prime and its label fit on one line. */}
+          <span className="font-mono text-[clamp(1rem,4.6vw,1.25rem)]">
+            {numberFormatter.format(prime)}
+          </span>
+        </div>,
+      );
+    }
+  }
+
+  return (
+    <div className="flex h-full flex-col">
+      {/* Outside the scroll container, so it stays put and never covers a row. */}
+      {labelsAreEstimated && (
+        <p
+          ref={estimateBannerRef}
+          role="status"
+          className="border-b border-rule px-5 py-1.5 text-xs text-muted"
+        >
+          Positions after a jump are estimated. Scroll back to 2 for exact counts.
+        </p>
+      )}
+      <div
+        ref={scrollContainerRef}
+        data-testid="prime-list"
+        data-status={status}
+        className={`${styles.scrollContainer} min-h-0 flex-1 overflow-y-auto [overflow-anchor:none]`}
+        onScroll={handleScroll}
+      >
+        <div className="relative w-full" style={{ height: totalScreenRows * ROW_HEIGHT_PX }}>
+          {renderedRows}
+        </div>
+      </div>
+    </div>
+  );
+}

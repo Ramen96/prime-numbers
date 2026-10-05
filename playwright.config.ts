@@ -1,0 +1,34 @@
+import { defineConfig, devices } from "@playwright/test";
+
+const PORT = 3000;
+const APP_URL = `http://localhost:${PORT}`;
+
+export default defineConfig({
+  testDir: "./tests/e2e",
+  fullyParallel: true,
+  forbidOnly: Boolean(process.env.CI),
+  retries: process.env.CI ? 1 : 0,
+  reporter: process.env.CI ? "github" : "list",
+  use: {
+    baseURL: APP_URL,
+    trace: "retain-on-failure",
+  },
+  // Every test runs at both sizes.
+  projects: [
+    {
+      name: "phone",
+      use: { ...devices["Desktop Chrome"], viewport: { width: 420, height: 800 } },
+    },
+    {
+      name: "desktop",
+      use: { ...devices["Desktop Chrome"], viewport: { width: 1440, height: 900 } },
+    },
+  ],
+  webServer: {
+    command: "npm run dev",
+    url: APP_URL,
+    // Locally, reuse a dev server that's already running instead of failing on the port.
+    reuseExistingServer: !process.env.CI,
+    timeout: 120_000,
+  },
+});
