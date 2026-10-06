@@ -7,6 +7,12 @@ import {
   type WorkerRequest,
   type WorkerResponse,
 } from "./protocol";
+import {
+  EMPTY_RATE_WINDOW,
+  measurePrimesPerSecond,
+  recordBatch,
+  type RateWindow,
+} from "./primeRateMeter.ts";
 import { addBatch, type Batch } from "./rollingBuffer.ts";
 
 export type { Batch };
@@ -33,13 +39,6 @@ export interface JumpResult {
  * the way back through the first batch.
  */
 const FETCH_THRESHOLD = 0.6;
-/** How much the newest batch counts toward the smoothed rate (exponential moving average). */
-const RATE_SMOOTHING = 0.3;
-/**
- * Lower bound on batch duration. Browsers round worker timers to ≥100µs, so
- * a tiny early batch can report 0ms, which would make the rate infinite.
- */
-const MIN_BATCH_DURATION_MS = 0.1;
 
 /** Primes/sec at which heat is 0 (cool). */
 const COOL_RATE = 1e7;
@@ -62,8 +61,16 @@ export function heatFromRate(primesPerSecond: number): number {
 export interface PrimeBuffer {
   batches: Batch[];
   status: BufferStatus;
-  /** Smoothed primes per second, or 0 before the first batch arrives. */
-  primesPerSecond: number;
+  /**
+   * Primes per second over recent batches (see primeRateMeter.ts), or null
+   * when there's no measured time yet: right after load or a jump.
+   */
+  primesPerSecond: number | null;
+  /**
+   * 0 (cool) to 1 (overheating), from primesPerSecond. Keeps its last value
+   * while primesPerSecond is null, so the CPU doesn't flash cool after a jump.
+   */
+  heat: number;
   lastBatchDurationMs: number;
   /** The most recent completed jump, or null if the user hasn't jumped. */
   lastJump: JumpResult | null;
@@ -85,7 +92,8 @@ export interface PrimeBuffer {
 export function usePrimeBuffer(): PrimeBuffer {
   const [batches, setBatches] = useState<Batch[]>([]);
   const [status, setStatus] = useState<BufferStatus>("idle");
-  const [primesPerSecond, setPrimesPerSecond] = useState(0);
+  const [primesPerSecond, setPrimesPerSecond] = useState<number | null>(null);
+  const [heat, setHeat] = useState(0);
   const [lastBatchDurationMs, setLastBatchDurationMs] = useState(0);
   const [lastJump, setLastJump] = useState<JumpResult | null>(null);
 
@@ -113,7 +121,7 @@ export function usePrimeBuffer(): PrimeBuffer {
   } | null>(null);
   const rowsAddedAboveRef = useRef(0);
   const primeToShowAtTopRef = useRef<number | null>(null);
-  const smoothedRateRef = useRef(0);
+  const rateWindowRef = useRef<RateWindow>(EMPTY_RATE_WINDOW);
   const stoppedRef = useRef(false); // set after overflow or error; no more requests
 
   /** Asks the worker for a batch. Ignored if one is already in progress. */
@@ -149,6 +157,8 @@ export function usePrimeBuffer(): PrimeBuffer {
       stoppedRef.current = false;
 
       heldBatchesRef.current = [];
+      // Measure the new region on its own, not averaged with where we were.
+      rateWindowRef.current = EMPTY_RATE_WINDOW;
       rowsAddedAboveRef.current = 0;
       primeToShowAtTopRef.current = null;
       pendingSeedRef.current = { target, isUserJump, primesFromTarget: null };
@@ -165,6 +175,7 @@ export function usePrimeBuffer(): PrimeBuffer {
       // worker computes the new ones.
       setBatches([]);
       setLastJump(null);
+      setPrimesPerSecond(null);
       seedBuffer(target, true);
     },
     [seedBuffer],
@@ -199,14 +210,15 @@ export function usePrimeBuffer(): PrimeBuffer {
       const { primes: newPrimes, durationMs, direction } = response;
       if (newPrimes.length === 0) return; // asked for primes before 2; there are none
 
-      // Update the primes-per-second counter.
-      const durationSeconds = Math.max(durationMs, MIN_BATCH_DURATION_MS) / 1000;
-      const thisBatchRate = newPrimes.length / durationSeconds;
-      const isFirstBatchEver = smoothedRateRef.current === 0;
-      smoothedRateRef.current = isFirstBatchEver
-        ? thisBatchRate
-        : RATE_SMOOTHING * thisBatchRate + (1 - RATE_SMOOTHING) * smoothedRateRef.current;
-      setPrimesPerSecond(smoothedRateRef.current);
+      // Update the primes-per-second counter. Only batches add to the rate,
+      // so when the worker is idle it simply holds its last value.
+      rateWindowRef.current = recordBatch(rateWindowRef.current, {
+        primeCount: newPrimes.length,
+        measuredDurationMs: durationMs,
+      });
+      const measuredRate = measurePrimesPerSecond(rateWindowRef.current);
+      setPrimesPerSecond(measuredRate);
+      if (measuredRate !== null) setHeat(heatFromRate(measuredRate));
       setLastBatchDurationMs(durationMs);
 
       const pendingSeed = pendingSeedRef.current;
@@ -322,6 +334,7 @@ export function usePrimeBuffer(): PrimeBuffer {
     batches,
     status,
     primesPerSecond,
+    heat,
     lastBatchDurationMs,
     lastJump,
     jumpTo,

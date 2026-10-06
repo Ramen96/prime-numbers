@@ -22,6 +22,10 @@ function sendToMainThread(response: WorkerResponse, transfer: Transferable[] = [
 }
 
 function handleBatchRequest({ id, generation, direction, from, count }: BatchRequest) {
+  // performance.now() precision depends on cross-origin isolation (the
+  // COOP/COEP headers in next.config.ts): microseconds when isolated, 0.1 ms
+  // or coarser when not. Fast batches can still measure 0 ms; the rate meter
+  // averages over many batches to handle that.
   const startTime = performance.now();
   const primesFound: number[] = [];
 

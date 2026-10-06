@@ -1,13 +1,18 @@
 "use client";
 
 import type { CSSProperties, ReactNode } from "react";
-import { heatFromRate, usePrimeBuffer } from "@/lib/primes/usePrimeBuffer";
+import { usePrimeBuffer } from "@/lib/primes/usePrimeBuffer";
 import { Cpu } from "./Cpu";
 import { JumpForm } from "./JumpForm";
 import { PrimeList } from "./PrimeList";
 import heatStyles from "./heat.module.scss";
 
 const numberFormatter = new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 });
+
+/** Below 0.1 ms, the timer may not be precise enough to say more than that. */
+function formatBatchDuration(durationMs: number): string {
+  return durationMs < 0.1 ? "< 0.1 ms" : `${durationMs.toFixed(2)} ms`;
+}
 
 interface Props {
   intro: ReactNode;
@@ -18,13 +23,13 @@ export function InfinitePrimes({ intro }: Props) {
     batches,
     status,
     primesPerSecond,
+    heat,
     lastBatchDurationMs,
     lastJump,
     jumpTo,
     reportView,
     takeScrollInstruction,
   } = usePrimeBuffer();
-  const heat = heatFromRate(primesPerSecond);
 
   // The frontier is the largest prime currently held.
   const lastBatch = batches[batches.length - 1];
@@ -44,7 +49,7 @@ export function InfinitePrimes({ intro }: Props) {
           <Cpu />
           <div className="min-w-40 flex-1">
             <div className="font-mono text-[clamp(2rem,8vw,3.75rem)] leading-none font-bold tabular-nums wrap-anywhere text-(--heat-color) transition-colors duration-600 desktop:text-[3.25rem]">
-              {primesPerSecond ? numberFormatter.format(primesPerSecond) : "—"}
+              {primesPerSecond === null ? "—" : numberFormatter.format(primesPerSecond)}
             </div>
             <div className="mt-1 text-xs tracking-widest text-muted uppercase">
               primes per second
@@ -55,7 +60,7 @@ export function InfinitePrimes({ intro }: Props) {
                 {frontier ? numberFormatter.format(frontier) : "—"}
               </dd>
               <dt>last batch</dt>
-              <dd className="text-foreground">{lastBatchDurationMs.toFixed(2)} ms</dd>
+              <dd className="text-foreground">{formatBatchDuration(lastBatchDurationMs)}</dd>
             </dl>
           </div>
         </header>
