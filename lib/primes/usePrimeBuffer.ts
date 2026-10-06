@@ -13,7 +13,7 @@ import {
   recordBatch,
   type RateWindow,
 } from "./primeRateMeter.ts";
-import { addBatch, type Batch } from "./rollingBuffer.ts";
+import { addBatch, MAX_BATCHES, type Batch } from "./rollingBuffer.ts";
 
 export type { Batch };
 
@@ -71,7 +71,8 @@ export interface PrimeBuffer {
    * while primesPerSecond is null, so the CPU doesn't flash cool after a jump.
    */
   heat: number;
-  lastBatchDurationMs: number;
+  /** null until the worker has computed a batch (the first one comes from the server). */
+  lastBatchDurationMs: number | null;
   /** The most recent completed jump, or null if the user hasn't jumped. */
   lastJump: JumpResult | null;
   /** Throw the buffer away and restart it at the first prime ≥ `target`. */
@@ -89,19 +90,29 @@ export interface PrimeBuffer {
   takeScrollInstruction: () => ScrollInstruction | null;
 }
 
-export function usePrimeBuffer(): PrimeBuffer {
-  const [batches, setBatches] = useState<Batch[]>([]);
+/**
+ * The first batch, computed on the server at build time and rendered into the
+ * page's HTML. Starting from it means the first screen of primes needs no
+ * worker round trip; the worker takes over from the first scroll.
+ */
+function batchesFromServer(firstBatchFromServer: readonly number[]): Batch[] {
+  if (firstBatchFromServer.length === 0) return [];
+  return addBatch([], Float64Array.from(firstBatchFromServer), "next").batches;
+}
+
+export function usePrimeBuffer(firstBatchFromServer: readonly number[]): PrimeBuffer {
+  const [batches, setBatches] = useState<Batch[]>(() => batchesFromServer(firstBatchFromServer));
   const [status, setStatus] = useState<BufferStatus>("idle");
   const [primesPerSecond, setPrimesPerSecond] = useState<number | null>(null);
   const [heat, setHeat] = useState(0);
-  const [lastBatchDurationMs, setLastBatchDurationMs] = useState(0);
+  const [lastBatchDurationMs, setLastBatchDurationMs] = useState<number | null>(null);
   const [lastJump, setLastJump] = useState<JumpResult | null>(null);
 
   // These refs hold the same values as state, but update instantly. The worker
   // message handler and the scroll handler read them, so they always see the
   // latest values instead of a stale snapshot from an earlier render.
   const workerRef = useRef<Worker | null>(null);
-  const heldBatchesRef = useRef<Batch[]>([]);
+  const heldBatchesRef = useRef<Batch[]>(batches);
   const pendingRequestRef = useRef<{ id: number; direction: Direction } | null>(null);
   const lastRequestIdRef = useRef(0);
   /** Bumped on every seed/jump. Responses tagged with an older generation are ignored. */
@@ -123,6 +134,12 @@ export function usePrimeBuffer(): PrimeBuffer {
   const primeToShowAtTopRef = useRef<number | null>(null);
   const rateWindowRef = useRef<RateWindow>(EMPTY_RATE_WINDOW);
   const stoppedRef = useRef(false); // set after overflow or error; no more requests
+  /**
+   * True from page load until the buffer holds MAX_BATCHES. The server sends
+   * the first batch, so nothing has been timed yet; filling the buffer right
+   * away gives the counter a real measurement within moments of loading.
+   */
+  const fillingOnLoadRef = useRef(true);
 
   /** Asks the worker for a batch. Ignored if one is already in progress. */
   const requestBatch = useCallback((direction: Direction, from: number) => {
@@ -162,8 +179,11 @@ export function usePrimeBuffer(): PrimeBuffer {
       rowsAddedAboveRef.current = 0;
       primeToShowAtTopRef.current = null;
       pendingSeedRef.current = { target, isUserJump, primesFromTarget: null };
+      fillingOnLoadRef.current = false;
 
       // "next" returns primes strictly greater than `from`, so this asks for primes ≥ target.
+      // If the worker doesn't exist yet (a jump from the URL on page load), the
+      // request is skipped and the worker sends it once it starts.
       requestBatch("next", target - 1);
     },
     [requestBatch],
@@ -244,7 +264,17 @@ export function usePrimeBuffer(): PrimeBuffer {
       rowsAddedAboveRef.current += rowsAddedAbove;
       heldBatchesRef.current = updatedBatches;
       setBatches(updatedBatches);
+
+      if (fillingOnLoadRef.current) {
+        if (updatedBatches.length < MAX_BATCHES) requestNextAfter(updatedBatches);
+        else fillingOnLoadRef.current = false;
+      }
     };
+
+    function requestNextAfter(batches: Batch[]) {
+      const lastBatch = batches[batches.length - 1];
+      requestBatch("next", lastBatch.primes[lastBatch.primes.length - 1]);
+    }
 
     /** Shows a freshly seeded buffer, landing the view on the first prime ≥ target. */
     function finishSeeding(
@@ -280,7 +310,18 @@ export function usePrimeBuffer(): PrimeBuffer {
       setStatus("error");
     };
 
-    seedBuffer(2, false);
+    // Send whatever was waiting for the worker to exist (or was cut off when a
+    // previous worker was terminated).
+    const pendingSeed = pendingSeedRef.current;
+    if (pendingSeed?.primesFromTarget) {
+      requestBatch("prev", pendingSeed.primesFromTarget[0]);
+    } else if (pendingSeed) {
+      requestBatch("next", pendingSeed.target - 1);
+    } else if (heldBatchesRef.current.length === 0) {
+      seedBuffer(2, false); // no first batch from the server
+    } else if (fillingOnLoadRef.current) {
+      requestNextAfter(heldBatchesRef.current);
+    }
 
     return () => {
       worker.terminate();

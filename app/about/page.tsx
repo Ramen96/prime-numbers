@@ -1,0 +1,122 @@
+import Link from "next/link";
+import { pageMetadata } from "@/lib/pageMetadata";
+import { AUTHOR_NAME, AUTHOR_URL, GITHUB_URL } from "@/lib/site";
+import { Article } from "../components/Article";
+
+export const metadata = pageMetadata({
+  title: "About | Every Prime Number",
+  description:
+    "Why Every Prime Number exists, who built it, and answers to common questions: is it using my computer, what does ≈ mean, and why does it slow down?",
+  path: "/about",
+});
+
+const FREQUENTLY_ASKED_QUESTIONS = [
+  {
+    question: "Does it really calculate every prime number?",
+    answer: (
+      <>
+        It calculates every prime, in order, for as long as you keep scrolling, and nothing is
+        skipped or looked up from a list. But there are infinitely many primes (Euclid proved
+        it, see <Link href="/how-it-works#infinitely-many-primes">how it works</Link>), so
+        “every” is the joke: you’ll never reach the end.
+      </>
+    ),
+  },
+  {
+    question: "Is it using my computer?",
+    answer: (
+      <>
+        Yes. All the computing happens in your browser, on your device. Nothing is calculated
+        on a server: the server only sends the page itself, with the first 500 primes already
+        written into it.
+      </>
+    ),
+  },
+  {
+    question: "Is any of my data sent anywhere?",
+    answer: (
+      <>
+        No. There are no analytics, trackers or accounts, and nothing you do on the page is
+        sent anywhere. Like any website, the host sees the ordinary request for the page when
+        you load it.
+      </>
+    ),
+  },
+  {
+    question: "Why does the counter slow down as I scroll?",
+    answer: (
+      <>
+        Because primes get rarer as numbers get bigger. Near a million, about one number in 14
+        is prime; near a trillion, about one in 28. Each number also takes more work to rule
+        out. So the further you go, the longer each batch of 500 primes takes, and the
+        primes-per-second counter falls. The slowdown is real math, not a special effect.
+      </>
+    ),
+  },
+  {
+    question: "What does the “≈” next to a number mean?",
+    answer: (
+      <>
+        After you jump, the site doesn’t know exactly how many primes it skipped, so the
+        position labels (#n) are estimates, made with the logarithmic integral. They’re very
+        close: about 0.0001% off at a trillion. Scroll back down to 2 and they become exact.{" "}
+        <Link href="/how-it-works#estimated-positions">More on how it estimates.</Link>
+      </>
+    ),
+  },
+  {
+    question: "Why can’t I jump past a certain number?",
+    answer: (
+      <>
+        JavaScript numbers are only exact up to 2⁵³ − 1 (9,007,199,254,740,991). Past that they
+        start rounding, which would mean showing wrong primes. The site would rather show
+        nothing than show something wrong.
+      </>
+    ),
+  },
+  {
+    question: "Will it break my computer?",
+    answer: (
+      <>
+        No. It works your processor hard while it’s calculating, but it does so in a background
+        worker, so the page stays responsive and you can stop at any time. It only computes when
+        you scroll toward primes it doesn’t have yet; when you stop, it rests.
+      </>
+    ),
+  },
+];
+
+export default function AboutPage() {
+  return (
+    <Article title="About Every Prime Number">
+      <p>
+        It started as a deliberately absurd idea: a website that lists every prime number. An
+        infinite scroll, with your own computer working out each prime on the spot, a big
+        primes-per-second counter, and a little cartoon CPU that gets visibly hotter the further
+        you go.
+      </p>
+      <p>
+        Doing that properly turned into a real engineering project: a prime finder running in
+        a background thread, a list that scrolls forever without memory growing, position
+        estimates good to a ten-thousandth of a percent, and a fight with the browser’s own
+        timers just to measure the speed honestly.{" "}
+        <Link href="/how-it-works">How it works</Link> explains all of it.
+      </p>
+      <p>
+        Built by <a href={AUTHOR_URL}>{AUTHOR_NAME}</a>. The source code is on{" "}
+        <a href={GITHUB_URL} target="_blank" rel="noopener noreferrer">
+          GitHub
+        </a>
+        .
+      </p>
+
+      <h2 id="faq">Frequently asked questions</h2>
+      {FREQUENTLY_ASKED_QUESTIONS.map(({ question, answer }) => (
+        <section key={question}>
+          <h3>{question}</h3>
+          <p>{answer}</p>
+        </section>
+      ))}
+    </Article>
+  );
+}

@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, type SubmitEvent } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore, type SubmitEvent } from "react";
+import { jumpParameterFrom, urlForJump } from "@/lib/jumpUrl";
 import { parseJumpTarget } from "@/lib/primes/parseJumpTarget";
 import type { JumpResult } from "@/lib/primes/usePrimeBuffer";
 import styles from "./JumpForm.module.scss";
@@ -12,19 +13,50 @@ interface Props {
 
 const numberFormatter = new Intl.NumberFormat("en-US");
 
+// The page is statically rendered, so ?jump= can only be read in the browser:
+// the server snapshot is always an empty query string.
+const subscribeToNothing = () => () => {};
+const readQueryString = () => window.location.search;
+const readServerQueryString = () => "";
+
 export function JumpForm({ onJump, lastJump }: Props) {
-  const [userInput, setUserInput] = useState("");
+  // null until the user types or submits; until then the box shows ?jump=.
+  const [userInput, setUserInput] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  const queryString = useSyncExternalStore(subscribeToNothing, readQueryString, readServerQueryString);
+  const jumpFromUrl = jumpParameterFrom(queryString);
+  const shownInput = userInput ?? jumpFromUrl ?? "";
+  const invalidUrlJumpMessage = (() => {
+    if (userInput !== null || jumpFromUrl === null) return null;
+    const result = parseJumpTarget(jumpFromUrl);
+    return result.valid ? null : result.message;
+  })();
+  const shownError = errorMessage ?? invalidUrlJumpMessage;
+
+  // Follow a shared link: jump once on load if ?jump= holds a valid number.
+  const hasFollowedUrlJumpRef = useRef(false);
+  useEffect(() => {
+    if (hasFollowedUrlJumpRef.current) return;
+    hasFollowedUrlJumpRef.current = true;
+    const urlJumpText = jumpParameterFrom(window.location.search);
+    if (urlJumpText === null) return;
+    const result = parseJumpTarget(urlJumpText);
+    if (result.valid) onJump(result.target);
+  }, [onJump]);
 
   const handleSubmit = (event: SubmitEvent) => {
     event.preventDefault();
-    const result = parseJumpTarget(userInput);
+    setUserInput(shownInput);
+    const result = parseJumpTarget(shownInput);
     if (!result.valid) {
       setErrorMessage(result.message);
       return;
     }
     setErrorMessage(null);
     onJump(result.target);
+    // Make the URL shareable without reloading or adding a history entry per jump.
+    window.history.replaceState(null, "", urlForJump(window.location.href, result.target));
   };
 
   return (
@@ -39,9 +71,9 @@ export function JumpForm({ onJump, lastJump }: Props) {
           inputMode="numeric"
           autoComplete="off"
           placeholder="Jump to… e.g. 15,000,000"
-          value={userInput}
+          value={shownInput}
           onChange={(event) => setUserInput(event.target.value)}
-          aria-invalid={errorMessage !== null}
+          aria-invalid={shownError !== null}
           aria-describedby="jump-feedback"
           className="min-w-0 flex-1 h-11 rounded-md border bg-transparent px-3 tabular-nums outline-none placeholder:font-sans placeholder:text-muted aria-invalid:border-(--hot)"
         />
@@ -54,8 +86,8 @@ export function JumpForm({ onJump, lastJump }: Props) {
       </div>
 
       <p id="jump-feedback" aria-live="polite" className="mt-1.5 min-h-5 text-sm">
-        {errorMessage ? (
-          <span className="text-(--hot)">{errorMessage}</span>
+        {shownError ? (
+          <span className="text-(--hot-text)">{shownError}</span>
         ) : lastJump ? (
           // Keyed by generation so the fade-out restarts on every jump.
           <span key={lastJump.generation} className={`${styles.fadingNotice} text-muted`}>

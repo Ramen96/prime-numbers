@@ -28,8 +28,8 @@ export class PrimeListPage {
     this.jumpFeedback = page.locator("#jump-feedback");
   }
 
-  async open() {
-    await this.page.goto("/");
+  async open(pagePath = "/") {
+    await this.page.goto(pagePath);
     await expect(this.primeList.getByTestId("prime-row").first()).toBeVisible();
     await this.waitForWorkerToFinish();
   }

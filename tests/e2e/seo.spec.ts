@@ -16,15 +16,23 @@ test.describe("server-rendered HTML", () => {
     expect(html).toContain("watch the primes-per-second counter fall");
   });
 
+  test("contains the first primes, rendered on the server", async ({ request }) => {
+    const html = await (await request.get("/")).text();
+    for (const prime of [2, 3, 5, 7, 11, 13, 17, 19, 23, 29]) {
+      expect(html).toContain(`data-prime="${prime}"`);
+    }
+    expect(html).toMatch(/<span[^>]*>#1<\/span>/); // with its exact position label
+  });
+
   test("contains the title, description, Open Graph and Twitter tags", async ({ request }) => {
     const html = await (await request.get("/")).text();
-    const title = "Every Prime Number – An Infinite List of Primes, Calculated Live";
+    const title = "Every Prime Number | Live Infinite List of Primes";
 
     expect(html).toContain(`<title>${title}</title>`);
     expect(html).toMatch(/<meta name="description" content="An infinite, scrollable list of prime numbers/);
     expect(html).toContain(`<meta property="og:title" content="${title}"/>`);
     expect(html).toContain('<meta property="og:url" content="https://everyprimenumber.com"/>');
-    expect(html).toContain('<meta name="twitter:card" content="summary"/>');
+    expect(html).toContain('<meta name="twitter:card" content="summary_large_image"/>');
     expect(html).toContain(`<meta name="twitter:title" content="${title}"/>`);
   });
 

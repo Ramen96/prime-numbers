@@ -1,0 +1,29 @@
+$cool: #4aa3ff;
+$warm: #ff9a3c;
+$hot: #ff2d2d;
+
+// On the root element so the whole site (nav included) shares one heat.
+// The home page updates --heat as the counter changes; elsewhere it stays 0.
+:root {
+  --heat: 0;
+  --hot: #{$hot};
+  --heat-color: color-mix(in oklch,
+    color-mix(in oklch, #{$cool}, #{$warm} calc(min(var(--heat) * 2, 1) * 100%)),
+    #{$hot} calc(clamp(0, var(--heat) * 2 - 1, 1) * 100%));
+  --anim: calc(0.15s + var(--heat) * 2.2s);
+}
+
+// Text-safe versions for small or important text (WCAG AA, at least 4.5:1 at
+// every heat level): darkened in light mode, plain in dark mode.
+:root {
+  --heat-text: color-mix(in oklch, var(--heat-color) 70%, black);
+  --hot-text: #d42020;
+  --hot-surface: #c81e1e; // with white text on it
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --heat-text: var(--heat-color);
+    --hot-text: #{$hot};
+  }
+}

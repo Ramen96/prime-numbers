@@ -8,6 +8,7 @@ import styles from "./PrimeList.module.scss";
 const ROW_HEIGHT_PX = 44;
 /** Extra rows rendered above and below the viewport so fast scrolling doesn't flash blank space. */
 const EXTRA_ROWS_RENDERED = 10;
+const INITIAL_VIEWPORT_HEIGHT_GUESS_PX = 900;
 
 /**
  * The list has one status row above the primes ("it all begins here") and one
@@ -43,7 +44,9 @@ export function PrimeList({ batches, status, reportView, takeScrollInstruction }
   /** Remembered so we know how far to scroll back after the banner is removed from the DOM. */
   const lastBannerHeightRef = useRef(0);
   const [scrollTopPx, setScrollTopPx] = useState(0);
-  const [viewportHeightPx, setViewportHeightPx] = useState(0);
+  // Until the browser can measure, assume a typical screen so the server
+  // renders a full first screen of primes into the HTML.
+  const [viewportHeightPx, setViewportHeightPx] = useState(INITIAL_VIEWPORT_HEIGHT_GUESS_PX);
 
   // Join the batches into one array so each screen row maps to one prime.
   const { allPrimes, ordinalOfFirstPrime, labelsAreEstimated } = useMemo(() => {
@@ -190,11 +193,11 @@ export function PrimeList({ batches, status, reportView, takeScrollInstruction }
         >
           {labelsAreEstimated ? (
             <span data-testid="prime-label" className="text-[0.8rem] text-muted opacity-70">
-              ≈ #{ordinal}
+              {`≈ #${ordinal}`}
             </span>
           ) : (
             <span data-testid="prime-label" className="text-[0.8rem] text-muted">
-              #{ordinal}
+              {`#${ordinal}`}
             </span>
           )}
           {/* Scales down on narrow phones so a 16-digit prime and its label fit on one line. */}
