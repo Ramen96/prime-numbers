@@ -1,0 +1,17 @@
+// Shiki writes each token's colour for both themes as CSS variables. The
+// block keeps the page's own background, which the colours were checked against.
+.codeBlock {
+  :global(.shiki) {
+    background-color: transparent;
+  }
+
+  :global(.shiki span) {
+    color: var(--shiki-light);
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :global(.shiki span) {
+      color: var(--shiki-dark);
+    }
+  }
+}

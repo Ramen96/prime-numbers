@@ -2,6 +2,7 @@ import Link from "next/link";
 import { pageMetadata } from "@/lib/pageMetadata";
 import { AUTHOR_NAME, AUTHOR_URL, SITE_URL } from "@/lib/site";
 import { Article } from "../components/Article";
+import { CodeBlock } from "../components/CodeBlock";
 import { JsonLd } from "../components/JsonLd";
 import { UlamSpiral } from "../components/UlamSpiral";
 
@@ -169,8 +170,9 @@ export default function HowItWorksPage() {
         </li>
       </ul>
       <p>In code, one segment looks roughly like this:</p>
-      <pre>
-        <code>{`// The primes in [low, high), given every prime up to √high.
+      <CodeBlock
+        language="javascript"
+        code={`// The primes in [low, high), given every prime up to √high.
 function sieveSegment(low, high, basePrimes, isComposite) {
   isComposite.fill(0, 0, high - low); // reuse one buffer for every segment
   for (const prime of basePrimes) {
@@ -186,8 +188,8 @@ function sieveSegment(low, high, basePrimes, isComposite) {
     if (!isComposite[candidate - low]) primes.push(candidate);
   }
   return primes;
-}`}</code>
-      </pre>
+}`}
+      />
       <p>
         This is how the site’s background worker finds primes, in C compiled to WebAssembly.
         Memory stays flat because the scratch buffer is the same size for every segment,
@@ -425,8 +427,9 @@ function sieveSegment(low, high, basePrimes, isComposite) {
         Here γ ≈ 0.5772 is the Euler–Mascheroni constant. It looks fearsome, but it’s a loop.
         Each term reuses the previous one, so there are no giant powers or factorials:
       </p>
-      <pre>
-        <code>{`const lnX = Math.log(x);
+      <CodeBlock
+        language="javascript"
+        code={`const lnX = Math.log(x);
 let sum = 0;
 let powerOverFactorial = 1; // (ln x)^n / (n! · 2^(n−1))
 let oddReciprocalSum = 0;   // 1 + 1/3 + 1/5 + …
@@ -438,8 +441,8 @@ for (let n = 1; n <= 200; n++) {
   sum += term;
   if (n > lnX && Math.abs(term) < Number.EPSILON * Math.abs(sum)) break;
 }
-return EULER_MASCHERONI + Math.log(lnX) + Math.sqrt(x) * sum;`}</code>
-      </pre>
+return EULER_MASCHERONI + Math.log(lnX) + Math.sqrt(x) * sum;`}
+      />
       <p>
         The site’s tests check it against known values: li(10⁶) ≈ 78,627.5, li(10⁹) ≈
         50,849,234.9 and li(10¹²) ≈ 37,607,950,280.8, all to within 0.1.
