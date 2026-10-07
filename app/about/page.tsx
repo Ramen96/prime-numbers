@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { anchorForQuestion, DATA_FAQ_QUESTION } from "@/lib/faqAnchors";
 import { pageMetadata } from "@/lib/pageMetadata";
 import { AUTHOR_NAME, AUTHOR_URL, GITHUB_URL } from "@/lib/site";
 import { Article } from "../components/Article";
@@ -34,12 +35,15 @@ const FREQUENTLY_ASKED_QUESTIONS = [
     ),
   },
   {
-    question: "Is any of my data sent anywhere?",
+    question: DATA_FAQ_QUESTION,
     answer: (
       <>
         No. There are no analytics, trackers or accounts, and nothing you do on the page is
-        sent anywhere. Like any website, the host sees the ordinary request for the page when
-        you load it.
+        sent anywhere. The site saves your favorite primes and scroll records in your browser
+        so they’re there next time, along with a note that you’ve seen the notice about this.
+        They stay on this device and are never sent anywhere; clearing your browser’s site
+        data removes them. Like any website, the host sees the ordinary request for the page
+        when you load it.
       </>
     ),
   },
@@ -114,7 +118,7 @@ export default function AboutPage() {
       <h2 id="faq">Frequently asked questions</h2>
       {FREQUENTLY_ASKED_QUESTIONS.map(({ question, answer }) => (
         <section key={question}>
-          <h3>{question}</h3>
+          <h3 id={anchorForQuestion(question)}>{question}</h3>
           <p>{answer}</p>
         </section>
       ))}

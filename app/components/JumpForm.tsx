@@ -1,12 +1,19 @@
 "use client";
 
-import { useEffect, useRef, useState, useSyncExternalStore, type SubmitEvent } from "react";
-import { jumpParameterFrom, urlForJump } from "@/lib/jumpUrl";
+import {
+  useEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+  type SubmitEvent,
+} from "react";
+import { jumpParameterFrom } from "@/lib/jumpUrl";
 import { parseJumpTarget } from "@/lib/primes/parseJumpTarget";
 import type { JumpResult } from "@/lib/primes/usePrimeBuffer";
-import styles from "./JumpForm.module.scss";
+import fadingNotice from "./FadingNotice.module.scss";
 
 interface Props {
+  /** Jumps, and updates the URL so it can be shared. */
   onJump: (target: bigint) => void;
   lastJump: JumpResult | null;
 }
@@ -55,8 +62,6 @@ export function JumpForm({ onJump, lastJump }: Props) {
     }
     setErrorMessage(null);
     onJump(result.target);
-    // Make the URL shareable without reloading or adding a history entry per jump.
-    window.history.replaceState(null, "", urlForJump(window.location.href, result.target));
   };
 
   return (
@@ -90,7 +95,7 @@ export function JumpForm({ onJump, lastJump }: Props) {
           <span className="text-(--hot-text)">{shownError}</span>
         ) : lastJump ? (
           // Keyed by generation so the fade-out restarts on every jump.
-          <span key={lastJump.generation} className={`${styles.fadingNotice} text-muted`}>
+          <span key={lastJump.generation} className={`${fadingNotice.fadingNotice} text-muted`}>
             Jumped to{" "}
             <span className="font-mono text-foreground">
               {numberFormatter.format(lastJump.firstPrimeFound)}

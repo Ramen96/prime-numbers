@@ -5,6 +5,7 @@ const PAGES = [
   { path: "/", linkName: "Home" },
   { path: "/how-it-works", linkName: "How it works" },
   { path: "/about", linkName: "About" },
+  { path: "/favorites", linkName: "Favorites" },
 ] as const;
 
 test.describe("site navigation", () => {
@@ -15,7 +16,8 @@ test.describe("site navigation", () => {
       for (const otherPage of PAGES) expect(html).toContain(`href="${otherPage.path}"`);
       expect(html).toContain(`href="${GITHUB_URL}"`);
       expect(html).toMatch(
-        new RegExp(`<a[^>]*aria-current="page"[^>]*href="${path}"[^>]*>${linkName}</a>`),
+        // The Favorites link holds a star icon and a label, so match up to the label.
+        new RegExp(`<a[^>]*aria-current="page"[^>]*href="${path}"[^>]*>[\\s\\S]*?${linkName}[\\s\\S]*?</a>`),
       );
     });
   }
@@ -24,7 +26,7 @@ test.describe("site navigation", () => {
     await page.goto("/");
     const siteNav = page.getByRole("navigation", { name: "Site" });
 
-    for (const { path, linkName } of [PAGES[1], PAGES[2], PAGES[0]]) {
+    for (const { path, linkName } of [PAGES[1], PAGES[2], PAGES[3], PAGES[0]]) {
       await siteNav.getByRole("link", { name: linkName, exact: true }).click();
       await expect(page).toHaveURL(path);
       await expect(siteNav.getByRole("link", { name: linkName, exact: true })).toHaveAttribute(

@@ -1,9 +1,10 @@
 "use client";
 
-import { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { bufferLabelsAreEstimated } from "@/lib/primes/rollingBuffer";
 import type { Batch, BufferStatus, ScrollInstruction } from "@/lib/primes/usePrimeBuffer";
-import styles from "./PrimeList.module.scss";
+import { StarIcon } from "./StarIcon";
+import scrollbar from "./ThemedScrollbar.module.scss";
 
 const ROW_HEIGHT_PX = 44;
 /** Extra rows rendered above and below the viewport so fast scrolling doesn't flash blank space. */
@@ -24,20 +25,38 @@ interface Props {
   status: BufferStatus;
   reportView: (firstVisiblePrime: number, lastVisiblePrime: number) => void;
   takeScrollInstruction: () => ScrollInstruction | null;
+  /** Decimal strings of the visitor's favorite primes. */
+  favoritePrimes: ReadonlySet<string>;
+  onToggleFavorite: (prime: bigint) => void;
+  /** The largest prime actually on screen (for personal records). */
+  onLargestVisiblePrime: (prime: bigint) => void;
 }
 
 const numberFormatter = new Intl.NumberFormat("en-US");
 
+// Below 640px a row stacks the prime above its position label, so a 16-digit
+// prime, its label and the star all fit; from 640px up they share one line.
 const PRIME_ROW_CLASSES =
-  "absolute inset-x-0 top-0 flex items-baseline justify-between gap-3 border-b border-rule px-4 leading-[44px] whitespace-nowrap tabular-nums sm:gap-4 sm:px-5";
-const STATUS_ROW_CLASSES = `${PRIME_ROW_CLASSES} justify-center! text-muted italic`;
+  "absolute inset-x-0 top-0 flex items-center gap-1 border-b border-rule pr-4 pl-1 whitespace-nowrap tabular-nums sm:gap-3 sm:pr-5 sm:pl-2";
+const PRIME_AND_LABEL_CLASSES =
+  "flex min-w-0 flex-1 flex-col items-end leading-tight sm:flex-row sm:items-baseline sm:justify-between";
+const STATUS_ROW_CLASSES =
+  "absolute inset-x-0 top-0 flex items-center justify-center border-b border-rule px-4 text-muted italic";
 
 /** Converts a row position on screen to a position in the prime buffer. */
 function screenRowToPrimeIndex(screenRow: number): number {
   return screenRow - HEADER_ROWS;
 }
 
-export function PrimeList({ batches, status, reportView, takeScrollInstruction }: Props) {
+export function PrimeList({
+  batches,
+  status,
+  reportView,
+  takeScrollInstruction,
+  favoritePrimes,
+  onToggleFavorite,
+  onLargestVisiblePrime,
+}: Props) {
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   /** Holds the notices above the list ("You broke math", the estimate banner). */
   const noticeAreaRef = useRef<HTMLDivElement>(null);
@@ -81,6 +100,36 @@ export function PrimeList({ batches, status, reportView, takeScrollInstruction }
     reportView(firstVisiblePrime, lastVisiblePrime);
   }, [reportView]);
 
+  /**
+   * Reports the largest prime actually on screen: the list's visible area,
+   * cut off at the window's bottom edge (on phones the list can extend below it).
+   */
+  const reportLargestPrimeOnScreen = useCallback(() => {
+    const scrollContainer = scrollContainerRef.current;
+    if (!scrollContainer || allPrimes.length === 0) return;
+    const containerBox = scrollContainer.getBoundingClientRect();
+    const onScreenTopPx = Math.max(containerBox.top, 0);
+    const onScreenBottomPx = Math.min(containerBox.bottom, window.innerHeight);
+    if (onScreenBottomPx <= onScreenTopPx) return;
+
+    const lastPixelOnScreen = scrollContainer.scrollTop + (onScreenBottomPx - containerBox.top) - 1;
+    const lastPrimeOnScreen = Math.min(
+      allPrimes.length - 1,
+      screenRowToPrimeIndex(Math.floor(lastPixelOnScreen / ROW_HEIGHT_PX)),
+    );
+    if (lastPrimeOnScreen >= 0) onLargestVisiblePrime(allPrimes[lastPrimeOnScreen]);
+  }, [allPrimes, onLargestVisiblePrime]);
+
+  // The page itself scrolls on phones, which can bring more of the list on screen.
+  useEffect(() => {
+    window.addEventListener("scroll", reportLargestPrimeOnScreen, { passive: true });
+    window.addEventListener("resize", reportLargestPrimeOnScreen);
+    return () => {
+      window.removeEventListener("scroll", reportLargestPrimeOnScreen);
+      window.removeEventListener("resize", reportLargestPrimeOnScreen);
+    };
+  }, [reportLargestPrimeOnScreen]);
+
   // After the buffer changes, adjust the scroll position:
   // - A batch dropped from the top (scrolling down) or added at the top
   //   (scrolling up) moves every row below it. Scroll by the same amount so
@@ -114,7 +163,15 @@ export function PrimeList({ batches, status, reportView, takeScrollInstruction }
     setScrollTopPx(scrollContainer.scrollTop);
     setViewportHeightPx(scrollContainer.clientHeight);
     reportVisiblePrimes();
-  }, [batches, labelsAreEstimated, ranOutOfSafeIntegers, takeScrollInstruction, reportVisiblePrimes]);
+    reportLargestPrimeOnScreen();
+  }, [
+    batches,
+    labelsAreEstimated,
+    ranOutOfSafeIntegers,
+    takeScrollInstruction,
+    reportVisiblePrimes,
+    reportLargestPrimeOnScreen,
+  ]);
 
   useLayoutEffect(() => {
     const scrollContainer = scrollContainerRef.current;
@@ -131,6 +188,7 @@ export function PrimeList({ batches, status, reportView, takeScrollInstruction }
     if (!scrollContainer) return;
     setScrollTopPx(scrollContainer.scrollTop);
     reportVisiblePrimes();
+    reportLargestPrimeOnScreen();
   };
 
   // Only rows near the viewport go into the DOM; the spacer div's height makes
@@ -178,6 +236,8 @@ export function PrimeList({ batches, status, reportView, takeScrollInstruction }
       const prime = allPrimes[primeIndex];
       // 2 is #1, 3 is #2, … After a jump this is estimated (see rollingBuffer.ts).
       const ordinal = numberFormatter.format(ordinalOfFirstPrime + BigInt(primeIndex));
+      const formattedPrime = numberFormatter.format(prime);
+      const isFavorite = favoritePrimes.has(String(prime));
       renderedRows.push(
         <div
           key={String(prime)}
@@ -186,19 +246,26 @@ export function PrimeList({ batches, status, reportView, takeScrollInstruction }
           className={PRIME_ROW_CLASSES}
           style={positionStyle}
         >
-          {labelsAreEstimated ? (
-            <span data-testid="prime-label" className="text-[0.8rem] text-muted opacity-70">
-              {`≈ #${ordinal}`}
+          <button
+            type="button"
+            aria-pressed={isFavorite}
+            aria-label={`Favorite ${formattedPrime}`}
+            onClick={() => onToggleFavorite(prime)}
+            className="grid h-11 w-11 shrink-0 place-items-center rounded-md text-muted hover:text-foreground focus-visible:outline-2 focus-visible:outline-(--heat-text) aria-pressed:text-(--heat-text)"
+          >
+            <StarIcon filled={isFavorite} />
+          </button>
+          <div className={PRIME_AND_LABEL_CLASSES}>
+            <span
+              data-testid="prime-label"
+              className={`order-2 text-[0.7rem] text-muted sm:order-1 sm:text-[0.8rem] ${labelsAreEstimated ? "opacity-70" : ""}`}
+            >
+              {labelsAreEstimated ? `≈ #${ordinal}` : `#${ordinal}`}
             </span>
-          ) : (
-            <span data-testid="prime-label" className="text-[0.8rem] text-muted">
-              {`#${ordinal}`}
+            <span className="order-1 font-mono text-[clamp(1rem,4.6vw,1.25rem)] sm:order-2">
+              {formattedPrime}
             </span>
-          )}
-          {/* Scales down on narrow phones so a 16-digit prime and its label fit on one line. */}
-          <span className="font-mono text-[clamp(1rem,4.6vw,1.25rem)]">
-            {numberFormatter.format(prime)}
-          </span>
+          </div>
         </div>,
       );
     }
@@ -224,7 +291,7 @@ export function PrimeList({ batches, status, reportView, takeScrollInstruction }
         ref={scrollContainerRef}
         data-testid="prime-list"
         data-status={status}
-        className={`${styles.scrollContainer} min-h-0 flex-1 overflow-y-auto [overflow-anchor:none]`}
+        className={`${scrollbar.themedScrollbar} min-h-0 flex-1 overflow-y-auto [overflow-anchor:none]`}
         onScroll={handleScroll}
       >
         <div className="relative w-full" style={{ height: totalScreenRows * ROW_HEIGHT_PX }}>

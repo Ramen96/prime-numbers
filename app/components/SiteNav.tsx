@@ -12,7 +12,7 @@ export function SiteNav() {
     <nav
       aria-label="Site"
       data-testid="site-nav"
-      className="sticky top-0 z-20 flex h-(--mobile-nav-height) items-center border-b border-rule bg-background px-2 sm:px-3 desktop:h-dvh desktop:w-44 desktop:shrink-0 desktop:flex-col desktop:items-stretch desktop:border-r desktop:border-b-0 desktop:px-5 desktop:py-8"
+      className="sticky top-0 z-20 flex h-(--mobile-nav-height) items-center border-b border-rule bg-background px-2 sm:px-3 desktop:h-[calc(100dvh-var(--storage-notice-height))] desktop:w-44 desktop:shrink-0 desktop:flex-col desktop:items-stretch desktop:border-r desktop:border-b-0 desktop:px-5 desktop:py-8"
     >
       <Link
         href="/"

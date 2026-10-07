@@ -19,6 +19,8 @@ interface PageMetadataOptions {
   description: string;
   /** Path from the site root, e.g. "/about". */
   path: string;
+  /** Ask search engines not to index the page (e.g. personal pages with no public content). */
+  noIndex?: boolean;
 }
 
 /**
@@ -26,10 +28,11 @@ interface PageMetadataOptions {
  * Next.js replaces (rather than merges) a parent layout's `openGraph` and
  * `twitter` objects, so each page sets them in full.
  */
-export function pageMetadata({ title, description, path }: PageMetadataOptions): Metadata {
+export function pageMetadata({ title, description, path, noIndex = false }: PageMetadataOptions): Metadata {
   return {
     title,
     description,
+    ...(noIndex && { robots: { index: false, follow: true } }),
     alternates: { canonical: path },
     openGraph: {
       type: "website",

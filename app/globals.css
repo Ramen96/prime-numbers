@@ -11,6 +11,8 @@
   --rule: #ececec;
   --pin-color: #8a8a8a;
   --mobile-nav-height: 3rem;
+  /* Set by the storage notice while it's showing (see StorageNotice). */
+  --storage-notice-height: 0px;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -46,4 +48,9 @@ html {
   :root {
     --mobile-nav-height: 0px;
   }
+}
+
+/* Room for the storage notice, so the end of a scrolling page isn't hidden behind it. */
+body {
+  padding-bottom: var(--storage-notice-height);
 }

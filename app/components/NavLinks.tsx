@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { GITHUB_URL } from "@/lib/site";
+import { StarIcon } from "./StarIcon";
 
 const PAGES = [
   { href: "/", label: "Home" },
@@ -37,7 +38,23 @@ export function NavLinks() {
           </li>
         );
       })}
-      <li className="ml-auto desktop:mt-3 desktop:ml-0">
+      {/*
+        Favorites: a star icon in the phone nav bar (five words don't fit in one
+        row at 360px), the word in the desktop sidebar. Named "Favorites" either way.
+      */}
+      <li className="ml-auto desktop:ml-0">
+        <Link
+          href="/favorites"
+          aria-current={currentPath === "/favorites" ? "page" : undefined}
+          className={`${LINK_CLASSES} w-11 justify-center desktop:w-auto desktop:justify-start ${currentPath === "/favorites" ? CURRENT_PAGE_CLASSES : ""}`}
+        >
+          <span aria-hidden className="desktop:hidden">
+            <StarIcon filled={currentPath === "/favorites"} size={20} />
+          </span>
+          <span className="sr-only desktop:not-sr-only">Favorites</span>
+        </Link>
+      </li>
+      <li className="desktop:mt-3">
         <a
           href={GITHUB_URL}
           target="_blank"

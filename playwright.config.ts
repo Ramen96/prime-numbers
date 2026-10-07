@@ -12,6 +12,17 @@ export default defineConfig({
   use: {
     baseURL: APP_URL,
     trace: "retain-on-failure",
+    // Every test starts with the storage notice already seen, so it never gets in
+    // the way. Tests of the notice itself opt out (storageNotice.spec.ts).
+    storageState: {
+      cookies: [],
+      origins: [
+        {
+          origin: APP_URL,
+          localStorage: [{ name: "everyPrimeNumber.storageNoticeSeen", value: "yes" }],
+        },
+      ],
+    },
   },
   // Every test runs at both sizes.
   projects: [

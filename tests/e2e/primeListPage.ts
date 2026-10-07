@@ -69,6 +69,11 @@ export class PrimeListPage {
     });
   }
 
+  /** Records are saved at most once a second; wait until the latest is in storage. */
+  async waitForRecordsToSave() {
+    await this.page.waitForTimeout(1100);
+  }
+
   /** Every prime row that's fully inside the list's viewport, top to bottom. */
   async visibleRows(): Promise<VisibleRow[]> {
     return this.primeList.evaluate((list) => {

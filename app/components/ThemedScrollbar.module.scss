@@ -1,3 +1,6 @@
+// The scrollbar for every scrolling list on the site (the prime list, the
+// favorites list), in one place so they can't drift apart.
+
 // A transitionable color (unregistered custom properties can't animate).
 @property --scrollbar-thumb-color {
   syntax: "<color>";
@@ -9,7 +12,7 @@ $track-width: 12px;
 $thumb-inset-resting: 3.5px;
 $thumb-inset-active: 1.5px;
 
-.scrollContainer {
+.themedScrollbar {
   --scrollbar-thumb-color: color-mix(in oklch, var(--heat-color) 45%, transparent);
   transition: --scrollbar-thumb-color 0.15s ease-out;
 

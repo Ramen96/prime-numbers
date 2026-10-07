@@ -58,6 +58,17 @@ test.describe("layout", () => {
 test.describe("layout on a 360px phone", () => {
   test.use({ viewport: { width: 360, height: 740 } });
 
+  test("the prime list itself never scrolls sideways, even with 16-digit primes", async ({ page }) => {
+    const primeListPage = new PrimeListPage(page);
+    await primeListPage.open();
+    await primeListPage.jumpTo("9,000,000,000,000,000");
+    const { contentWidth, visibleWidth } = await primeListPage.primeList.evaluate((list) => ({
+      contentWidth: list.scrollWidth,
+      visibleWidth: list.clientWidth,
+    }));
+    expect(contentWidth).toBeLessThanOrEqual(visibleWidth);
+  });
+
   test("never scrolls horizontally", async ({ page }) => {
     const primeListPage = new PrimeListPage(page);
     await primeListPage.open();

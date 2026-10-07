@@ -1,10 +1,15 @@
 "use client";
 
-import { useEffect, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, type ReactNode } from "react";
+import { urlForJump } from "@/lib/jumpUrl";
+import { NEW_RECORD_SESSION, sessionAfterJump } from "@/lib/personalRecords";
 import { usePrimeBuffer } from "@/lib/primes/usePrimeBuffer";
+import { reportVisiblePrime, toggleFavorite, usePersonalData } from "@/lib/usePersonalData";
 import { Cpu } from "./Cpu";
+import fadingNotice from "./FadingNotice.module.scss";
 import { JumpForm } from "./JumpForm";
 import { PrimeList } from "./PrimeList";
+import { WrappableNumber } from "./WrappableNumber";
 
 const numberFormatter = new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 });
 
@@ -12,6 +17,10 @@ const numberFormatter = new Intl.NumberFormat("en-US", { maximumFractionDigits: 
 function formatBatchDuration(durationMs: number | null): string {
   if (durationMs === null) return "—";
   return durationMs < 0.1 ? "< 0.1 ms" : `${durationMs.toFixed(2)} ms`;
+}
+
+function storedPrime(decimal: string | null): bigint | null {
+  return decimal === null ? null : BigInt(decimal);
 }
 
 interface Props {
@@ -47,6 +56,30 @@ export function InfinitePrimes({ intro, firstBatchFromServer }: Props) {
     };
   }, []);
 
+  const personalData = usePersonalData();
+  const favoritePrimes = useMemo(
+    () => new Set(personalData.data.favorites),
+    [personalData.data.favorites],
+  );
+
+  // Whether scrolling still counts toward "furthest scroll" (only from 2, with no jump).
+  const recordSessionRef = useRef(NEW_RECORD_SESSION);
+  const handleLargestVisiblePrime = useCallback(
+    (prime: bigint) => reportVisiblePrime(prime, recordSessionRef.current),
+    [],
+  );
+
+  /** Every jump goes through here: the jump form, ?jump= links and favorites. */
+  const handleJump = useCallback(
+    (target: bigint) => {
+      recordSessionRef.current = sessionAfterJump(target);
+      jumpTo(target);
+      // Make the URL shareable without reloading or adding a history entry per jump.
+      window.history.replaceState(null, "", urlForJump(window.location.href, target));
+    },
+    [jumpTo],
+  );
+
   // The frontier is the largest prime currently held.
   const lastBatch = batches[batches.length - 1];
   const frontier = lastBatch ? lastBatch.primes[lastBatch.primes.length - 1] : null;
@@ -54,14 +87,14 @@ export function InfinitePrimes({ intro, firstBatchFromServer }: Props) {
 
   return (
     <main
-      className={`mx-auto w-full max-w-3xl desktop:grid desktop:h-dvh desktop:max-w-6xl desktop:grid-cols-[minmax(20rem,28rem)_minmax(0,44rem)] desktop:grid-rows-[auto_auto_auto_1fr] desktop:justify-center desktop:gap-x-12 desktop:px-8`}
+      className={`mx-auto w-full max-w-3xl desktop:grid desktop:h-[calc(100dvh-var(--storage-notice-height))] desktop:max-w-6xl desktop:grid-cols-[minmax(20rem,28rem)_minmax(0,44rem)] desktop:grid-rows-[auto_auto_auto_1fr] desktop:justify-center desktop:gap-x-12 desktop:px-8`}
     >
       <div className="px-5 pt-6 pb-4 desktop:col-start-1 desktop:row-start-1 desktop:px-0 desktop:pt-10">
         {intro}
       </div>
 
-      {/* One screen tall, minus the sticky mobile nav bar. */}
-      <div className="flex h-[calc(100dvh-var(--mobile-nav-height))] flex-col desktop:contents">
+      {/* One screen tall, minus the sticky mobile nav bar and the storage notice. */}
+      <div className="flex h-[calc(100dvh-var(--mobile-nav-height)-var(--storage-notice-height))] flex-col desktop:contents">
         <header className="flex flex-wrap items-center gap-x-6 gap-y-2 border-y border-rule px-5 py-4 desktop:col-start-1 desktop:row-start-2 desktop:px-0">
           <Cpu />
           <div className="min-w-40 flex-1">
@@ -93,7 +126,7 @@ export function InfinitePrimes({ intro, firstBatchFromServer }: Props) {
             <dl className="mt-1 grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-0.5 text-[0.8rem] text-muted tabular-nums">
               <dt>frontier</dt>
               <dd className="text-foreground">
-                {frontier === null ? "—" : numberFormatter.format(frontier)}
+                <WrappableNumber value={frontier} />
               </dd>
               <dt>last batch</dt>
               <dd className="text-foreground">{formatBatchDuration(lastBatchDurationMs)}</dd>
@@ -103,12 +136,30 @@ export function InfinitePrimes({ intro, firstBatchFromServer }: Props) {
                   ? "—"
                   : `built in ${formatBatchDuration(lastBasePrimeSetupMs)}`}
               </dd>
+              <dt>furthest scroll</dt>
+              <dd className="text-foreground">
+                <WrappableNumber value={storedPrime(personalData.data.records.furthestScroll)} />
+                {personalData.furthestScrollRecordBeaten && (
+                  <span role="status" className={`${fadingNotice.fadingNotice} ml-2 text-(--heat-text)`}>
+                    New record!
+                  </span>
+                )}
+              </dd>
+              <dt>biggest visited</dt>
+              <dd className="text-foreground">
+                <WrappableNumber value={storedPrime(personalData.data.records.biggestPrimeVisited)} />
+              </dd>
             </dl>
+            {personalData.storageIsFull && (
+              <p role="status" className="mt-1 text-xs text-(--hot-text)">
+                Your browser’s storage is full, so favorites and records aren’t being saved.
+              </p>
+            )}
           </div>
         </header>
 
         <div className="desktop:col-start-1 desktop:row-start-3">
-          <JumpForm onJump={jumpTo} lastJump={lastJump} />
+          <JumpForm onJump={handleJump} lastJump={lastJump} />
         </div>
 
         <section
@@ -121,6 +172,9 @@ export function InfinitePrimes({ intro, firstBatchFromServer }: Props) {
               status={status}
               reportView={reportView}
               takeScrollInstruction={takeScrollInstruction}
+              favoritePrimes={favoritePrimes}
+              onToggleFavorite={toggleFavorite}
+              onLargestVisiblePrime={handleLargestVisiblePrime}
             />
           </div>
         </section>

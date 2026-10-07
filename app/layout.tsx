@@ -4,6 +4,7 @@ import "./globals.css";
 import "./heat.scss";
 import { SITE_NAME, SITE_URL } from "@/lib/site";
 import { SiteNav } from "./components/SiteNav";
+import { StorageNotice } from "./components/StorageNotice";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -43,6 +44,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
           <SiteNav />
           <div className="min-w-0 flex-1">{children}</div>
         </div>
+        <StorageNotice />
       </body>
     </html>
   );

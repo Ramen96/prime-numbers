@@ -45,7 +45,7 @@ test.describe("/about", () => {
       "Why can’t I jump past a certain number?",
       "Will it break my computer?",
     ]) {
-      expect(html).toContain(`<h3>${question}</h3>`);
+      expect(html).toMatch(new RegExp(`<h3[^>]*>${question.replace("?", "\\?")}</h3>`));
     }
     expect(html).toContain('<link rel="canonical" href="https://everyprimenumber.com/about"/>');
   });
