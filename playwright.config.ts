@@ -5,6 +5,8 @@ const APP_URL = `http://localhost:${PORT}`;
 
 export default defineConfig({
   testDir: "./tests/e2e",
+  // Tests tagged @slow (e.g. sieving near 2^64) only run with `npm run test:e2e:slow`.
+  grepInvert: process.env.RUN_SLOW_TESTS ? undefined : /@slow/,
   fullyParallel: true,
   forbidOnly: Boolean(process.env.CI),
   retries: process.env.CI ? 1 : 0,

@@ -1,5 +1,3 @@
-import { SIEVE_LIMIT } from "./protocol.ts";
-
 export type JumpTargetResult =
   | { valid: true; target: bigint }
   | { valid: false; message: string };
@@ -30,14 +28,7 @@ export function parseJumpTarget(userInput: string): JumpTargetResult {
     return { valid: false, message: "That doesn't look like a number." };
   }
 
-  const target = BigInt(digitsOnly);
-  if (target >= SIEVE_LIMIT) {
-    return {
-      valid: false,
-      message:
-        "The sieve stops at 2⁵³ − 1 (9,007,199,254,740,991) for now. Try a smaller number.",
-    };
-  }
-
-  return { valid: true, target };
+  // Any size: a jump past what this device can sieve shows the memory limit
+  // instead of primes, never a wrong answer.
+  return { valid: true, target: BigInt(digitsOnly) };
 }

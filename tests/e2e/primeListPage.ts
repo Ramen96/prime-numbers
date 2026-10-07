@@ -102,6 +102,38 @@ export class PrimeListPage {
     return topRow;
   }
 
+  /**
+   * The primes fully on screen, top to bottom, as exact BigInts read from the
+   * data-prime attributes (VisibleRow.prime is a number, only exact below 2^53).
+   */
+  async visiblePrimesExact(): Promise<bigint[]> {
+    const primeStrings = await this.primeList.evaluate((list) => {
+      const listBox = list.getBoundingClientRect();
+      return [...list.querySelectorAll<HTMLElement>('[data-testid="prime-row"]')]
+        .filter((row) => {
+          const rowBox = row.getBoundingClientRect();
+          return rowBox.top >= listBox.top - 0.5 && rowBox.bottom <= listBox.bottom + 0.5;
+        })
+        .sort((rowA, rowB) => rowA.getBoundingClientRect().top - rowB.getBoundingClientRect().top)
+        .map((row) => row.dataset.prime!);
+    });
+    return primeStrings.map((prime) => BigInt(prime));
+  }
+
+  /**
+   * Every number the page shows for primes, positions and stats, as text: the
+   * prime rows' values and labels, their data-prime attributes, and the stats.
+   */
+  async allDisplayedNumbers(): Promise<string[]> {
+    return this.page.evaluate(() => [
+      ...[...document.querySelectorAll<HTMLElement>('[data-testid="prime-row"]')].flatMap((row) => [
+        row.dataset.prime!,
+        row.textContent ?? "",
+      ]),
+      ...[...document.querySelectorAll("header dd")].map((value) => value.textContent ?? ""),
+    ]);
+  }
+
   /** Every prime currently rendered (visible or just off screen). */
   async renderedPrimes(): Promise<number[]> {
     return this.primeList

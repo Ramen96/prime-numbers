@@ -70,12 +70,14 @@ const FREQUENTLY_ASKED_QUESTIONS = [
     ),
   },
   {
-    question: "Why can’t I jump past a certain number?",
+    question: "Is there a largest number I can jump to?",
     answer: (
       <>
-        The sieve stops at 2⁵³ − 1 (9,007,199,254,740,991): that’s where its base primes, the
-        primes it crosses off with, stop growing. The primes themselves are 64-bit integers that
-        stay exact much further, but for now, that’s where the list ends.
+        No: the jump box takes a number of any size. How far the list can actually go depends
+        on your device’s memory. To find primes near a number <em>x</em>, the sieve first needs
+        every prime up to √<em>x</em>; near 2⁶⁴ (about 18 quintillion) that’s 203,280,221 of
+        them. Past what fits, the list stops at the last prime it could prove and says so.
+        Nothing is skipped or guessed.
       </>
     ),
   },

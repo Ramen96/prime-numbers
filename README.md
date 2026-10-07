@@ -27,8 +27,10 @@ npm run build:wasm
 ### Tests
 
 ```bash
-npm test           # unit tests (TypeScript) + native tests for wasm/sieve.c (needs a C compiler: cc)
-npm run test:e2e   # Playwright end-to-end tests at phone and desktop sizes (starts the dev server)
+npm test                  # unit tests (TypeScript), native C tests (needs cc) and Wasm tests (needs emcc)
+npm run test:e2e          # Playwright end-to-end tests at phone and desktop sizes (starts the dev server)
+npm run test:native:slow  # native tests around 2^64 (~16 s, ~230 MB: base primes up to 2^32)
+npm run test:e2e:slow     # end-to-end tests tagged @slow, around 2^64 (desktop only)
 ```
 
-The native tests compile `wasm/sieve.c` with the system C compiler and check `sieve_next` and `sieve_prev` against an independent Miller–Rabin primality test.
+The native tests compile `wasm/sieve.c` and `wasm/bignum.c` with the system C compiler: the sieve is checked against an independent Miller–Rabin primality test, and the multi-limb arithmetic against `unsigned __int128`. `npm run test:wasm` compiles `wasm/bignum.c` to WebAssembly with a small test harness and checks it against JavaScript BigInt at sizes up to 8,192 bits. It also builds `wasm/sieve.c` with a 16 MB memory ceiling, so a real allocation failure inside WebAssembly can be tested: the base primes must roll back and every later prime must still be right.

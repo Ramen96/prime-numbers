@@ -23,6 +23,10 @@ const FOOTER_ROWS = 1;
 interface Props {
   batches: Batch[];
   status: BufferStatus;
+  /** The sieve can't go further up: the base primes it needs don't fit in memory. */
+  reachedMemoryLimit: boolean;
+  /** Why calculation stopped with an error, shown above the list. */
+  errorMessage: string | null;
   reportView: (firstVisiblePrime: number, lastVisiblePrime: number) => void;
   takeScrollInstruction: () => ScrollInstruction | null;
   /** Decimal strings of the visitor's favorite primes. */
@@ -51,6 +55,8 @@ function screenRowToPrimeIndex(screenRow: number): number {
 export function PrimeList({
   batches,
   status,
+  reachedMemoryLimit,
+  errorMessage,
   reportView,
   takeScrollInstruction,
   favoritePrimes,
@@ -58,7 +64,7 @@ export function PrimeList({
   onLargestVisiblePrime,
 }: Props) {
   const scrollContainerRef = useRef<HTMLDivElement>(null);
-  /** Holds the notices above the list ("You broke math", the estimate banner). */
+  /** Holds the notices above the list (the memory limit, the estimate banner). */
   const noticeAreaRef = useRef<HTMLDivElement>(null);
   const previousNoticeAreaHeightRef = useRef(0);
   const [scrollTopPx, setScrollTopPx] = useState(0);
@@ -68,13 +74,8 @@ export function PrimeList({
 
   // Join the batches into one array so each screen row maps to one prime.
   const { allPrimes, ordinalOfFirstPrime, labelsAreEstimated } = useMemo(() => {
-    const primeCount = batches.reduce((count, batch) => count + batch.primes.length, 0);
-    const joined = new BigUint64Array(primeCount);
-    let writePosition = 0;
-    for (const batch of batches) {
-      joined.set(batch.primes, writePosition);
-      writePosition += batch.primes.length;
-    }
+    const joined: bigint[] = [];
+    for (const batch of batches) joined.push(...batch.primes);
     return {
       allPrimes: joined,
       ordinalOfFirstPrime: batches[0]?.ordinalOfFirstPrime ?? 1n,
@@ -84,7 +85,7 @@ export function PrimeList({
   }, [batches]);
 
   const bufferStartsAtTwo = allPrimes[0] === 2n;
-  const ranOutOfSafeIntegers = status === "overflow";
+
 
   /** Tells the buffer which primes are on screen so it can decide whether to fetch more. */
   const reportVisiblePrimes = useCallback(() => {
@@ -167,7 +168,8 @@ export function PrimeList({
   }, [
     batches,
     labelsAreEstimated,
-    ranOutOfSafeIntegers,
+    reachedMemoryLimit,
+    errorMessage,
     takeScrollInstruction,
     reportVisiblePrimes,
     reportLargestPrimeOnScreen,
@@ -221,8 +223,8 @@ export function PrimeList({
       );
     } else if (screenRow === footerScreenRow) {
       const footerText =
-        status === "overflow"
-          ? "you broke math"
+        reachedMemoryLimit
+          ? "memory limit: not checked yet"
           : status === "error"
             ? "the worker gave up"
             : "computing…";
@@ -275,10 +277,16 @@ export function PrimeList({
     <div className="flex h-full flex-col">
       {/* Outside the scroll container, so notices stay put and never cover a row. */}
       <div ref={noticeAreaRef}>
-        {ranOutOfSafeIntegers && (
+        {errorMessage && (
+          <p role="alert" className="bg-(--hot-surface) px-5 py-3 text-white">
+            <strong>Stopped.</strong> {errorMessage}
+          </p>
+        )}
+        {reachedMemoryLimit && (
           <p role="status" className="bg-(--hot-surface) px-5 py-3 text-white">
-            <strong>You broke math.</strong> Well, the sieve: it stops at 2⁵³ − 1, and there
-            are no primes left below that.
+            <strong>This device’s memory limit.</strong> Going further needs more base primes than
+            fit in its memory, so the list stops at the last prime it could prove. Nothing after
+            it has been skipped or guessed; it just hasn’t been checked.
           </p>
         )}
         {labelsAreEstimated && (

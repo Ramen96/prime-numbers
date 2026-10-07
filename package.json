@@ -5,13 +5,16 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "build:wasm": "emcc wasm/sieve.c -O3 --no-entry -sSTANDALONE_WASM -sALLOW_MEMORY_GROWTH -sWASM_BIGINT -sEXPORTED_FUNCTIONS=_sieve_next,_sieve_prev,_output_buffer,_base_prime_limit,_extend_base_primes -o public/sieve.wasm",
+    "build:wasm": "emcc wasm/sieve.c wasm/bignum.c -O3 --no-entry -sSTANDALONE_WASM -sALLOW_MEMORY_GROWTH -sWASM_BIGINT -sEXPORTED_FUNCTIONS=_request_buffer,_sieve_next,_sieve_prev,_batch_base_limbs,_batch_base_limb_count,_batch_offset_buffer,_batch_reached_memory_limit,_base_prime_limit,_extend_base_primes,_set_base_prime_memory_budget,_reserve_base_prime_storage,_base_prime_memory_bytes -sMAXIMUM_MEMORY=4GB -o public/sieve.wasm",
     "start": "next start",
     "lint": "eslint",
-    "test": "npm run test:unit && npm run test:native",
+    "test": "npm run test:unit && npm run test:native && npm run test:wasm",
     "test:unit": "node --test 'lib/**/*.test.ts'",
-    "test:native": "mkdir -p .cache && cc -O2 -std=c11 -Wall -Wextra -o .cache/sieve_test tests/native/sieve_test.c wasm/sieve.c -lm && .cache/sieve_test",
-    "test:e2e": "playwright test"
+    "test:native": "mkdir -p .cache && cc -O2 -std=c11 -Wall -Wextra -DSIEVE_TEST_HOOKS -o .cache/sieve_test tests/native/sieve_test.c wasm/sieve.c wasm/bignum.c -lm && .cache/sieve_test && cc -O2 -std=c11 -Wall -Wextra -o .cache/bignum_test tests/native/bignum_test.c wasm/bignum.c -lm && .cache/bignum_test",
+    "test:native:slow": "mkdir -p .cache && cc -O2 -std=c11 -Wall -Wextra -DSIEVE_TEST_HOOKS -o .cache/sieve_slow_test tests/native/sieve_slow_test.c wasm/sieve.c wasm/bignum.c -lm && .cache/sieve_slow_test",
+    "test:wasm": "mkdir -p .cache && emcc tests/wasm/bignum_harness.c wasm/bignum.c -O2 --no-entry -sSTANDALONE_WASM -sALLOW_MEMORY_GROWTH -sEXPORTED_FUNCTIONS=_harness_first_input,_harness_second_input,_harness_output,_harness_compare,_harness_add_small,_harness_subtract_small,_harness_mod_small,_harness_square_root_upper,_harness_bit_length -o .cache/bignum_harness.wasm && emcc wasm/sieve.c wasm/bignum.c -O2 --no-entry -sSTANDALONE_WASM -sALLOW_MEMORY_GROWTH -sWASM_BIGINT -sINITIAL_MEMORY=4MB -sMAXIMUM_MEMORY=16MB -sEXPORTED_FUNCTIONS=_request_buffer,_sieve_next,_sieve_prev,_batch_base_limbs,_batch_base_limb_count,_batch_offset_buffer,_batch_reached_memory_limit,_base_prime_limit,_extend_base_primes,_set_base_prime_memory_budget,_reserve_base_prime_storage,_base_prime_memory_bytes -o .cache/sieve_small_memory.wasm && node --test 'tests/wasm/*.test.ts'",
+    "test:e2e": "playwright test",
+    "test:e2e:slow": "RUN_SLOW_TESTS=1 playwright test --grep @slow --project=desktop"
   },
   "dependencies": {
     "next": "16.3.8",

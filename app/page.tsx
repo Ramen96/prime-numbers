@@ -2,6 +2,7 @@ import { pageMetadata } from "@/lib/pageMetadata";
 import { SITE_NAME, SITE_URL } from "@/lib/site";
 import { firstPrimes } from "@/lib/primes/sieveOfEratosthenes";
 import { BATCH_SIZE } from "@/lib/primes/protocol";
+import { verifyPrimes } from "@/lib/primes/verifyPrimes";
 import { InfinitePrimes } from "./components/InfinitePrimes";
 import { Intro } from "./components/Intro";
 import { JsonLd } from "./components/JsonLd";
@@ -34,6 +35,12 @@ const WEB_APPLICATION_DATA = {
 
 // Computed once at build time: the page is static, so these primes are in
 // the HTML for crawlers and for an instant first screen.
+// Verified independently too (Requirement A3): if the build-time sieve were
+// ever wrong, the build fails instead of shipping it.
+const firstBatchVerification = verifyPrimes(firstPrimes(BATCH_SIZE).map(BigInt));
+if (!firstBatchVerification.verified) {
+  throw new Error(`The first batch includes ${firstBatchVerification.disputedPrime}, which isn't prime.`);
+}
 // Passed as strings: a server component can't hand BigInt to a client component.
 const FIRST_BATCH = firstPrimes(BATCH_SIZE).map(String);
 

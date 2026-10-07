@@ -194,16 +194,26 @@ function sieveSegment(low, high, basePrimes, isComposite) {
         This is how the site’s background worker finds primes, in C compiled to WebAssembly.
         Memory stays flat because the scratch buffer is the same size for every segment,
         wherever it is on the number line (it even skips even numbers, which halves it). Only
-        the list of base primes grows, with the square root of the numbers: the primes below
-        about 95 million cover everything up to 2⁵³. The worker keeps that list and extends it
-        only when the numbers get big enough to need more.
+        the list of base primes grows, with the square root of the numbers: covering everything
+        up to 2⁶⁴ takes every prime below 2³², about 203 million of them. To fit, they’re stored
+        as the gaps between them, halved (every gap after 2 is even), one byte each. The worker
+        keeps that list and extends it only when the numbers get big enough to need more.
       </p>
       <p>
         A batch on the site is always 500 primes, not a fixed range of numbers. Primes thin out
         as numbers grow, so each batch covers a wider stretch of numbers, and every segment has
         more base primes to cross off with. On a recent laptop a batch near a million takes
-        about 0.03 ms; near a trillion, 0.2 ms; just below 2⁵³, about 5 ms. That’s the slowdown
-        the counter shows.
+        about 0.04 ms; near a trillion, 0.2 ms; near 2⁵³, about 6 ms; near 2⁶⁴, about half a
+        second. That’s the slowdown the counter shows.
+      </p>
+      <p>
+        Before a batch is shown, every prime in it is checked again by a completely separate
+        method: a Miller–Rabin test, written in TypeScript and sharing no code with the C sieve.
+        With the first 13 primes as its test bases, it’s proven never to call a composite prime
+        below about 3.3 × 10²⁴, beyond anything the sieve can reach in a browser’s memory. If
+        the two ever disagreed, the site would stop with an error rather than show the disputed
+        number. The check takes about 1 ms per batch near a million and about 30 ms near 2⁶⁴.
+        It appears separately under “checked” and doesn’t count toward the speed.
       </p>
 
       {/* 5 */}
@@ -493,13 +503,28 @@ return EULER_MASCHERONI + Math.log(lnX) + Math.sqrt(x) * sum;`}
         <code>2**53 + 1</code> comes out as 9,007,199,254,740,992. A prime finder that silently
         rounds would show wrong primes, which is worse than showing none. So the site never
         uses ordinary numbers for the primes the worker finds: from the C sieve to the page,
-        each one is a 64-bit integer, a JavaScript <code>BigInt</code>, which stays exact far
-        past 2⁵³.
+        each one is a JavaScript <code>BigInt</code>, exact at any size.
       </p>
       <p>
-        The limit today is the sieve’s own. It stops at 2⁵³ − 1, because that’s where its base
-        primes stop growing. The jump box won’t accept anything from there up, and if scrolling
-        ever reaches it, the page announces that you broke math.
+        Past 2⁶⁴, even C’s largest built-in integers run out, so the sieve keeps big numbers as
+        arrays of 32-bit pieces (“limbs”), with as many as a number needs. Only where a segment
+        starts is a big number; inside a segment everything is a small offset, so the inner
+        loop is the same as before.
+      </p>
+      <p>
+        The real limit is memory. To sieve near <em>x</em>, the worker first needs every prime
+        up to √<em>x</em>. When those no longer fit on your device, the list stops at the last
+        prime it could prove and says so, rather than guessing or skipping ahead.
+      </p>
+      <p>
+        How much memory that is comes from your device, not from the code: half of its memory
+        where the browser reports it, up to the 4 GB a WebAssembly module can address. Where
+        the browser doesn’t say, the worker keeps growing until an allocation fails, and then
+        puts its base primes back exactly as they were. Before a jump, it works out the least
+        memory the base primes could possibly need; if even that won’t fit, it says so straight
+        away instead of building for minutes first. A WebAssembly module’s memory never shrinks,
+        so after a far jump, jumping back somewhere smaller starts a fresh worker to give the
+        memory back.
       </p>
 
       {/* 10 */}

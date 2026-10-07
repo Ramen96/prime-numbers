@@ -1,17 +1,12 @@
 // Shared message protocol between the main thread and the prime worker.
 // Both sides import from here so the contract stays type-checked.
-// Prime values are BigInt throughout: 64-bit integers from the Wasm sieve.
+// Prime values are BigInt throughout, of any size: the Wasm sieve hands them
+// over as limbs and offsets (see wasmSieve.ts), never as JS numbers.
 
 export type Direction = "next" | "prev";
 
 /** Number of primes per batch. The rolling buffer holds 3 of these. */
 export const BATCH_SIZE = 500;
-
-/**
- * The sieve's upper limit, 2^53 − 1 (SIEVE_LIMIT in wasm/sieve.c). Its base
- * primes stop growing at √ of this, so it finds no primes past it.
- */
-export const SIEVE_LIMIT = 9_007_199_254_740_991n;
 
 /**
  * Every message carries two tags:
@@ -44,24 +39,45 @@ export interface BuildingBasePrimesNotice extends RequestTags {
   type: "building-base-primes";
 }
 
+/** The worker's memory, sent with every result (Wasm memory only grows). */
+export interface WorkerMemory {
+  /** Bytes allocated for base primes. */
+  basePrimeBytes: number;
+  /** Everything the Wasm module holds, base primes included. */
+  moduleBytes: number;
+}
+
 export interface BatchResponse extends RequestTags {
   type: "batch";
   direction: Direction;
   /**
-   * Primes in ascending order regardless of direction. The buffer is
-   * transferred, not copied. May hold fewer than `count` primes: for "prev"
-   * near 2, and for "next" just below SIEVE_LIMIT, where the sieve's primes run out.
+   * Primes in ascending order regardless of direction. May hold fewer than
+   * `count` primes: for "prev" near 2, or when the sieve reached this device's
+   * memory limit part way through (then `reachedMemoryLimit` is set).
    */
-  primes: BigUint64Array;
+  primes: bigint[];
+  /** The sieve stopped because the base primes it needs next don't fit in memory. */
+  reachedMemoryLimit: boolean;
   /** Time spent sieving this batch, from performance.now(). The speed counter uses only this. */
   sievingDurationMs: number;
   /** Time spent building base primes before sieving; 0 when none were needed. */
   setupDurationMs: number;
+  /**
+   * Time spent re-checking every prime with Miller–Rabin before sending it
+   * (Requirement A3). Like setup, it isn't part of the speed counter.
+   */
+  verificationDurationMs: number;
+  memory: WorkerMemory;
 }
 
-/** There are no more primes below SIEVE_LIMIT after `from`. */
-export interface OverflowResponse extends RequestTags {
-  type: "overflow";
+/**
+ * No primes could be proven at all for this request: the base primes the
+ * sieve would need don't fit in this device's memory. Nothing is skipped or
+ * guessed; everything from `from` on stays unchecked.
+ */
+export interface MemoryLimitResponse extends RequestTags {
+  type: "memory-limit";
+  memory: WorkerMemory;
 }
 
 export interface ErrorResponse extends RequestTags {
@@ -72,5 +88,5 @@ export interface ErrorResponse extends RequestTags {
 export type WorkerResponse =
   | BuildingBasePrimesNotice
   | BatchResponse
-  | OverflowResponse
+  | MemoryLimitResponse
   | ErrorResponse;

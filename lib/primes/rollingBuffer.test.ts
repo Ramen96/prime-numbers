@@ -26,20 +26,20 @@ const ALL_PRIMES_BELOW_LIMIT: number[] = (() => {
   return primes;
 })();
 
-function toBigUint64Array(values: number[]): BigUint64Array {
-  return BigUint64Array.from(values, (value) => BigInt(value));
+function toBigInts(values: number[]): bigint[] {
+  return values.map((value) => BigInt(value));
 }
 
 /** Same contract as the worker's "next": up to `count` primes strictly greater than `from`. */
-function primesAfter(from: bigint, count = BATCH_SIZE): BigUint64Array {
+function primesAfter(from: bigint, count = BATCH_SIZE): bigint[] {
   const startPosition = ALL_PRIMES_BELOW_LIMIT.findIndex((prime) => BigInt(prime) > from);
-  return toBigUint64Array(ALL_PRIMES_BELOW_LIMIT.slice(startPosition, startPosition + count));
+  return toBigInts(ALL_PRIMES_BELOW_LIMIT.slice(startPosition, startPosition + count));
 }
 
 /** Same contract as the worker's "prev": up to `count` primes strictly less than `from`, ascending. */
-function primesBefore(from: bigint, count = BATCH_SIZE): BigUint64Array {
+function primesBefore(from: bigint, count = BATCH_SIZE): bigint[] {
   const endPosition = ALL_PRIMES_BELOW_LIMIT.findIndex((prime) => BigInt(prime) >= from);
-  return toBigUint64Array(
+  return toBigInts(
     ALL_PRIMES_BELOW_LIMIT.slice(Math.max(0, endPosition - count), endPosition),
   );
 }
@@ -150,26 +150,23 @@ describe("labels after a jump", () => {
   });
 });
 
-describe("labels past 2^53", () => {
-  // Real primes near 2^63 would take a 64-bit prime finder to produce. The
+describe("labels past 2^53, and values past 2^64", () => {
+  // Real primes near 2^200 would take a big-number prime finder to produce. The
   // buffer never checks primality and labels depend only on positions, so
   // consecutive odd numbers stand in for primes here.
-  function standInBatchAfter(from: bigint): BigUint64Array {
+  function standInBatchAfter(from: bigint): bigint[] {
     const firstOdd = from % 2n === 0n ? from + 1n : from + 2n;
-    return BigUint64Array.from({ length: BATCH_SIZE }, (_, index) => firstOdd + 2n * BigInt(index));
+    return Array.from({ length: BATCH_SIZE }, (_, index) => firstOdd + 2n * BigInt(index));
   }
-  function standInBatchBefore(before: bigint): BigUint64Array {
+  function standInBatchBefore(before: bigint): bigint[] {
     const lastOdd = before % 2n === 0n ? before - 1n : before - 2n;
-    return BigUint64Array.from(
-      { length: BATCH_SIZE },
-      (_, index) => lastOdd - 2n * BigInt(BATCH_SIZE - 1 - index),
-    );
+    return Array.from({ length: BATCH_SIZE }, (_, index) => lastOdd - 2n * BigInt(BATCH_SIZE - 1 - index));
   }
 
   it("stay exactly consecutive across batch boundaries in both directions", () => {
-    const jumpPoint = 2n ** 63n;
+    const jumpPoint = 2n ** 200n; // far past 2^64: batches hold BigInts of any size
     let batches = addBatch([], standInBatchAfter(jumpPoint), "next").batches;
-    // li(2^63) ≈ 2.1 × 10^17: far past 2^53, where a number can't tell n from n + 1.
+    // li(2^200) ≈ 1.2 × 10^58: far past 2^53, where a number can't tell n from n + 1.
     assert.ok(batches[0].ordinalOfFirstPrime > 2n ** 53n);
 
     for (let step = 0; step < 4; step++) {
@@ -241,9 +238,7 @@ describe("rowsAddedAbove", () => {
 describe("estimate banner visibility (bufferLabelsAreEstimated)", () => {
   // The first few primes above 10^12. The reference sieve doesn't reach that
   // far, but a jump only needs the batch's first prime to place its anchor.
-  const PRIMES_ABOVE_ONE_TRILLION = BigUint64Array.from([
-    1_000_000_000_039n, 1_000_000_000_061n, 1_000_000_000_063n,
-  ]);
+  const PRIMES_ABOVE_ONE_TRILLION = [1_000_000_000_039n, 1_000_000_000_061n, 1_000_000_000_063n];
 
   it("is hidden on app start", () => {
     assert.equal(bufferLabelsAreEstimated([]), false); // before the first batch arrives

@@ -13,7 +13,9 @@ import {
   recordBatch,
   type RateWindow,
 } from "./primeRateMeter.ts";
+import { estimatedBasePrimeBytes, shouldRestartWorkerToReleaseMemory } from "./memoryBudget.ts";
 import { addBatch, MAX_BATCHES, type Batch } from "./rollingBuffer.ts";
+import { basePrimeLimitNeededFor } from "./wasmSieve.ts";
 
 export type { Batch };
 
@@ -22,7 +24,6 @@ export type BufferStatus =
   | "computing"
   | "building-base-primes"
   | "stopped"
-  | "overflow"
   | "error";
 
 /** What the list should do with its scroll position after the buffer changes. */
@@ -83,8 +84,19 @@ export interface PrimeBuffer {
   lastBatchDurationMs: number | null;
   /** How long building base primes took the last time it was needed; null before then. */
   lastBasePrimeSetupMs: number | null;
+  /** Bytes the worker holds for base primes; null until it has reported. */
+  basePrimeMemoryBytes: number | null;
+  /** How long re-checking the last batch with Miller–Rabin took; null before the first. */
+  lastVerificationMs: number | null;
+  /** Why the worker stopped with an error (e.g. a verification disagreement), or null. */
+  errorMessage: string | null;
   /** True once the current calculation has run long enough to offer a Stop button. */
   calculationIsSlow: boolean;
+  /**
+   * The sieve reached this device's memory limit going up: the base primes it
+   * needs next don't fit. The list stops at the last proven prime. Cleared by a jump.
+   */
+  reachedMemoryLimit: boolean;
   /** The most recent completed jump, or null if the user hasn't jumped. */
   lastJump: JumpResult | null;
   /** Throw the buffer away and restart it at the first prime ≥ `target`. */
@@ -115,7 +127,7 @@ export interface PrimeBuffer {
  */
 function batchesFromServer(firstBatchFromServer: readonly string[]): Batch[] {
   if (firstBatchFromServer.length === 0) return [];
-  const primes = BigUint64Array.from(firstBatchFromServer, (prime) => BigInt(prime));
+  const primes = firstBatchFromServer.map((prime) => BigInt(prime));
   return addBatch([], primes, "next").batches;
 }
 
@@ -131,13 +143,19 @@ export function usePrimeBuffer(firstBatchFromServer: readonly string[]): PrimeBu
   const [heat, setHeat] = useState(0);
   const [lastBatchDurationMs, setLastBatchDurationMs] = useState<number | null>(null);
   const [lastBasePrimeSetupMs, setLastBasePrimeSetupMs] = useState<number | null>(null);
+  const [lastVerificationMs, setLastVerificationMs] = useState<number | null>(null);
+  const [basePrimeMemoryBytes, setBasePrimeMemoryBytes] = useState<number | null>(null);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [calculationIsSlow, setCalculationIsSlow] = useState(false);
   const [lastJump, setLastJump] = useState<JumpResult | null>(null);
+  const [reachedMemoryLimit, setReachedMemoryLimit] = useState(false);
 
   // These refs hold the same values as state, but update instantly. The worker
   // message handler and the scroll handler read them, so they always see the
   // latest values instead of a stale snapshot from an earlier render.
   const workerRef = useRef<Worker | null>(null);
+  /** Everything the current worker's Wasm module holds, from its last report. */
+  const workerMemoryBytesRef = useRef(0);
   const heldBatchesRef = useRef<Batch[]>(batches);
   const pendingRequestRef = useRef<{ id: number; direction: Direction } | null>(null);
   const lastRequestIdRef = useRef(0);
@@ -154,13 +172,18 @@ export function usePrimeBuffer(firstBatchFromServer: readonly string[]): PrimeBu
     target: bigint;
     isUserJump: boolean;
     /** The primes ≥ target, held back until the batch below them arrives. */
-    primesFromTarget: BigUint64Array | null;
+    primesFromTarget: readonly bigint[] | null;
   } | null>(null);
   const rowsAddedAboveRef = useRef(0);
   const primeToShowAtTopRef = useRef<number | null>(null);
   const rateWindowRef = useRef<RateWindow>(EMPTY_RATE_WINDOW);
-  /** Set after overflow or an error: nothing more can be calculated in this buffer. */
+  /** Set after an error: nothing more can be calculated in this buffer. */
   const cannotContinueRef = useRef(false);
+  /**
+   * Set when the sieve reached this device's memory limit going up: the list
+   * stops at the last proven prime. Scrolling back down still works.
+   */
+  const memoryLimitReachedRef = useRef(false);
   /**
    * True from page load until the buffer holds MAX_BATCHES. The server sends
    * the first batch, so nothing has been timed yet; filling the buffer right
@@ -200,6 +223,7 @@ export function usePrimeBuffer(firstBatchFromServer: readonly string[]): PrimeBu
   const discardWorker = useCallback(() => {
     workerRef.current?.terminate();
     workerRef.current = null;
+    workerMemoryBytesRef.current = 0;
     pendingRequestRef.current = null;
     clearSlowCalculation();
   }, [clearSlowCalculation]);
@@ -208,6 +232,7 @@ export function usePrimeBuffer(firstBatchFromServer: readonly string[]): PrimeBu
   const requestBatch = useCallback(
     (direction: Direction, from: bigint) => {
       if (pendingRequestRef.current || cannotContinueRef.current) return;
+      if (direction === "next" && memoryLimitReachedRef.current) return;
       const worker = workerRef.current ?? startWorker();
 
       const id = ++lastRequestIdRef.current;
@@ -250,6 +275,7 @@ export function usePrimeBuffer(firstBatchFromServer: readonly string[]): PrimeBu
       generationRef.current++;
       if (pendingRequestRef.current) discardWorker();
       cannotContinueRef.current = false;
+      memoryLimitReachedRef.current = false;
 
       heldBatchesRef.current = [];
       // Measure the new region on its own, not averaged with where we were.
@@ -271,9 +297,20 @@ export function usePrimeBuffer(firstBatchFromServer: readonly string[]): PrimeBu
       setBatches([]);
       setLastJump(null);
       setPrimesPerSecond(null);
+      setReachedMemoryLimit(false);
+      setErrorMessage(null);
+      // Wasm memory never shrinks. If the worker grew for somewhere far away
+      // and this jump needs much less, start a fresh one to give it back.
+      const bytesNeeded = estimatedBasePrimeBytes(
+        basePrimeLimitNeededFor("next", searchStartFor(target), BATCH_SIZE),
+      );
+      if (shouldRestartWorkerToReleaseMemory(workerMemoryBytesRef.current, bytesNeeded)) {
+        discardWorker();
+        setBasePrimeMemoryBytes(null);
+      }
       seedBuffer(target, true);
     },
-    [seedBuffer],
+    [discardWorker, seedBuffer],
   );
 
   const stop = useCallback(() => {
@@ -288,8 +325,8 @@ export function usePrimeBuffer(firstBatchFromServer: readonly string[]): PrimeBu
     (
       target: bigint,
       isUserJump: boolean,
-      primesFromTarget: BigUint64Array,
-      primesBelowTarget: BigUint64Array | null,
+      primesFromTarget: readonly bigint[],
+      primesBelowTarget: readonly bigint[] | null,
     ) => {
       pendingSeedRef.current = null;
 
@@ -327,15 +364,25 @@ export function usePrimeBuffer(firstBatchFromServer: readonly string[]): PrimeBu
 
       pendingRequestRef.current = null;
       clearSlowCalculation();
+      if (response.type === "batch" || response.type === "memory-limit") {
+        workerMemoryBytesRef.current = response.memory.moduleBytes;
+        setBasePrimeMemoryBytes(response.memory.basePrimeBytes);
+      }
 
-      if (response.type === "overflow") {
-        cannotContinueRef.current = true;
-        setStatus("overflow");
+      if (response.type === "memory-limit") {
+        // Nothing more could be proven this way. A jump that couldn't prove
+        // even its first prime leaves an empty list, with the notice explaining.
+        memoryLimitReachedRef.current = true;
+        pendingSeedRef.current = null;
+        fillingOnLoadRef.current = false;
+        setReachedMemoryLimit(true);
+        setStatus("idle");
         return;
       }
       if (response.type === "error") {
         cannotContinueRef.current = true;
         console.error("prime worker:", response.message);
+        setErrorMessage(response.message);
         setStatus("error");
         return;
       }
@@ -343,6 +390,13 @@ export function usePrimeBuffer(firstBatchFromServer: readonly string[]): PrimeBu
       setStatus("idle");
       const { primes: newPrimes, sievingDurationMs, setupDurationMs, direction } = response;
       if (setupDurationMs > 0) setLastBasePrimeSetupMs(setupDurationMs);
+      setLastVerificationMs(response.verificationDurationMs);
+      if (response.reachedMemoryLimit && direction === "next") {
+        // These primes are proven; nothing after them could be checked.
+        memoryLimitReachedRef.current = true;
+        fillingOnLoadRef.current = false;
+        setReachedMemoryLimit(true);
+      }
       if (newPrimes.length === 0) return; // asked for primes before 2; there are none
 
       // Update the primes-per-second counter from sieving time only. Only
@@ -469,7 +523,11 @@ export function usePrimeBuffer(firstBatchFromServer: readonly string[]): PrimeBu
     heat,
     lastBatchDurationMs,
     lastBasePrimeSetupMs,
+    lastVerificationMs,
+    basePrimeMemoryBytes,
+    errorMessage,
     calculationIsSlow,
+    reachedMemoryLimit,
     lastJump,
     jumpTo,
     stop,

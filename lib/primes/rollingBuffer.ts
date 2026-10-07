@@ -6,7 +6,8 @@ import { estimatePrimeOrdinal } from "./logarithmicIntegral.ts";
 import type { Direction } from "./protocol.ts";
 
 export interface Batch {
-  primes: BigUint64Array;
+  /** Ascending, exact, any size. */
+  primes: readonly bigint[];
   /**
    * Which prime primes[0] is, counting from 1: 2 is #1, 3 is #2, 5 is #3, …
    * BigInt, because the count of primes below 2^64 is itself past 2^53.
@@ -42,7 +43,7 @@ export interface BufferUpdate {
  */
 export function addBatch(
   heldBatches: Batch[],
-  newPrimes: BigUint64Array,
+  newPrimes: readonly bigint[],
   direction: Direction,
 ): BufferUpdate {
   let batches: Batch[];
@@ -93,7 +94,7 @@ export function bufferLabelsAreEstimated(batches: Batch[]): boolean {
   return batches[0]?.ordinalIsEstimate ?? false;
 }
 
-function startNewBuffer(primes: BigUint64Array): Batch {
+function startNewBuffer(primes: readonly bigint[]): Batch {
   const anchorPrime = primes[0];
   return {
     primes,

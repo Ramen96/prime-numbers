@@ -48,6 +48,48 @@ test.describe("building base primes", () => {
   });
 });
 
+test.describe("base-prime memory", () => {
+  test("is shown, and grows with a jump that needs more base primes", async ({ page }) => {
+    const primeListPage = new PrimeListPage(page);
+    await primeListPage.open();
+    const memoryFormat = /^[\d,.]+ (KB|MB|GB) of base primes$/;
+    await expect.poll(() => statValue(page, "memory")).toMatch(memoryFormat);
+    const bytes = (text: string) => parseNumber(text) * { KB: 1e3, MB: 1e6, GB: 1e9 }[text.split(" ")[1] as "KB"];
+    const beforeJump = bytes(await statValue(page, "memory"));
+    expect(beforeJump).toBeLessThan(1e6); // the first few thousand primes need very few
+
+    // near 9 × 10^15, base primes go up to about 9.5 × 10^7: about 5.5 million, a byte each
+    await primeListPage.jumpTo("9,000,000,000,000,000");
+    const afterJump = bytes(await statValue(page, "memory"));
+    expect(afterJump).toBeGreaterThan(5e6);
+    expect(afterJump).toBeLessThan(7e6); // reserved from an estimate, not doubled
+  });
+
+  test("a jump back from far away starts a fresh worker, giving the memory back", async ({ page }) => {
+    const workers: Worker[] = [];
+    page.on("worker", (worker) => workers.push(worker));
+    const primeListPage = new PrimeListPage(page);
+    await primeListPage.open();
+
+    // near 2^63, base primes go up to about 3 × 10^9: about 150 MB
+    await primeListPage.jumpTo("9,223,372,036,854,775,808");
+    expect(parseNumber(await statValue(page, "memory"))).toBeGreaterThan(140);
+    expect(workers).toHaveLength(1);
+
+    // a small jump needs far less: the big worker is replaced, not reused
+    const bigWorkerClosed = new Promise<void>((resolve) => workers[0].once("close", () => resolve()));
+    await primeListPage.jumpTo("1,000,000");
+    await bigWorkerClosed;
+    expect(workers).toHaveLength(2);
+    expect(await statValue(page, "memory")).toMatch(/ KB of base primes$/);
+    await expect(primeListPage.primeList.getByTestId("prime-row").first()).toBeVisible();
+
+    // a jump that needs as much as the worker holds doesn't restart it
+    await primeListPage.jumpTo("2,000,000");
+    expect(workers).toHaveLength(2);
+  });
+});
+
 test.describe("Stop button", () => {
   test("stops the calculation, keeps the visible primes, and scrolling resumes", async ({
     page,

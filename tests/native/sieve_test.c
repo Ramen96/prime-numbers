@@ -1,339 +1,312 @@
-// Native tests for wasm/sieve.c, built with the system C compiler.
-// Every result is checked against references that share no code with the
-// sieve: a deterministic Miller–Rabin test, and a plain array sieve for the
-// long sweeps.
+// Native tests for wasm/sieve.c (the fast suite, part of `npm test`).
+// Every result is checked against an independent Miller–Rabin test (see
+// sieve_test_support.h). Built with SIEVE_TEST_HOOKS so the multi-limb window
+// path can be forced below 2^64 and checked against the fast path. The slow
+// suite (sieve_slow_test.c) covers 2^64 itself.
 //
 // Run with: npm run test:native
 
-#include <stdint.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
+#include "sieve_test_support.h"
 
-int sieve_next(uint64_t after, int count);
-int sieve_prev(uint64_t before, int count);
-uint64_t *output_buffer(void);
-uint64_t base_prime_limit(void);
-int extend_base_primes(uint64_t limit);
+#define BOOTSTRAP_LIMIT 65536
+#define SEGMENT_SPAN 65536
 
-#define SIEVE_LIMIT 9007199254740991ULL // 2^53 − 1
-#define LARGEST_PRIME_BELOW_2_TO_THE_53 9007199254740881ULL
-#define BOOTSTRAP_LIMIT 65536ULL
-#define SEGMENT_SPAN 65536ULL // numbers covered by one segment (32,768 odd slots)
-#define BATCH_SIZE 500
-#define MAX_REFERENCE_PRIMES 8192
+static void check_around(const char *label, u128 center);
 
-static int checks_run = 0;
-static int checks_failed = 0;
-
-// ── reference: deterministic Miller–Rabin ───────────────────────────────
-
-static uint64_t multiply_mod(uint64_t a, uint64_t b, uint64_t modulus) {
-  return (uint64_t)((unsigned __int128)a * b % modulus);
-}
-
-static uint64_t power_mod(uint64_t base, uint64_t exponent, uint64_t modulus) {
-  uint64_t result = 1;
-  base %= modulus;
-  while (exponent) {
-    if (exponent & 1) result = multiply_mod(result, base, modulus);
-    base = multiply_mod(base, base, modulus);
-    exponent >>= 1;
-  }
-  return result;
-}
-
-// These 12 bases make Miller–Rabin exact for every n < 3.3 × 10^24.
-static int is_prime_reference(uint64_t candidate) {
-  static const uint64_t witnesses[] = {2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37};
-  if (candidate < 2) return 0;
-  for (size_t i = 0; i < sizeof witnesses / sizeof *witnesses; i++) {
-    if (candidate % witnesses[i] == 0) return candidate == witnesses[i];
-  }
-  uint64_t odd_part = candidate - 1;
-  int powers_of_two = 0;
-  while (odd_part % 2 == 0) {
-    odd_part /= 2;
-    powers_of_two++;
-  }
-  for (size_t i = 0; i < sizeof witnesses / sizeof *witnesses; i++) {
-    uint64_t x = power_mod(witnesses[i], odd_part, candidate);
-    if (x == 1 || x == candidate - 1) continue;
-    int composite = 1;
-    for (int round = 1; round < powers_of_two; round++) {
-      x = multiply_mod(x, x, candidate);
-      if (x == candidate - 1) {
-        composite = 0;
-        break;
-      }
-    }
-    if (composite) return 0;
-  }
-  return 1;
-}
-
-// Up to `count` primes > after (and ≤ 2^53 − 1), ascending.
-static int reference_primes_after(uint64_t after, int count, uint64_t *primes) {
-  int found = 0;
-  for (uint64_t candidate = after + 1; found < count && candidate <= SIEVE_LIMIT; candidate++) {
-    if (is_prime_reference(candidate)) primes[found++] = candidate;
-  }
-  return found;
-}
-
-// Up to `count` primes < before, ascending.
-static int reference_primes_before(uint64_t before, int count, uint64_t *primes) {
-  int found = 0;
-  uint64_t descending[MAX_REFERENCE_PRIMES];
-  for (uint64_t candidate = before; found < count && candidate > 2;) {
-    candidate--;
-    if (is_prime_reference(candidate)) descending[found++] = candidate;
-  }
-  for (int i = 0; i < found; i++) primes[i] = descending[found - 1 - i];
-  return found;
-}
-
-// ── assertions ──────────────────────────────────────────────────────────
-
-static void fail(const char *test_name, const char *format, unsigned long long a,
-                 unsigned long long b) {
-  checks_failed++;
-  fprintf(stderr, "FAIL %s: ", test_name);
-  fprintf(stderr, format, a, b);
-  fprintf(stderr, "\n");
-}
-
-static void expect_matches_reference(const char *test_name, int written, const uint64_t *expected,
-                                     int expected_count) {
-  checks_run++;
-  const uint64_t *output = output_buffer();
-  if (written != expected_count) {
-    fail(test_name, "wrote %llu primes, expected %llu", (unsigned long long)written,
-         (unsigned long long)expected_count);
-    return;
-  }
-  for (int i = 0; i < written; i++) {
-    if (output[i] != expected[i]) {
-      fail(test_name, "got %llu where %llu was expected", (unsigned long long)output[i],
-           (unsigned long long)expected[i]);
-      return;
-    }
-  }
-}
-
-static void check_next(const char *test_name, uint64_t after, int count) {
-  static uint64_t expected[MAX_REFERENCE_PRIMES];
-  int expected_count = after >= SIEVE_LIMIT ? 0 : reference_primes_after(after, count, expected);
-  expect_matches_reference(test_name, sieve_next(after, count), expected, expected_count);
-}
-
-static void check_prev(const char *test_name, uint64_t before, int count) {
-  static uint64_t expected[MAX_REFERENCE_PRIMES];
-  // The sieve stops at its limit, so anything above it behaves like 2^53.
-  uint64_t capped_before = before > SIEVE_LIMIT + 1 ? SIEVE_LIMIT + 1 : before;
-  int expected_count = before <= 2 ? 0 : reference_primes_before(capped_before, count, expected);
-  expect_matches_reference(test_name, sieve_prev(before, count), expected, expected_count);
-}
-
-// next and prev, each with a small batch and one spanning several segments.
-static void check_around(const char *label, uint64_t center) {
-  char test_name[128];
-  snprintf(test_name, sizeof test_name, "next after %s", label);
-  check_next(test_name, center, BATCH_SIZE);
-  snprintf(test_name, sizeof test_name, "prev before %s", label);
-  check_prev(test_name, center, BATCH_SIZE);
-  snprintf(test_name, sizeof test_name, "next after %s, 8192 primes (several segments)", label);
-  check_next(test_name, center, 8192);
-  snprintf(test_name, sizeof test_name, "prev before %s, 8192 primes (several segments)", label);
-  check_prev(test_name, center, 8192);
-}
-
-// ── tests ───────────────────────────────────────────────────────────────
-
-static void test_near_zero(void) {
-  for (uint64_t after = 0; after <= 12; after++) {
-    char test_name[64];
-    snprintf(test_name, sizeof test_name, "next after %llu", (unsigned long long)after);
-    check_next(test_name, after, 10);
-  }
-  for (uint64_t before = 0; before <= 14; before++) {
-    char test_name[64];
-    snprintf(test_name, sizeof test_name, "prev before %llu", (unsigned long long)before);
-    check_prev(test_name, before, 10);
-  }
-  check_next("first 8192 primes", 0, 8192);
-  check_prev("everything below 1,000 (stops at 2)", 1000, BATCH_SIZE);
-}
-
-static void test_bootstrap_and_segment_boundaries(void) {
-  // The candidates crossing the bootstrap table's end...
-  check_around("65,536 (bootstrap limit)", BOOTSTRAP_LIMIT);
-  // ...and the point where base primes must first grow past it (√2^32 = 65,536).
-  check_around("2^32 (base primes extend past the bootstrap)", BOOTSTRAP_LIMIT * BOOTSTRAP_LIMIT);
-  // Segments start wherever a request starts; shift the start across one span.
-  for (uint64_t offset = 0; offset <= 4; offset++) {
-    char label[96];
-    snprintf(label, sizeof label, "10^6 + 65,536 + %llu", (unsigned long long)offset);
-    check_around(label, 1000000 + SEGMENT_SPAN + offset);
-  }
-}
-
-static void test_large_numbers(void) {
-  check_around("10^9", 1000000000ULL);
-  check_around("10^12", 1000000000000ULL);
-  check_around("10^15", 1000000000000000ULL);
-}
-
-// The base primes stop at √(2^53). The squares of the largest ones are the
-// composites that need them most: if the top base primes were missing, these
-// squares would be reported as prime.
-static void test_squares_of_the_largest_base_primes(void) {
-  int squares_checked = 0;
-  for (uint64_t base_prime = 94906265; squares_checked < 5; base_prime--) {
-    if (!is_prime_reference(base_prime)) continue;
-    uint64_t square = base_prime * base_prime;
-    char test_name[128];
-    snprintf(test_name, sizeof test_name, "next across %llu² = %llu",
-             (unsigned long long)base_prime, (unsigned long long)square);
-    check_next(test_name, square - 600, 50);
-    snprintf(test_name, sizeof test_name, "prev across %llu²", (unsigned long long)base_prime);
-    check_prev(test_name, square + 600, 50);
-    squares_checked++;
-  }
-}
-
-static void test_last_primes_below_2_to_the_53(void) {
-  checks_run++;
-  if (!is_prime_reference(LARGEST_PRIME_BELOW_2_TO_THE_53))
-    fail("largest prime", "%llu is not prime (reference)%llu",
-         (unsigned long long)LARGEST_PRIME_BELOW_2_TO_THE_53, 0);
-
-  check_next("next near 2^53 runs out before 500", SIEVE_LIMIT - 20000, BATCH_SIZE);
-  check_next("next after the largest prime finds none", LARGEST_PRIME_BELOW_2_TO_THE_53, 10);
-  check_next("next after 2^53 − 1 finds none", SIEVE_LIMIT, 10);
-  check_prev("prev below 2^53 − 1", SIEVE_LIMIT, BATCH_SIZE);
-  check_prev("prev below 2^53", SIEVE_LIMIT + 1, BATCH_SIZE);
-
-  // 64-bit inputs past the sieve's limit: nothing after them, and "before"
-  // them means "before 2^53". 2^64 − 1 used to wrap (after + 1) around to 0.
-  check_next("next after 2^53 finds none", SIEVE_LIMIT + 1, 10);
-  check_next("next after 2^63 finds none", 1ULL << 63, 10);
-  check_next("next after 2^64 − 1 finds none", UINT64_MAX, 10);
-  check_prev("prev below 2^64 − 1 gives the last primes below 2^53", UINT64_MAX, BATCH_SIZE);
-
-  checks_run++;
-  int written = sieve_next(SIEVE_LIMIT - 2000, 100);
-  uint64_t last_prime = written > 0 ? output_buffer()[written - 1] : 0;
-  if (written == 0 || last_prime != LARGEST_PRIME_BELOW_2_TO_THE_53)
-    fail("largest prime from sieve_next", "last prime %llu, expected %llu",
-         (unsigned long long)last_prime, LARGEST_PRIME_BELOW_2_TO_THE_53);
-}
-
-#define SWEEP_LIMIT 3000000
-
-static uint8_t *plain_sieve_up_to(uint64_t limit) {
-  uint8_t *is_prime = malloc(limit + 1);
-  memset(is_prime, 1, limit + 1);
-  is_prime[0] = is_prime[1] = 0;
-  for (uint64_t candidate = 2; candidate * candidate <= limit; candidate++) {
-    if (!is_prime[candidate]) continue;
-    for (uint64_t multiple = candidate * candidate; multiple <= limit; multiple += candidate)
-      is_prime[multiple] = 0;
-  }
-  return is_prime;
-}
-
-static void test_forward_sweep_from_zero(const uint8_t *is_prime) {
-  checks_run++;
-  uint64_t expected_next = 2;
-  uint64_t after = 0;
-  while (expected_next <= SWEEP_LIMIT - 100000) {
-    int written = sieve_next(after, BATCH_SIZE);
-    const uint64_t *output = output_buffer();
-    for (int i = 0; i < written; i++) {
-      if (output[i] != expected_next) {
-        fail("forward sweep", "got %llu, expected %llu", (unsigned long long)output[i],
-             (unsigned long long)expected_next);
-        return;
-      }
-      do expected_next++; while (!is_prime[expected_next]);
-    }
-    after = output[written - 1];
-  }
-}
-
-static void test_backward_sweep_to_two(const uint8_t *is_prime) {
-  checks_run++;
-  uint64_t expected_previous = SWEEP_LIMIT - 100000;
-  while (!is_prime[expected_previous]) expected_previous--;
-  uint64_t before = expected_previous + 1;
-  int reached_two = 0;
-  while (!reached_two) {
-    int written = sieve_prev(before, BATCH_SIZE);
-    if (written == 0) break;
-    const uint64_t *output = output_buffer();
-    for (int i = written - 1; i >= 0; i--) {
-      if (output[i] != expected_previous) {
-        fail("backward sweep", "got %llu, expected %llu", (unsigned long long)output[i],
-             (unsigned long long)expected_previous);
-        return;
-      }
-      if (expected_previous == 2) {
-        reached_two = 1;
-        break;
-      }
-      do expected_previous--; while (!is_prime[expected_previous]);
-    }
-    before = output[0];
-  }
-  if (!reached_two) fail("backward sweep", "stopped before reaching 2 (at %llu)%llu",
-                         (unsigned long long)expected_previous, 0);
-  checks_run++;
-  if (sieve_prev(2, BATCH_SIZE) != 0) fail("prev before 2", "should find nothing%llu%llu", 0, 0);
-}
+// ── base primes ───────────────────────────────────────────────────────────
 
 // Runs first, while the base primes are still small.
 static void test_extending_base_primes(void) {
-  checks_run++;
-  if (base_prime_limit() != 0)
-    fail("base primes before any call", "limit is %llu, expected %llu",
-         (unsigned long long)base_prime_limit(), 0);
+  const char *name = "extending base primes";
+  expect(name, "nothing built before any call", 0, base_prime_limit());
 
   const uint64_t needed_limit = 20000000; // √(4 × 10^14)
+  expect(name, "extend succeeds", 1, (u128)extend_base_primes(needed_limit));
   checks_run++;
-  if (!extend_base_primes(needed_limit) || base_prime_limit() <= needed_limit)
-    fail("extend_base_primes", "limit is %llu, expected more than %llu",
-         (unsigned long long)base_prime_limit(), (unsigned long long)needed_limit);
+  if (base_prime_limit() <= needed_limit)
+    fail(name, "limit after extending", needed_limit + 1, base_prime_limit());
 
   // A batch whose base primes are already there doesn't extend them again.
   uint64_t limit_after_extending = base_prime_limit();
   check_next("next after 4 × 10^14 (base primes already built)", 400000000000000ULL, BATCH_SIZE);
   check_prev("prev before 4 × 10^14 (base primes already built)", 400000000000000ULL, BATCH_SIZE);
-  checks_run++;
-  if (base_prime_limit() != limit_after_extending)
-    fail("sieve_next after extending", "base primes grew again, to %llu from %llu",
-         (unsigned long long)base_prime_limit(), (unsigned long long)limit_after_extending);
+  expect(name, "sieving didn't extend them again", limit_after_extending, base_prime_limit());
 
   // Asking for less than what's there is a no-op.
+  expect(name, "extending to less succeeds", 1, (u128)extend_base_primes(1000));
+  expect(name, "and changes nothing", limit_after_extending, base_prime_limit());
+}
+
+// How base primes are stored: as gaps, one byte for gaps up to 510 and a
+// 9-byte escape above that. Real base primes don't need the escape until
+// after 304,599,508,537, so these are synthetic: odd numbers starting at 3
+// (the storage assumes it), not primes. The escape must hold any gap below
+// 2^64, so the last case spans almost all of it.
+static void test_gap_encoding(void) {
+  const char *name = "gap encoding round trip";
+  static const uint64_t small_gaps[] = {3, 5, 7, 11, 13, 17, 19, 23, 29, 31};
+  static const uint64_t largest_one_byte_gap[] = {3, 513, 1023};        // gaps of 510
+  static const uint64_t smallest_escaped_gap[] = {3, 515, 517, 1029};    // 512, then 2, then 512
+  static const uint64_t gap_past_32_bits[] = {3, 5 + ((uint64_t)1 << 33), 7 + ((uint64_t)1 << 33)};
+  static const uint64_t gap_past_56_bits[] = {3, 3 + ((uint64_t)1 << 57), 5 + ((uint64_t)1 << 57)};
+  static const uint64_t gap_across_almost_2_to_the_64[] = {3, 5, UINT64_MAX};
+  expect(name, "small gaps", 1, (u128)sieve_test_gap_encoding_round_trip(small_gaps, 10));
+  expect(name, "largest one-byte gap", 1, (u128)sieve_test_gap_encoding_round_trip(largest_one_byte_gap, 3));
+  expect(name, "smallest escaped gap", 1, (u128)sieve_test_gap_encoding_round_trip(smallest_escaped_gap, 4));
+  expect(name, "gap past 32 bits", 1, (u128)sieve_test_gap_encoding_round_trip(gap_past_32_bits, 3));
+  expect(name, "gap past 56 bits", 1, (u128)sieve_test_gap_encoding_round_trip(gap_past_56_bits, 3));
+  expect(name, "gap across almost all of 2^64", 1,
+         (u128)sieve_test_gap_encoding_round_trip(gap_across_almost_2_to_the_64, 3));
+  // the hook itself can say no: storage always starts at 3
+  static const uint64_t not_starting_at_3[] = {5, 7};
+  expect(name, "rejects a list not starting at 3", 0, (u128)sieve_test_gap_encoding_round_trip(not_starting_at_3, 2));
+  // and it puts the real base primes back
+  check_next("next after 10^12 (after the gap hook)", 1000000000000ULL, BATCH_SIZE);
+}
+
+// The memory budget, and the rollback when base primes don't fit in it. Runs
+// after test_extending_base_primes, so there are base primes to protect.
+static void test_memory_budget(void) {
+  const char *name = "memory budget";
+  uint64_t limit_before = base_prime_limit();
+
+  // reserving: within the budget it allocates exactly that; less is a no-op;
+  // over the budget it fails and changes nothing
+  size_t reserved = base_prime_memory_bytes() + 100000;
+  expect(name, "reserve more", 1, (u128)reserve_base_prime_storage(reserved));
+  expect(name, "reserved exactly", reserved, base_prime_memory_bytes());
+  expect(name, "reserve less", 1, (u128)reserve_base_prime_storage(1000));
+  expect(name, "still reserved", reserved, base_prime_memory_bytes());
+  set_base_prime_memory_budget(reserved);
+  expect(name, "reserve past the budget", 0, (u128)reserve_base_prime_storage(reserved + 1));
+  expect(name, "unchanged after refusing", reserved, base_prime_memory_bytes());
+
+  // a far extension fills what's left, then fails, and must roll back
+  expect(name, "extension past the budget fails", 0, (u128)extend_base_primes(limit_before * 100));
+  expect(name, "limit unchanged", limit_before, base_prime_limit());
+  expect(name, "memory unchanged", reserved, base_prime_memory_bytes());
+  // the space the failed extension used is free again: a small extension
+  // (about 3,000 primes; 100,000 bytes are free) still fits
+  expect(name, "small extension fits after rollback", 1, (u128)extend_base_primes(limit_before + 50000));
   checks_run++;
-  if (!extend_base_primes(1000) || base_prime_limit() != limit_after_extending)
-    fail("extend_base_primes with a smaller limit", "limit changed to %llu from %llu",
-         (unsigned long long)base_prime_limit(), (unsigned long long)limit_after_extending);
+  if (base_prime_limit() <= limit_before + 50000)
+    fail(name, "limit after the small extension", limit_before + 50001, base_prime_limit());
+
+  // a batch that needs more base primes than the budget allows stops, says
+  // so, and reports nothing it couldn't prove
+  static u128 batch[MAX_PRIMES];
+  u128 far = (u128)(limit_before * 100) * (limit_before * 100);
+  expect(name, "batch past the budget finds nothing", 0, (u128)sieve_primes(1, far, BATCH_SIZE, batch));
+  expect(name, "and reports the memory limit", 1, (u128)batch_reached_memory_limit());
+
+  // with the budget lifted, everything works, including where the failed
+  // extension had been
+  set_base_prime_memory_budget(SIZE_MAX);
+  check_next("next past the old budget", far, BATCH_SIZE);
+  expect(name, "memory limit cleared", 0, (u128)batch_reached_memory_limit());
+  check_around("10^12 after a rolled-back extension", 1000000000000ULL);
+}
+
+// ── the start of the list ─────────────────────────────────────────────────
+
+static void test_near_zero(void) {
+  char name[64];
+  for (unsigned after = 0; after <= 12; after++) {
+    snprintf(name, sizeof name, "next after %u", after);
+    check_next(name, after, 10);
+  }
+  for (unsigned before = 0; before <= 14; before++) {
+    snprintf(name, sizeof name, "prev before %u", before);
+    check_prev(name, before, 10);
+  }
+  check_next("first 8192 primes", 0, 8192);
+  check_prev("everything below 1,000 (stops at 2)", 1000, BATCH_SIZE);
+}
+
+// next and prev, each with a small batch and one spanning several segments.
+static void check_around(const char *label, u128 center) {
+  char name[160];
+  snprintf(name, sizeof name, "next after %s", label);
+  check_next(name, center, BATCH_SIZE);
+  snprintf(name, sizeof name, "prev before %s", label);
+  check_prev(name, center, BATCH_SIZE);
+  snprintf(name, sizeof name, "next after %s, 8192 primes (several segments)", label);
+  check_next(name, center, 8192);
+  snprintf(name, sizeof name, "prev before %s, 8192 primes (several segments)", label);
+  check_prev(name, center, 8192);
+}
+
+// ── coverage at boundaries (Requirement A2) ───────────────────────────────
+
+static void test_boundaries(void) {
+  // The bootstrap table's end, and where base primes first grow past it (√2^32).
+  check_around("65,536 (bootstrap limit)", BOOTSTRAP_LIMIT);
+  check_around("2^32 (one limb to two; base primes extend past the bootstrap)", TWO_TO_THE_32);
+  // Segments start wherever a request starts; shift the start across one span.
+  for (unsigned offset = 0; offset <= 4; offset++) {
+    char label[96];
+    snprintf(label, sizeof label, "10^6 + 65,536 + %u", offset);
+    check_around(label, 1000000 + SEGMENT_SPAN + offset);
+  }
+  check_around("10^9", 1000000000ULL);
+  check_around("10^12", 1000000000000ULL);
+  check_around("10^15", 1000000000000000ULL);
+  // 2^53 used to be the sieve's limit; now it's just another number.
+  check_around("2^53", TWO_TO_THE_53);
+  check_around("2^53 − 3,000", TWO_TO_THE_53 - 3000);
+  check_around("2^53 + 3,000", TWO_TO_THE_53 + 3000);
+  check_around("10^17", (u128)100000000000000000ULL);
+}
+
+// The squares of the largest base primes below √(2^53) are the composites
+// that need those base primes most; if they were missing, the squares would
+// be reported as prime.
+static void test_squares_of_large_base_primes(void) {
+  int squares_checked = 0;
+  for (u128 base_prime = 94906265; squares_checked < 5; base_prime--) {
+    if (!is_prime_reference(base_prime))
+      continue;
+    u128 square = base_prime * base_prime;
+    check_next("next across the square of a large base prime", square - 600, 50);
+    check_prev("prev across the square of a large base prime", square + 600, 50);
+    squares_checked++;
+  }
+}
+
+// ── fast path and multi-limb path agree ───────────────────────────────────
+
+// Below 2^64 the sieve normally uses uint64_t windows. Forcing the multi-limb
+// window code there must give identical primes (Requirement B).
+static void test_multi_limb_path_matches_fast_path(void) {
+  static const u128 starts[] = {1000003ULL, 4294967296ULL - 70000, 1000000000000ULL,
+                                TWO_TO_THE_53 - 40000, 1000000000000000ULL};
+  static u128 fast[MAX_PRIMES], multi_limb[MAX_PRIMES];
+  for (size_t index = 0; index < sizeof starts / sizeof *starts; index++) {
+    for (int next = 0; next <= 1; next++) {
+      sieve_force_multi_limb_windows(0);
+      int fast_count = sieve_primes(next, starts[index], 3000, fast);
+      sieve_force_multi_limb_windows(1);
+      int multi_limb_count = sieve_primes(next, starts[index], 3000, multi_limb);
+      sieve_force_multi_limb_windows(0);
+
+      const char *name = next ? "multi-limb next matches fast path" : "multi-limb prev matches fast path";
+      expect(name, "count", (u128)fast_count, (u128)multi_limb_count);
+      checks_run++;
+      if (memcmp(fast, multi_limb, sizeof(u128) * (size_t)fast_count) != 0)
+        fail(name, "primes differ from", starts[index], 0);
+      check_batch(name, next, starts[index], 3000); // and both match the reference
+    }
+  }
+}
+
+// ── published values (Requirement A4) ─────────────────────────────────────
+
+// Counts the primes up to `limit` by walking the sieve's batches from 0.
+static u128 count_primes_up_to(u128 limit) {
+  static u128 batch[MAX_PRIMES];
+  u128 count = 0, after = 0;
+  for (;;) {
+    int written = sieve_primes(1, after, MAX_PRIMES, batch);
+    for (int i = 0; i < written; i++) {
+      if (batch[i] > limit)
+        return count;
+      count++;
+    }
+    after = batch[written - 1];
+  }
+}
+
+static void test_prime_counts(void) {
+  // π(10^n) for n = 1..9. Source: OEIS A006880, https://oeis.org/A006880/b006880.txt
+  static const u128 primes_below_powers_of_ten[] = {4, 25, 168, 1229, 9592, 78498, 664579, 5761455, 50847534};
+  u128 power = 1;
+  for (int exponent = 1; exponent <= 9; exponent++) {
+    power *= 10;
+    expect("π(10^n) matches OEIS A006880", "count", primes_below_powers_of_ten[exponent - 1],
+           count_primes_up_to(power));
+  }
+  // π(2^n) for n = 20, 25, 30. Source: OEIS A007053, https://oeis.org/A007053/b007053.txt
+  expect("π(2^20) matches OEIS A007053", "count", 82025, count_primes_up_to((u128)1 << 20));
+  expect("π(2^25) matches OEIS A007053", "count", 2063689, count_primes_up_to((u128)1 << 25));
+  expect("π(2^30) matches OEIS A007053", "count", 54400028, count_primes_up_to((u128)1 << 30));
+}
+
+static void test_record_gaps(void) {
+  // Maximal prime gaps: the gap (OEIS A005250, https://oeis.org/A005250/b005250.txt)
+  // and the prime that starts it (OEIS A002386, https://oeis.org/A002386/b002386.txt), entries 64 and 65.
+  check_record_gap("record gap 1132 (below 2^53)", 1693182318746371ULL, 1132);
+  check_record_gap("record gap 1184 (above 2^53)", 43841547845541059ULL, 1184);
+}
+
+// ── sweeps ────────────────────────────────────────────────────────────────
+
+#define SWEEP_LIMIT 3000000
+
+static void test_sweeps_against_a_plain_sieve(void) {
+  uint8_t *is_prime = malloc(SWEEP_LIMIT + 1);
+  memset(is_prime, 1, SWEEP_LIMIT + 1);
+  is_prime[0] = is_prime[1] = 0;
+  for (uint64_t candidate = 2; candidate * candidate <= SWEEP_LIMIT; candidate++)
+    if (is_prime[candidate])
+      for (uint64_t multiple = candidate * candidate; multiple <= SWEEP_LIMIT; multiple += candidate)
+        is_prime[multiple] = 0;
+
+  static u128 batch[MAX_PRIMES];
+  // Forward from 0 in batches of 500: every batch starts where the last ended.
+  uint64_t expected = 2;
+  u128 after = 0;
+  while (expected < SWEEP_LIMIT - 100000) {
+    int written = sieve_primes(1, after, BATCH_SIZE, batch);
+    for (int i = 0; i < written; i++) {
+      checks_run++;
+      if (batch[i] != expected) {
+        fail("forward sweep", "prime", expected, batch[i]);
+        free(is_prime);
+        return;
+      }
+      do expected++; while (!is_prime[expected]);
+    }
+    after = batch[written - 1];
+  }
+  // Backward down to 2.
+  expected = SWEEP_LIMIT - 100000;
+  while (!is_prime[expected]) expected--;
+  u128 before = expected + 1;
+  int reached_two = 0;
+  while (!reached_two) {
+    int written = sieve_primes(0, before, BATCH_SIZE, batch);
+    if (written == 0)
+      break;
+    for (int i = written - 1; i >= 0; i--) {
+      checks_run++;
+      if (batch[i] != expected) {
+        fail("backward sweep", "prime", expected, batch[i]);
+        free(is_prime);
+        return;
+      }
+      if (expected == 2) {
+        reached_two = 1;
+        break;
+      }
+      do expected--; while (!is_prime[expected]);
+    }
+    before = batch[0];
+  }
+  expect("backward sweep", "reached 2", 1, (u128)reached_two);
+  expect("prev before 2", "finds nothing", 0, (u128)sieve_primes(0, 2, BATCH_SIZE, batch));
+  free(is_prime);
 }
 
 int main(void) {
   test_extending_base_primes();
+  test_gap_encoding();
+  test_memory_budget();
   test_near_zero();
-  test_bootstrap_and_segment_boundaries();
-  test_large_numbers();
-  test_squares_of_the_largest_base_primes();
-  test_last_primes_below_2_to_the_53();
-
-  uint8_t *is_prime = plain_sieve_up_to(SWEEP_LIMIT);
-  test_forward_sweep_from_zero(is_prime);
-  test_backward_sweep_to_two(is_prime);
-  free(is_prime);
-
-  printf("native sieve tests: %d checks, %d failed\n", checks_run, checks_failed);
-  return checks_failed == 0 ? 0 : 1;
+  test_boundaries();
+  test_squares_of_large_base_primes();
+  test_multi_limb_path_matches_fast_path();
+  test_prime_counts();
+  test_record_gaps();
+  test_sweeps_against_a_plain_sieve();
+  return report("native sieve tests");
 }

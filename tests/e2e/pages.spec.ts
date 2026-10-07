@@ -42,7 +42,7 @@ test.describe("/about", () => {
       "Is any of my data sent anywhere?",
       "Why does the counter slow down as I scroll?",
       "What does the “≈” next to a number mean?",
-      "Why can’t I jump past a certain number?",
+      "Is there a largest number I can jump to?",
       "Will it break my computer?",
     ]) {
       expect(html).toMatch(new RegExp(`<h3[^>]*>${question.replace("?", "\\?")}</h3>`));

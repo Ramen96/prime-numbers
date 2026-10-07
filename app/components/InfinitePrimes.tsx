@@ -19,6 +19,14 @@ function formatBatchDuration(durationMs: number | null): string {
   return durationMs < 0.1 ? "< 0.1 ms" : `${durationMs.toFixed(2)} ms`;
 }
 
+/** Decimal units (1 MB = 10^6 bytes), as people read them. */
+function formatMemory(bytes: number | null): string {
+  if (bytes === null) return "—";
+  if (bytes >= 1e9) return `${(bytes / 1e9).toFixed(2)} GB`;
+  if (bytes >= 1e6) return `${numberFormatter.format(bytes / 1e6)} MB`;
+  return `${numberFormatter.format(bytes / 1e3)} KB`;
+}
+
 function storedPrime(decimal: string | null): bigint | null {
   return decimal === null ? null : BigInt(decimal);
 }
@@ -37,7 +45,11 @@ export function InfinitePrimes({ intro, firstBatchFromServer }: Props) {
     heat,
     lastBatchDurationMs,
     lastBasePrimeSetupMs,
+    lastVerificationMs,
+    basePrimeMemoryBytes,
+    errorMessage,
     calculationIsSlow,
+    reachedMemoryLimit,
     stop,
     lastJump,
     jumpTo,
@@ -136,6 +148,14 @@ export function InfinitePrimes({ intro, firstBatchFromServer }: Props) {
                   ? "—"
                   : `built in ${formatBatchDuration(lastBasePrimeSetupMs)}`}
               </dd>
+              <dt>memory</dt>
+              <dd className="text-foreground">
+                {basePrimeMemoryBytes === null ? "—" : `${formatMemory(basePrimeMemoryBytes)} of base primes`}
+              </dd>
+              <dt>checked</dt>
+              <dd className="text-foreground">
+                {lastVerificationMs === null ? "—" : `in ${formatBatchDuration(lastVerificationMs)}`}
+              </dd>
               <dt>furthest scroll</dt>
               <dd className="text-foreground">
                 <WrappableNumber value={storedPrime(personalData.data.records.furthestScroll)} />
@@ -170,6 +190,8 @@ export function InfinitePrimes({ intro, firstBatchFromServer }: Props) {
             <PrimeList
               batches={batches}
               status={status}
+              reachedMemoryLimit={reachedMemoryLimit}
+              errorMessage={errorMessage}
               reportView={reportView}
               takeScrollInstruction={takeScrollInstruction}
               favoritePrimes={favoritePrimes}
