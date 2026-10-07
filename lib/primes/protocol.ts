@@ -38,14 +38,15 @@ export interface BatchResponse extends RequestTags {
   /**
    * Primes in ascending order regardless of direction. Float64 is exact for
    * every integer up to 2^53, and the buffer is transferred, not copied.
-   * May hold fewer than `count` primes for "prev" near 2.
+   * May hold fewer than `count` primes: for "prev" near 2, and for "next"
+   * just below 2^53, where the primes JavaScript can represent exactly run out.
    */
   primes: Float64Array;
   /** Wall time spent computing this batch, from performance.now(). */
   durationMs: number;
 }
 
-/** The next candidate would exceed Number.MAX_SAFE_INTEGER. */
+/** There are no more primes below 2^53 (Number.MAX_SAFE_INTEGER + 1) after `from`. */
 export interface OverflowResponse extends RequestTags {
   type: "overflow";
 }

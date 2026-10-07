@@ -43,7 +43,7 @@ const FETCH_THRESHOLD = 0.6;
 /** Primes/sec at which heat is 0 (cool). */
 const COOL_RATE = 1e7;
 /** Primes/sec at which heat is 1 (overheating). */
-const HOT_RATE = 1e3;
+const HOT_RATE = 1e5; // about where the sieve ends up just below 2^53
 
 /**
  * Maps primes/sec to heat in 0..1 on a log scale, because the rate falls

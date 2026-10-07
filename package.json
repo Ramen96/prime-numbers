@@ -5,9 +5,12 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
+    "build:wasm": "emcc wasm/sieve.c -O3 --no-entry -sSTANDALONE_WASM -sALLOW_MEMORY_GROWTH -sEXPORTED_FUNCTIONS=_sieve_next,_sieve_prev,_output_buffer -o public/sieve.wasm",
     "start": "next start",
     "lint": "eslint",
-    "test": "node --test 'lib/**/*.test.ts'",
+    "test": "npm run test:unit && npm run test:native",
+    "test:unit": "node --test 'lib/**/*.test.ts'",
+    "test:native": "mkdir -p .cache && cc -O2 -std=c11 -Wall -Wextra -o .cache/sieve_test tests/native/sieve_test.c wasm/sieve.c -lm && .cache/sieve_test",
     "test:e2e": "playwright test"
   },
   "dependencies": {

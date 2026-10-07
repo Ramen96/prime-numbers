@@ -26,9 +26,10 @@ const FREQUENTLY_ASKED_QUESTIONS = [
     question: "Is it using my computer?",
     answer: (
       <>
-        Yes. All the computing happens in your browser, on your device. Nothing is calculated
-        on a server: the server only sends the page itself, with the first 500 primes already
-        written into it.
+        Yes. Every prime you scroll or jump to is calculated in your browser, on your device;
+        no server does any of that work. The one exception is the first 500 primes, which are
+        worked out once when the site is built and written into the page, so the list appears
+        instantly.
       </>
     ),
   },

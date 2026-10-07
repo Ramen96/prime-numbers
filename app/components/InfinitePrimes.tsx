@@ -86,12 +86,6 @@ export function InfinitePrimes({ intro, firstBatchFromServer }: Props) {
           aria-label="Prime numbers"
           className="flex min-h-0 flex-1 flex-col desktop:col-start-2 desktop:row-span-4 desktop:row-start-1 desktop:border-x desktop:border-rule"
         >
-          {status === "overflow" && (
-            <div className="bg-(--hot-surface) px-5 py-3 text-white">
-              <strong>You broke math.</strong> The next prime is past 2⁵³ − 1, where
-              JavaScript numbers stop being exact integers.
-            </div>
-          )}
           <div className="min-h-0 flex-1">
             <PrimeList
               batches={batches}

@@ -39,10 +39,9 @@ function screenRowToPrimeIndex(screenRow: number): number {
 
 export function PrimeList({ batches, status, reportView, takeScrollInstruction }: Props) {
   const scrollContainerRef = useRef<HTMLDivElement>(null);
-  const estimateBannerRef = useRef<HTMLParagraphElement>(null);
-  const bannerWasVisibleRef = useRef(false);
-  /** Remembered so we know how far to scroll back after the banner is removed from the DOM. */
-  const lastBannerHeightRef = useRef(0);
+  /** Holds the notices above the list ("You broke math", the estimate banner). */
+  const noticeAreaRef = useRef<HTMLDivElement>(null);
+  const previousNoticeAreaHeightRef = useRef(0);
   const [scrollTopPx, setScrollTopPx] = useState(0);
   // Until the browser can measure, assume a typical screen so the server
   // renders a full first screen of primes into the HTML.
@@ -66,6 +65,7 @@ export function PrimeList({ batches, status, reportView, takeScrollInstruction }
   }, [batches]);
 
   const bufferStartsAtTwo = allPrimes[0] === 2;
+  const ranOutOfSafeIntegers = status === "overflow";
 
   /** Tells the buffer which primes are on screen so it can decide whether to fetch more. */
   const reportVisiblePrimes = useCallback(() => {
@@ -86,40 +86,35 @@ export function PrimeList({ batches, status, reportView, takeScrollInstruction }
   //   (scrolling up) moves every row below it. Scroll by the same amount so
   //   the user keeps seeing the same primes.
   // - After a jump, put the first prime found at the top of the viewport.
-  // - The estimate banner sits above the scroll container, so showing it
-  //   pushes the container's top edge down by the banner's height (and hiding
-  //   it pulls it back up). Scroll by the same amount so the visible primes
-  //   stay put on screen.
+  // - The notices sit above the scroll container, so when one appears it
+  //   pushes the container's top edge down by its height (and when one goes,
+  //   pulls it back up). Scroll by the same amount so the visible primes stay
+  //   put on screen.
   // Then check the thresholds again, because a new batch may already have
   // crossed one.
   useLayoutEffect(() => {
     const scrollContainer = scrollContainerRef.current;
     if (!scrollContainer) return;
 
-    const bannerJustAppeared = labelsAreEstimated && !bannerWasVisibleRef.current;
-    const bannerJustDisappeared = !labelsAreEstimated && bannerWasVisibleRef.current;
-    const heightOfDisappearedBanner = lastBannerHeightRef.current;
-    bannerWasVisibleRef.current = labelsAreEstimated;
-    if (labelsAreEstimated) {
-      lastBannerHeightRef.current = estimateBannerRef.current?.offsetHeight ?? 0;
-    }
+    const noticeAreaHeight = noticeAreaRef.current?.offsetHeight ?? 0;
+    const noticeAreaGrewBy = noticeAreaHeight - previousNoticeAreaHeightRef.current;
+    previousNoticeAreaHeightRef.current = noticeAreaHeight;
 
     const instruction = takeScrollInstruction();
     if (instruction?.type === "showPrimeAtTop") {
-      // Absolute position inside the container, so it already lands below the banner.
+      // Absolute position inside the container, so it already lands below the notices.
       scrollContainer.scrollTop = (HEADER_ROWS + instruction.primeIndex) * ROW_HEIGHT_PX;
     } else {
       if (instruction?.type === "keepPosition") {
         scrollContainer.scrollTop += instruction.rowsAddedAbove * ROW_HEIGHT_PX;
       }
-      if (bannerJustAppeared) scrollContainer.scrollTop += lastBannerHeightRef.current;
-      if (bannerJustDisappeared) scrollContainer.scrollTop -= heightOfDisappearedBanner;
+      scrollContainer.scrollTop += noticeAreaGrewBy;
     }
 
     setScrollTopPx(scrollContainer.scrollTop);
     setViewportHeightPx(scrollContainer.clientHeight);
     reportVisiblePrimes();
-  }, [batches, labelsAreEstimated, takeScrollInstruction, reportVisiblePrimes]);
+  }, [batches, labelsAreEstimated, ranOutOfSafeIntegers, takeScrollInstruction, reportVisiblePrimes]);
 
   useLayoutEffect(() => {
     const scrollContainer = scrollContainerRef.current;
@@ -211,16 +206,20 @@ export function PrimeList({ batches, status, reportView, takeScrollInstruction }
 
   return (
     <div className="flex h-full flex-col">
-      {/* Outside the scroll container, so it stays put and never covers a row. */}
-      {labelsAreEstimated && (
-        <p
-          ref={estimateBannerRef}
-          role="status"
-          className="border-b border-rule px-5 py-1.5 text-xs text-muted"
-        >
-          Positions after a jump are estimated. Scroll back to 2 for exact counts.
-        </p>
-      )}
+      {/* Outside the scroll container, so notices stay put and never cover a row. */}
+      <div ref={noticeAreaRef}>
+        {ranOutOfSafeIntegers && (
+          <p role="status" className="bg-(--hot-surface) px-5 py-3 text-white">
+            <strong>You broke math.</strong> The next prime is past 2⁵³ − 1, where JavaScript
+            numbers stop being exact integers.
+          </p>
+        )}
+        {labelsAreEstimated && (
+          <p role="status" className="border-b border-rule px-5 py-1.5 text-xs text-muted">
+            Positions after a jump are estimated. Scroll back to 2 for exact counts.
+          </p>
+        )}
+      </div>
       <div
         ref={scrollContainerRef}
         data-testid="prime-list"

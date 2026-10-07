@@ -189,15 +189,19 @@ function sieveSegment(low, high, basePrimes, isComposite) {
 }`}</code>
       </pre>
       <p>
-        This is how the site’s background worker finds primes. Memory stays flat because the
-        scratch buffer is the same size for every segment, wherever it is on the number line.
-        Only the list of base primes grows, and it grows very slowly, so the worker keeps it and
-        extends it only when the numbers get big enough to need a new base prime.
+        This is how the site’s background worker finds primes, in C compiled to WebAssembly.
+        Memory stays flat because the scratch buffer is the same size for every segment,
+        wherever it is on the number line (it even skips even numbers, which halves it). Only
+        the list of base primes grows, with the square root of the numbers: the primes below
+        about 95 million cover everything up to 2⁵³. The worker keeps that list and extends it
+        only when the numbers get big enough to need more.
       </p>
       <p>
         A batch on the site is always 500 primes, not a fixed range of numbers. Primes thin out
-        as numbers grow, so the bigger the numbers, the more segments the worker has to sieve to
-        collect 500 of them.
+        as numbers grow, so each batch covers a wider stretch of numbers, and every segment has
+        more base primes to cross off with. On a recent laptop a batch near a million takes
+        about 0.03 ms; near a trillion, 0.2 ms; just below 2⁵³, about 5 ms. That’s the slowdown
+        the counter shows.
       </p>
 
       {/* 5 */}

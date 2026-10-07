@@ -16,7 +16,7 @@ test.describe("layout", () => {
     const primeListPage = new PrimeListPage(page);
     await primeListPage.open();
     await expectNoHorizontalScrolling(page);
-    await primeListPage.jumpTo("1,000,000,000,000"); // long, 13-digit primes and labels
+    await primeListPage.jumpTo("9,000,000,000,000,000"); // the widest, 16-digit primes
     await expectNoHorizontalScrolling(page);
   });
 
@@ -62,7 +62,7 @@ test.describe("layout on a 360px phone", () => {
     const primeListPage = new PrimeListPage(page);
     await primeListPage.open();
     await expectNoHorizontalScrolling(page);
-    await primeListPage.jumpTo("1,000,000,000,000"); // long, 13-digit primes and labels
+    await primeListPage.jumpTo("9,000,000,000,000,000"); // the widest, 16-digit primes
     await expectNoHorizontalScrolling(page);
   });
 });
