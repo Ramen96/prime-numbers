@@ -6,9 +6,12 @@ import { estimatePrimeOrdinal } from "./logarithmicIntegral.ts";
 import type { Direction } from "./protocol.ts";
 
 export interface Batch {
-  primes: Float64Array;
-  /** Which prime primes[0] is, counting from 1: 2 is #1, 3 is #2, 5 is #3, … */
-  ordinalOfFirstPrime: number;
+  primes: BigUint64Array;
+  /**
+   * Which prime primes[0] is, counting from 1: 2 is #1, 3 is #2, 5 is #3, …
+   * BigInt, because the count of primes below 2^64 is itself past 2^53.
+   */
+  ordinalOfFirstPrime: bigint;
   /**
    * True after a jump. We estimate the position of the first prime the jump
    * found (the anchor) once, using li(x), and count exactly from there, so
@@ -39,7 +42,7 @@ export interface BufferUpdate {
  */
 export function addBatch(
   heldBatches: Batch[],
-  newPrimes: Float64Array,
+  newPrimes: BigUint64Array,
   direction: Direction,
 ): BufferUpdate {
   let batches: Batch[];
@@ -51,7 +54,7 @@ export function addBatch(
     const lastBatch = heldBatches[heldBatches.length - 1];
     const newBatch: Batch = {
       primes: newPrimes,
-      ordinalOfFirstPrime: lastBatch.ordinalOfFirstPrime + lastBatch.primes.length,
+      ordinalOfFirstPrime: lastBatch.ordinalOfFirstPrime + BigInt(lastBatch.primes.length),
       ordinalIsEstimate: lastBatch.ordinalIsEstimate,
     };
     batches = [...heldBatches, newBatch];
@@ -65,7 +68,7 @@ export function addBatch(
     const firstBatch = heldBatches[0];
     const newBatch: Batch = {
       primes: newPrimes,
-      ordinalOfFirstPrime: firstBatch.ordinalOfFirstPrime - newPrimes.length,
+      ordinalOfFirstPrime: firstBatch.ordinalOfFirstPrime - BigInt(newPrimes.length),
       ordinalIsEstimate: firstBatch.ordinalIsEstimate,
     };
     batches = [newBatch, ...heldBatches];
@@ -90,7 +93,7 @@ export function bufferLabelsAreEstimated(batches: Batch[]): boolean {
   return batches[0]?.ordinalIsEstimate ?? false;
 }
 
-function startNewBuffer(primes: Float64Array): Batch {
+function startNewBuffer(primes: BigUint64Array): Batch {
   const anchorPrime = primes[0];
   return {
     primes,
@@ -104,13 +107,13 @@ function startNewBuffer(primes: Float64Array): Batch {
  * the estimate away and count from 2.
  */
 function numberExactlyIfBufferContainsTwo(batches: Batch[]): Batch[] {
-  const bufferContainsTwo = batches[0]?.primes[0] === 2;
+  const bufferContainsTwo = batches[0]?.primes[0] === 2n;
   if (!bufferContainsTwo) return batches;
 
-  let ordinal = 1;
+  let ordinal = 1n;
   return batches.map((batch) => {
     const exactlyNumbered = { ...batch, ordinalOfFirstPrime: ordinal, ordinalIsEstimate: false };
-    ordinal += batch.primes.length;
+    ordinal += BigInt(batch.primes.length);
     return exactlyNumbered;
   });
 }

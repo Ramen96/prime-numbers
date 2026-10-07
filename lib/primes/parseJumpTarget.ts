@@ -1,5 +1,7 @@
+import { SIEVE_LIMIT } from "./protocol.ts";
+
 export type JumpTargetResult =
-  | { valid: true; target: number }
+  | { valid: true; target: bigint }
   | { valid: false; message: string };
 
 /** Characters people use to group digits: "1,000,000", "1_000_000", "1 000 000". */
@@ -28,15 +30,14 @@ export function parseJumpTarget(userInput: string): JumpTargetResult {
     return { valid: false, message: "That doesn't look like a number." };
   }
 
-  // Compare as BigInt: past 2^53 a JS number rounds, so a too-big input
-  // could round down and slip past a plain `>=` check.
-  if (BigInt(digitsOnly) >= BigInt(Number.MAX_SAFE_INTEGER)) {
+  const target = BigInt(digitsOnly);
+  if (target >= SIEVE_LIMIT) {
     return {
       valid: false,
       message:
-        "Past 2⁵³ − 1, JavaScript can't count exactly. We'd rather show nothing than wrong primes.",
+        "The sieve stops at 2⁵³ − 1 (9,007,199,254,740,991) for now. Try a smaller number.",
     };
   }
 
-  return { valid: true, target: Number(digitsOnly) };
+  return { valid: true, target };
 }

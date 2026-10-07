@@ -63,7 +63,8 @@ export class PrimeListPage {
    */
   async waitForWorkerToFinish() {
     await this.page.waitForTimeout(30);
-    await expect(this.primeList).not.toHaveAttribute("data-status", "computing", {
+    // Done = not computing and not building base primes.
+    await expect(this.primeList).toHaveAttribute("data-status", /^(idle|stopped|overflow|error)$/, {
       timeout: 60_000,
     });
   }

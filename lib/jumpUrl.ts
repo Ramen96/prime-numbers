@@ -11,9 +11,9 @@ export function jumpParameterFrom(queryString: string): string | null {
  * The current URL with ?jump= set to `target`, or removed when the jump goes
  * back to the start of the list (anything up to 2, the first prime).
  */
-export function urlForJump(currentUrl: string, target: number): string {
+export function urlForJump(currentUrl: string, target: bigint): string {
   const url = new URL(currentUrl);
-  if (target <= 2) url.searchParams.delete(JUMP_PARAMETER);
+  if (target <= 2n) url.searchParams.delete(JUMP_PARAMETER);
   else url.searchParams.set(JUMP_PARAMETER, String(target));
   return url.pathname + url.search + url.hash;
 }

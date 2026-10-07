@@ -16,12 +16,16 @@ describe("jumpParameterFrom", () => {
 
 describe("urlForJump", () => {
   it("sets ?jump= to the target, keeping other parameters", () => {
-    assert.equal(urlForJump("https://example.com/?ref=x", 1_000_000), "/?ref=x&jump=1000000");
-    assert.equal(urlForJump("https://example.com/?jump=5", 77), "/?jump=77");
+    assert.equal(urlForJump("https://example.com/?ref=x", 1_000_000n), "/?ref=x&jump=1000000");
+    assert.equal(urlForJump("https://example.com/?jump=5", 77n), "/?jump=77");
+  });
+
+  it("keeps every digit of numbers past 2^53", () => {
+    assert.equal(urlForJump("https://example.com/", 18_446_744_073_709_551_557n), "/?jump=18446744073709551557");
   });
 
   it("clears ?jump= when jumping back to the start", () => {
-    assert.equal(urlForJump("https://example.com/?jump=1000", 2), "/");
-    assert.equal(urlForJump("https://example.com/?jump=1000", 0), "/");
+    assert.equal(urlForJump("https://example.com/?jump=1000", 2n), "/");
+    assert.equal(urlForJump("https://example.com/?jump=1000", 0n), "/");
   });
 });

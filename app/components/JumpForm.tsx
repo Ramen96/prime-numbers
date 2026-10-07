@@ -7,7 +7,7 @@ import type { JumpResult } from "@/lib/primes/usePrimeBuffer";
 import styles from "./JumpForm.module.scss";
 
 interface Props {
-  onJump: (target: number) => void;
+  onJump: (target: bigint) => void;
   lastJump: JumpResult | null;
 }
 

@@ -34,7 +34,8 @@ const WEB_APPLICATION_DATA = {
 
 // Computed once at build time: the page is static, so these primes are in
 // the HTML for crawlers and for an instant first screen.
-const FIRST_BATCH = firstPrimes(BATCH_SIZE);
+// Passed as strings: a server component can't hand BigInt to a client component.
+const FIRST_BATCH = firstPrimes(BATCH_SIZE).map(String);
 
 export default function Home() {
   return (

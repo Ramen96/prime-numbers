@@ -69,9 +69,9 @@ const FREQUENTLY_ASKED_QUESTIONS = [
     question: "Why can’t I jump past a certain number?",
     answer: (
       <>
-        JavaScript numbers are only exact up to 2⁵³ − 1 (9,007,199,254,740,991). Past that they
-        start rounding, which would mean showing wrong primes. The site would rather show
-        nothing than show something wrong.
+        The sieve stops at 2⁵³ − 1 (9,007,199,254,740,991): that’s where its base primes, the
+        primes it crosses off with, stop growing. The primes themselves are 64-bit integers that
+        stay exact much further, but for now, that’s where the list ends.
       </>
     ),
   },

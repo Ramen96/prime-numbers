@@ -17,7 +17,7 @@ function formatBatchDuration(durationMs: number | null): string {
 interface Props {
   intro: ReactNode;
   /** The first 500 primes, computed on the server so they're in the HTML. */
-  firstBatchFromServer: readonly number[];
+  firstBatchFromServer: readonly string[];
 }
 
 export function InfinitePrimes({ intro, firstBatchFromServer }: Props) {
@@ -27,6 +27,9 @@ export function InfinitePrimes({ intro, firstBatchFromServer }: Props) {
     primesPerSecond,
     heat,
     lastBatchDurationMs,
+    lastBasePrimeSetupMs,
+    calculationIsSlow,
+    stop,
     lastJump,
     jumpTo,
     reportView,
@@ -46,7 +49,8 @@ export function InfinitePrimes({ intro, firstBatchFromServer }: Props) {
 
   // The frontier is the largest prime currently held.
   const lastBatch = batches[batches.length - 1];
-  const frontier = lastBatch ? lastBatch.primes[lastBatch.primes.length - 1] : 0;
+  const frontier = lastBatch ? lastBatch.primes[lastBatch.primes.length - 1] : null;
+  const isBuildingBasePrimes = status === "building-base-primes";
 
   return (
     <main
@@ -62,18 +66,43 @@ export function InfinitePrimes({ intro, firstBatchFromServer }: Props) {
           <Cpu />
           <div className="min-w-40 flex-1">
             <div className="font-mono text-[clamp(2rem,8vw,3.75rem)] leading-none font-bold tabular-nums wrap-anywhere text-(--heat-text) transition-colors duration-600 desktop:text-[3.25rem]">
-              {primesPerSecond === null ? "—" : numberFormatter.format(primesPerSecond)}
+              {status === "stopped"
+                ? "stopped"
+                : primesPerSecond === null
+                  ? "—"
+                  : numberFormatter.format(primesPerSecond)}
             </div>
-            <div className="mt-1 text-xs tracking-widest text-muted uppercase">
-              primes per second
+            <div className="flex min-h-11 items-center justify-between gap-3">
+              <p aria-live="polite" className="text-xs tracking-widest text-muted uppercase">
+                {isBuildingBasePrimes ? (
+                  <span className="text-(--heat-text)">Building base primes…</span>
+                ) : (
+                  "primes per second"
+                )}
+              </p>
+              {/* Always laid out, only shown during a slow calculation, so it never shifts the page. */}
+              <button
+                type="button"
+                onClick={stop}
+                aria-label="Stop calculating"
+                className={`h-11 shrink-0 rounded-md border border-rule px-4 text-sm font-medium hover:border-foreground focus-visible:outline-2 focus-visible:outline-(--heat-text) ${calculationIsSlow ? "" : "invisible"}`}
+              >
+                Stop
+              </button>
             </div>
-            <dl className="mt-3 grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-0.5 text-[0.8rem] text-muted tabular-nums">
+            <dl className="mt-1 grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-0.5 text-[0.8rem] text-muted tabular-nums">
               <dt>frontier</dt>
               <dd className="text-foreground">
-                {frontier ? numberFormatter.format(frontier) : "—"}
+                {frontier === null ? "—" : numberFormatter.format(frontier)}
               </dd>
               <dt>last batch</dt>
               <dd className="text-foreground">{formatBatchDuration(lastBatchDurationMs)}</dd>
+              <dt>base primes</dt>
+              <dd className="text-foreground">
+                {lastBasePrimeSetupMs === null
+                  ? "—"
+                  : `built in ${formatBatchDuration(lastBasePrimeSetupMs)}`}
+              </dd>
             </dl>
           </div>
         </header>

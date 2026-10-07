@@ -50,7 +50,7 @@ export function PrimeList({ batches, status, reportView, takeScrollInstruction }
   // Join the batches into one array so each screen row maps to one prime.
   const { allPrimes, ordinalOfFirstPrime, labelsAreEstimated } = useMemo(() => {
     const primeCount = batches.reduce((count, batch) => count + batch.primes.length, 0);
-    const joined = new Float64Array(primeCount);
+    const joined = new BigUint64Array(primeCount);
     let writePosition = 0;
     for (const batch of batches) {
       joined.set(batch.primes, writePosition);
@@ -58,13 +58,13 @@ export function PrimeList({ batches, status, reportView, takeScrollInstruction }
     }
     return {
       allPrimes: joined,
-      ordinalOfFirstPrime: batches[0]?.ordinalOfFirstPrime ?? 1,
+      ordinalOfFirstPrime: batches[0]?.ordinalOfFirstPrime ?? 1n,
       // Drives both the "≈" on each label and the estimate banner.
       labelsAreEstimated: bufferLabelsAreEstimated(batches),
     };
   }, [batches]);
 
-  const bufferStartsAtTwo = allPrimes[0] === 2;
+  const bufferStartsAtTwo = allPrimes[0] === 2n;
   const ranOutOfSafeIntegers = status === "overflow";
 
   /** Tells the buffer which primes are on screen so it can decide whether to fetch more. */
@@ -177,12 +177,12 @@ export function PrimeList({ batches, status, reportView, takeScrollInstruction }
       const primeIndex = screenRowToPrimeIndex(screenRow);
       const prime = allPrimes[primeIndex];
       // 2 is #1, 3 is #2, … After a jump this is estimated (see rollingBuffer.ts).
-      const ordinal = numberFormatter.format(ordinalOfFirstPrime + primeIndex);
+      const ordinal = numberFormatter.format(ordinalOfFirstPrime + BigInt(primeIndex));
       renderedRows.push(
         <div
-          key={prime}
+          key={String(prime)}
           data-testid="prime-row"
-          data-prime={prime}
+          data-prime={String(prime)}
           className={PRIME_ROW_CLASSES}
           style={positionStyle}
         >
@@ -210,8 +210,8 @@ export function PrimeList({ batches, status, reportView, takeScrollInstruction }
       <div ref={noticeAreaRef}>
         {ranOutOfSafeIntegers && (
           <p role="status" className="bg-(--hot-surface) px-5 py-3 text-white">
-            <strong>You broke math.</strong> The next prime is past 2⁵³ − 1, where JavaScript
-            numbers stop being exact integers.
+            <strong>You broke math.</strong> Well, the sieve: it stops at 2⁵³ − 1, and there
+            are no primes left below that.
           </p>
         )}
         {labelsAreEstimated && (

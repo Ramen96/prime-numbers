@@ -3,20 +3,24 @@
 #include <stdint.h>
 #include <stdlib.h>
 
-#define MAX_SAFE_INTEGER 9007199254740991ULL // 2^53 - 1
+// The sieve's deliberate upper limit, 2^53 - 1. Base primes stop growing at
+// its square root (MAX_BASE_LIMIT), so the sieve can't go past it. It happens
+// to equal JavaScript's Number.MAX_SAFE_INTEGER, but values now cross into
+// JavaScript as 64-bit integers (BigInt), so it's no longer a number-format limit.
+#define SIEVE_LIMIT 9007199254740991ULL
 #define MAX_BATCH 8192
 #define SEGMENT_BYTES 32768
 #define BOOTSTRAP_LIMIT 65536
 #define MAX_BASE_LIMIT 94906266ULL
 
-static double output[MAX_BATCH];
+static uint64_t output[MAX_BATCH];
 static uint8_t segment[SEGMENT_BYTES];
 static uint32_t *base_primes = NULL;
 static size_t base_count = 0;
 static size_t base_capacity = 0;
 static uint64_t base_limit = 0;
 
-double *output_buffer(void) { return output; }
+uint64_t *output_buffer(void) { return output; }
 
 // Square root on a double can be off by 1 near 2^53
 // this can skip a base prime and let a composite through
@@ -127,6 +131,13 @@ static int ensure_base_primes(uint64_t limit) {
   return 1;
 }
 
+// exclusive: every prime below this is in base primes (0 before the first batch)
+uint64_t base_prime_limit(void) { return base_limit; }
+
+// makes sure every prime <= limit is in base primes, so the worker can build
+// them as a separate, separately timed step. returns 0 if memory runs out
+int extend_base_primes(uint64_t limit) { return ensure_base_primes(limit); }
+
 static int prepare_segment(uint64_t low) {
   uint64_t last = low + 2ULL * SEGMENT_BYTES - 1;
   if (!ensure_base_primes(integer_sqrt(last)))
@@ -138,11 +149,14 @@ static int prepare_segment(uint64_t low) {
 // writes up to count primes strictly greater than after into the output buffer
 // ascending then it returns how many were written (fewr only at 2^53 or if
 // memory runs out)
-int sieve_next(double after, int count) {
+int sieve_next(uint64_t after, int count) {
   if (count > MAX_BATCH)
     count = MAX_BATCH;
+  // nothing to find past the limit, and (after + 1) below would wrap at 2^64 - 1
+  if (after >= SIEVE_LIMIT)
+    return 0;
   int written = 0;
-  uint64_t floor_exclusive = after < 0 ? 0 : (uint64_t)after;
+  uint64_t floor_exclusive = after;
 
   if (floor_exclusive < 2 && written < count)
     output[written++] = 2;
@@ -150,15 +164,15 @@ int sieve_next(double after, int count) {
   // odd numbers only from here on starting at the first odd number > after
   uint64_t low = floor_exclusive < 3 ? 3 : (floor_exclusive + 1) | 1;
 
-  while (written < count && low <= MAX_SAFE_INTEGER) {
+  while (written < count && low <= SIEVE_LIMIT) {
     if (!prepare_segment(low))
       break;
     for (uint64_t i = 0; i < SEGMENT_BYTES && written < count; i++) {
       uint64_t n = low + 2 * i;
-      if (n > MAX_SAFE_INTEGER)
+      if (n > SIEVE_LIMIT)
         return written;
       if (!segment[i])
-        output[written++] = (double)n;
+        output[written++] = n;
     }
     low += 2ULL * SEGMENT_BYTES;
   }
@@ -168,14 +182,14 @@ int sieve_next(double after, int count) {
 // writes up to count primes strictly less than before into the output buffer in
 // ascending bootstrap_base_primes returns how many were written, fewr when the
 // list reaches 2
-int sieve_prev(double before, int count) {
+int sieve_prev(uint64_t before, int count) {
   if (count > MAX_BATCH)
     count = MAX_BATCH;
   if (before <= 2)
     return 0;
-  uint64_t ceiling_exclusive = (uint64_t)before;
-  if (ceiling_exclusive > MAX_SAFE_INTEGER + 1)
-    ceiling_exclusive = MAX_SAFE_INTEGER + 1;
+  uint64_t ceiling_exclusive = before;
+  if (ceiling_exclusive > SIEVE_LIMIT + 1)
+    ceiling_exclusive = SIEVE_LIMIT + 1;
 
   // collected in decending order then reversed at the end
   int written = 0;
@@ -192,7 +206,7 @@ int sieve_prev(double before, int count) {
       if (n >= upper)
         continue;
       if (!segment[i])
-        output[written++] = (double)n;
+        output[written++] = n;
     }
     upper = low;
   }
@@ -201,7 +215,7 @@ int sieve_prev(double before, int count) {
     output[written++] = 2;
 
   for (int left = 0, right = written - 1; left < right; left++, right--) {
-    double swap = output[left];
+    uint64_t swap = output[left];
     output[left] = output[right];
     output[right] = swap;
   }

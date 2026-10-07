@@ -12,43 +12,47 @@ const BATCH_SIZE = 500;
 
 // ── reference primes for building realistic batches ──────────────────────
 
-const SIEVE_LIMIT = 1_100_000;
+const REFERENCE_SIEVE_LIMIT = 1_100_000;
 const ALL_PRIMES_BELOW_LIMIT: number[] = (() => {
-  const isComposite = new Uint8Array(SIEVE_LIMIT);
+  const isComposite = new Uint8Array(REFERENCE_SIEVE_LIMIT);
   const primes: number[] = [];
-  for (let candidate = 2; candidate < SIEVE_LIMIT; candidate++) {
+  for (let candidate = 2; candidate < REFERENCE_SIEVE_LIMIT; candidate++) {
     if (isComposite[candidate]) continue;
     primes.push(candidate);
-    for (let multiple = candidate * candidate; multiple < SIEVE_LIMIT; multiple += candidate) {
+    for (let multiple = candidate * candidate; multiple < REFERENCE_SIEVE_LIMIT; multiple += candidate) {
       isComposite[multiple] = 1;
     }
   }
   return primes;
 })();
 
+function toBigUint64Array(values: number[]): BigUint64Array {
+  return BigUint64Array.from(values, (value) => BigInt(value));
+}
+
 /** Same contract as the worker's "next": up to `count` primes strictly greater than `from`. */
-function primesAfter(from: number, count = BATCH_SIZE): Float64Array {
-  const startPosition = ALL_PRIMES_BELOW_LIMIT.findIndex((prime) => prime > from);
-  return Float64Array.from(ALL_PRIMES_BELOW_LIMIT.slice(startPosition, startPosition + count));
+function primesAfter(from: bigint, count = BATCH_SIZE): BigUint64Array {
+  const startPosition = ALL_PRIMES_BELOW_LIMIT.findIndex((prime) => BigInt(prime) > from);
+  return toBigUint64Array(ALL_PRIMES_BELOW_LIMIT.slice(startPosition, startPosition + count));
 }
 
 /** Same contract as the worker's "prev": up to `count` primes strictly less than `from`, ascending. */
-function primesBefore(from: number, count = BATCH_SIZE): Float64Array {
-  const endPosition = ALL_PRIMES_BELOW_LIMIT.findIndex((prime) => prime >= from);
-  return Float64Array.from(
+function primesBefore(from: bigint, count = BATCH_SIZE): BigUint64Array {
+  const endPosition = ALL_PRIMES_BELOW_LIMIT.findIndex((prime) => BigInt(prime) >= from);
+  return toBigUint64Array(
     ALL_PRIMES_BELOW_LIMIT.slice(Math.max(0, endPosition - count), endPosition),
   );
 }
 
 /** The exact position of a prime, 2 being #1. */
-function exactOrdinalOf(prime: number): number {
-  return ALL_PRIMES_BELOW_LIMIT.indexOf(prime) + 1;
+function exactOrdinalOf(prime: bigint): bigint {
+  return BigInt(ALL_PRIMES_BELOW_LIMIT.indexOf(Number(prime)) + 1);
 }
 
 // ── helpers that act like the hook ───────────────────────────────────────
 
-function jumpTo(target: number): Batch[] {
-  return addBatch([], primesAfter(target - 1), "next").batches;
+function jumpTo(target: bigint): Batch[] {
+  return addBatch([], primesAfter(target - 1n), "next").batches;
 }
 
 function scrollDownOneBatch(batches: Batch[]): Batch[] {
@@ -67,7 +71,7 @@ function labelledRows(batches: Batch[]) {
   return batches.flatMap((batch) =>
     Array.from(batch.primes, (prime, positionInBatch) => ({
       prime,
-      ordinal: batch.ordinalOfFirstPrime + positionInBatch,
+      ordinal: batch.ordinalOfFirstPrime + BigInt(positionInBatch),
       isEstimate: batch.ordinalIsEstimate,
     })),
   );
@@ -80,7 +84,7 @@ function assertLabelsConsecutive(batches: Batch[]) {
     const row = rows[rowIndex];
     assert.equal(
       row.ordinal - rowAbove.ordinal,
-      1,
+      1n,
       `labels jump between ${rowAbove.prime} (#${rowAbove.ordinal}) and ${row.prime} (#${row.ordinal})`,
     );
   }
@@ -89,23 +93,23 @@ function assertLabelsConsecutive(batches: Batch[]) {
 // ── tests ────────────────────────────────────────────────────────────────
 
 describe("labels after a jump", () => {
-  const anchorPrime = 1_000_003; // first prime ≥ 1,000,000
+  const anchorPrime = 1_000_003n; // first prime ≥ 1,000,000
 
   it("estimates the anchor's position once with li(x), and marks it as an estimate", () => {
-    const [seedBatch] = jumpTo(1_000_000);
+    const [seedBatch] = jumpTo(1_000_000n);
     assert.equal(seedBatch.primes[0], anchorPrime);
     assert.equal(seedBatch.ordinalOfFirstPrime, estimatePrimeOrdinal(anchorPrime));
     assert.equal(seedBatch.ordinalIsEstimate, true);
   });
 
   it("the estimate is close: within 0.2% of the exact position", () => {
-    const [seedBatch] = jumpTo(1_000_000);
+    const [seedBatch] = jumpTo(1_000_000n);
     const exact = exactOrdinalOf(anchorPrime); // 78,499
-    assert.ok(Math.abs(seedBatch.ordinalOfFirstPrime - exact) / exact < 0.002);
+    assert.ok(Math.abs(Number(seedBatch.ordinalOfFirstPrime - exact)) / Number(exact) < 0.002);
   });
 
   it("stay consecutive across batch boundaries scrolling up", () => {
-    let batches = jumpTo(1_000_000);
+    let batches = jumpTo(1_000_000n);
     for (let step = 0; step < 5; step++) {
       batches = scrollUpOneBatch(batches);
       assertLabelsConsecutive(batches);
@@ -114,7 +118,7 @@ describe("labels after a jump", () => {
   });
 
   it("stay consecutive across batch boundaries scrolling down", () => {
-    let batches = jumpTo(1_000_000);
+    let batches = jumpTo(1_000_000n);
     for (let step = 0; step < 5; step++) {
       batches = scrollDownOneBatch(batches);
       assertLabelsConsecutive(batches);
@@ -127,7 +131,7 @@ describe("labels after a jump", () => {
     const labelOfAnchor = (batches: Batch[]) =>
       labelledRows(batches).find((row) => row.prime === anchorPrime)?.ordinal;
 
-    let batches = jumpTo(1_000_000);
+    let batches = jumpTo(1_000_000n);
     batches = scrollUpOneBatch(batches);
     batches = scrollDownOneBatch(batches);
     assert.equal(labelOfAnchor(batches), anchorLabel);
@@ -136,7 +140,7 @@ describe("labels after a jump", () => {
   });
 
   it("stay consecutive when batches are dropped to keep the buffer at MAX_BATCHES", () => {
-    let batches = jumpTo(1_000_000);
+    let batches = jumpTo(1_000_000n);
     for (let step = 0; step < 4; step++) batches = scrollDownOneBatch(batches);
     assert.equal(batches.length, MAX_BATCHES);
     assertLabelsConsecutive(batches);
@@ -146,23 +150,59 @@ describe("labels after a jump", () => {
   });
 });
 
+describe("labels past 2^53", () => {
+  // Real primes near 2^63 would take a 64-bit prime finder to produce. The
+  // buffer never checks primality and labels depend only on positions, so
+  // consecutive odd numbers stand in for primes here.
+  function standInBatchAfter(from: bigint): BigUint64Array {
+    const firstOdd = from % 2n === 0n ? from + 1n : from + 2n;
+    return BigUint64Array.from({ length: BATCH_SIZE }, (_, index) => firstOdd + 2n * BigInt(index));
+  }
+  function standInBatchBefore(before: bigint): BigUint64Array {
+    const lastOdd = before % 2n === 0n ? before - 1n : before - 2n;
+    return BigUint64Array.from(
+      { length: BATCH_SIZE },
+      (_, index) => lastOdd - 2n * BigInt(BATCH_SIZE - 1 - index),
+    );
+  }
+
+  it("stay exactly consecutive across batch boundaries in both directions", () => {
+    const jumpPoint = 2n ** 63n;
+    let batches = addBatch([], standInBatchAfter(jumpPoint), "next").batches;
+    // li(2^63) ≈ 2.1 × 10^17: far past 2^53, where a number can't tell n from n + 1.
+    assert.ok(batches[0].ordinalOfFirstPrime > 2n ** 53n);
+
+    for (let step = 0; step < 4; step++) {
+      const lastBatch = batches[batches.length - 1];
+      const largestHeld = lastBatch.primes[lastBatch.primes.length - 1];
+      batches = addBatch(batches, standInBatchAfter(largestHeld), "next").batches;
+      assertLabelsConsecutive(batches);
+    }
+    for (let step = 0; step < 8; step++) {
+      batches = addBatch(batches, standInBatchBefore(batches[0].primes[0]), "prev").batches;
+      assertLabelsConsecutive(batches);
+    }
+    assert.ok(batches.every((batch) => batch.ordinalIsEstimate));
+  });
+});
+
 describe("labels become exact once 2 is in the buffer", () => {
   it("after scrolling all the way back down to 2", () => {
-    let batches = jumpTo(1_000_000);
-    while (batches[0].primes[0] !== 2) {
+    let batches = jumpTo(1_000_000n);
+    while (batches[0].primes[0] !== 2n) {
       batches = scrollUpOneBatch(batches);
     }
     const rows = labelledRows(batches);
     assert.ok(rows.every((row) => !row.isEstimate));
-    assert.deepEqual(rows[0], { prime: 2, ordinal: 1, isEstimate: false });
+    assert.deepEqual(rows[0], { prime: 2n, ordinal: 1n, isEstimate: false });
     for (const row of rows) assert.equal(row.ordinal, exactOrdinalOf(row.prime));
   });
 
   it("and stay exact when scrolling back down after that", () => {
-    let batches = jumpTo(2_000);
-    while (batches[0].primes[0] !== 2) batches = scrollUpOneBatch(batches);
+    let batches = jumpTo(2_000n);
+    while (batches[0].primes[0] !== 2n) batches = scrollUpOneBatch(batches);
     for (let step = 0; step < 5; step++) batches = scrollDownOneBatch(batches);
-    assert.ok(batches[0].primes[0] !== 2, "2 should have been dropped by now");
+    assert.ok(batches[0].primes[0] !== 2n, "2 should have been dropped by now");
     for (const row of labelledRows(batches)) {
       assert.equal(row.isEstimate, false);
       assert.equal(row.ordinal, exactOrdinalOf(row.prime));
@@ -170,24 +210,24 @@ describe("labels become exact once 2 is in the buffer", () => {
   });
 
   it("right away when jumping to a small number whose batch below reaches 2", () => {
-    let batches = jumpTo(100);
+    let batches = jumpTo(100n);
     batches = scrollUpOneBatch(batches); // the hook requests this immediately after a jump
     const rows = labelledRows(batches);
     assert.ok(rows.every((row) => !row.isEstimate));
-    assert.equal(rows.find((row) => row.prime === 101)?.ordinal, 26);
+    assert.equal(rows.find((row) => row.prime === 101n)?.ordinal, 26n);
   });
 
   it("from the start of the app (never jumped)", () => {
-    const batches = jumpTo(2); // the initial load seeds the buffer at 2
+    const batches = jumpTo(2n); // the initial load seeds the buffer at 2
     const rows = labelledRows(batches);
-    assert.deepEqual(rows[0], { prime: 2, ordinal: 1, isEstimate: false });
+    assert.deepEqual(rows[0], { prime: 2n, ordinal: 1n, isEstimate: false });
     assert.ok(rows.every((row) => !row.isEstimate));
   });
 });
 
 describe("rowsAddedAbove", () => {
   it("is −500 when a batch is dropped from the top, +500 when one is added there", () => {
-    let batches = jumpTo(1_000_000);
+    let batches = jumpTo(1_000_000n);
     batches = scrollDownOneBatch(batches);
     batches = scrollDownOneBatch(batches);
     const lastBatch = batches[batches.length - 1];
@@ -201,13 +241,13 @@ describe("rowsAddedAbove", () => {
 describe("estimate banner visibility (bufferLabelsAreEstimated)", () => {
   // The first few primes above 10^12. The reference sieve doesn't reach that
   // far, but a jump only needs the batch's first prime to place its anchor.
-  const PRIMES_ABOVE_ONE_TRILLION = Float64Array.from([
-    1_000_000_000_039, 1_000_000_000_061, 1_000_000_000_063,
+  const PRIMES_ABOVE_ONE_TRILLION = BigUint64Array.from([
+    1_000_000_000_039n, 1_000_000_000_061n, 1_000_000_000_063n,
   ]);
 
   it("is hidden on app start", () => {
     assert.equal(bufferLabelsAreEstimated([]), false); // before the first batch arrives
-    assert.equal(bufferLabelsAreEstimated(jumpTo(2)), false); // the initial load seeds at 2
+    assert.equal(bufferLabelsAreEstimated(jumpTo(2n)), false); // the initial load seeds at 2
   });
 
   it("is shown after jumping to 10^12", () => {
@@ -216,14 +256,14 @@ describe("estimate banner visibility (bufferLabelsAreEstimated)", () => {
   });
 
   it("is hidden after jumping to 100", () => {
-    let batches = jumpTo(100);
+    let batches = jumpTo(100n);
     batches = scrollUpOneBatch(batches); // the hook requests this immediately after a jump
     assert.equal(bufferLabelsAreEstimated(batches), false);
   });
 
   it("hides once the user scrolls back to 2, and stays hidden scrolling forward", () => {
-    let batches = jumpTo(1_000_000);
-    while (batches[0].primes[0] !== 2) {
+    let batches = jumpTo(1_000_000n);
+    while (batches[0].primes[0] !== 2n) {
       assert.equal(bufferLabelsAreEstimated(batches), true);
       batches = scrollUpOneBatch(batches);
     }
@@ -235,7 +275,7 @@ describe("estimate banner visibility (bufferLabelsAreEstimated)", () => {
   });
 
   it("is hidden during normal scrolling from 2", () => {
-    let batches = jumpTo(2);
+    let batches = jumpTo(2n);
     for (let step = 0; step < 5; step++) {
       batches = scrollDownOneBatch(batches);
       assert.equal(bufferLabelsAreEstimated(batches), false);

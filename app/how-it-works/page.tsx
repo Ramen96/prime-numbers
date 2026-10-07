@@ -488,9 +488,15 @@ return EULER_MASCHERONI + Math.log(lnX) + Math.sqrt(x) * sum;`}</code>
       <p>
         That’s <code>Number.MAX_SAFE_INTEGER</code>. Past it, numbers start rounding:{" "}
         <code>2**53 + 1</code> comes out as 9,007,199,254,740,992. A prime finder that silently
-        rounds would show wrong primes, which is worse than showing none. So the site refuses:
-        the jump box won’t accept anything from 2⁵³ − 1 up, and if scrolling ever reaches it,
-        the worker stops and the page announces that you broke math.
+        rounds would show wrong primes, which is worse than showing none. So the site never
+        uses ordinary numbers for the primes the worker finds: from the C sieve to the page,
+        each one is a 64-bit integer, a JavaScript <code>BigInt</code>, which stays exact far
+        past 2⁵³.
+      </p>
+      <p>
+        The limit today is the sieve’s own. It stops at 2⁵³ − 1, because that’s where its base
+        primes stop growing. The jump box won’t accept anything from there up, and if scrolling
+        ever reaches it, the page announces that you broke math.
       </p>
 
       {/* 10 */}
@@ -522,8 +528,10 @@ return EULER_MASCHERONI + Math.log(lnX) + Math.sqrt(x) * sum;`}</code>
         </li>
       </ul>
       <p>
-        The counter measures compute time, not wall-clock time: when you stop scrolling, the
-        worker rests and the counter keeps its last value instead of sinking to zero.
+        The counter measures sieving time, not wall-clock time: when you stop scrolling, the
+        worker rests and the counter keeps its last value instead of sinking to zero. Building
+        base primes, which can take a noticeable moment after a big jump, is timed separately
+        and left out, so the counter shows steady sieving speed.
       </p>
 
       {/* 11 */}

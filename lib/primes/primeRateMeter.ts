@@ -10,8 +10,13 @@
 
 export interface BatchTiming {
   primeCount: number;
-  /** As measured by the worker, so possibly 0 for a fast batch. */
-  measuredDurationMs: number;
+  /** Time spent sieving, as measured by the worker, so possibly 0 for a fast batch. */
+  sievingDurationMs: number;
+  /**
+   * Time spent building base primes first. Recorded but deliberately not
+   * counted: it's one-off setup (a big jump's first batch), not sieving speed.
+   */
+  setupDurationMs: number;
 }
 
 /** Recent batch timings, oldest first. Treat as immutable. */
@@ -46,10 +51,10 @@ export function recordBatch(window: RateWindow, batch: BatchTiming): RateWindow 
     const oldest = updatedWindow[oldestKept];
     const tooManyBatches = updatedWindow.length - oldestKept > MAX_WINDOW_BATCHES;
     const enoughTimeWithoutIt =
-      windowDurationMs - oldest.measuredDurationMs >= MIN_WINDOW_DURATION_MS;
+      windowDurationMs - oldest.sievingDurationMs >= MIN_WINDOW_DURATION_MS;
     if (!tooManyBatches && !enoughTimeWithoutIt) break;
 
-    windowDurationMs -= oldest.measuredDurationMs;
+    windowDurationMs -= oldest.sievingDurationMs;
     oldestKept++;
   }
 
@@ -57,7 +62,7 @@ export function recordBatch(window: RateWindow, batch: BatchTiming): RateWindow 
 }
 
 /**
- * Total primes ÷ total measured time across the window. Batches that measured
+ * Total primes ÷ total sieving time across the window (setup time is ignored). Batches that measured
  * 0 ms count too: their primes are in the total, and so is their 0 ms.
  * Returns null when there's no measured time yet, rather than inventing a number.
  */
@@ -69,5 +74,5 @@ export function measurePrimesPerSecond(window: RateWindow): number | null {
 }
 
 function totalDurationMs(window: RateWindow): number {
-  return window.reduce((sum, batch) => sum + batch.measuredDurationMs, 0);
+  return window.reduce((sum, batch) => sum + batch.sievingDurationMs, 0);
 }

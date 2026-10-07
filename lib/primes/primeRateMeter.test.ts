@@ -33,8 +33,8 @@ function measureWithRoundedTimer(
 
 function recordAll(window: RateWindow, measuredDurationsMs: number[]): RateWindow {
   return measuredDurationsMs.reduce(
-    (currentWindow, measuredDurationMs) =>
-      recordBatch(currentWindow, { primeCount: PRIMES_PER_BATCH, measuredDurationMs }),
+    (currentWindow, sievingDurationMs) =>
+      recordBatch(currentWindow, { primeCount: PRIMES_PER_BATCH, sievingDurationMs, setupDurationMs: 0 }),
     window,
   );
 }
@@ -68,8 +68,8 @@ describe("primeRateMeter", () => {
 
         // Once the window is full, every reading should be close to the truth.
         let window = recordAll(EMPTY_RATE_WINDOW, measuredDurationsMs.slice(0, MAX_WINDOW_BATCHES));
-        for (const measuredDurationMs of measuredDurationsMs.slice(MAX_WINDOW_BATCHES)) {
-          window = recordBatch(window, { primeCount: PRIMES_PER_BATCH, measuredDurationMs });
+        for (const sievingDurationMs of measuredDurationsMs.slice(MAX_WINDOW_BATCHES)) {
+          window = recordBatch(window, { primeCount: PRIMES_PER_BATCH, sievingDurationMs, setupDurationMs: 0 });
           assertWithinPercent(measurePrimesPerSecond(window), trueRate(trueBatchMicroseconds), 12);
         }
       });
@@ -80,6 +80,19 @@ describe("primeRateMeter", () => {
       // 4 batches × 500 primes over 0.1 ms total.
       assert.equal(measurePrimesPerSecond(window), 2000 / 0.0001);
     });
+  });
+
+  it("ignores setup time: building base primes doesn't drag the rate down", () => {
+    // A big jump's first batch: 64 ms building base primes, then 30 ms sieving,
+    // then a 25 ms batch. Together they're needed to cover 50 ms of sieving.
+    let window = recordBatch(EMPTY_RATE_WINDOW, {
+      primeCount: PRIMES_PER_BATCH,
+      sievingDurationMs: 30,
+      setupDurationMs: 64,
+    });
+    window = recordBatch(window, { primeCount: PRIMES_PER_BATCH, sievingDurationMs: 25, setupDurationMs: 0 });
+    assert.equal(window.length, 2);
+    assertWithinPercent(measurePrimesPerSecond(window), 1000 / 0.055, 0.001); // 1,000 primes in 55 ms of sieving
   });
 
   it("shows no rate when everything in the window measured 0 ms", () => {
@@ -106,14 +119,14 @@ describe("primeRateMeter", () => {
   describe("window size", () => {
     it(`keeps at least ${MIN_WINDOW_DURATION_MS} ms of measured time when it can`, () => {
       const window = recordAll(EMPTY_RATE_WINDOW, Array(30).fill(4));
-      const windowDurationMs = window.reduce((sum, batch) => sum + batch.measuredDurationMs, 0);
+      const windowDurationMs = window.reduce((sum, batch) => sum + batch.sievingDurationMs, 0);
       assert.ok(windowDurationMs >= MIN_WINDOW_DURATION_MS);
       assert.ok(windowDurationMs - 4 < MIN_WINDOW_DURATION_MS, "but no more than it needs");
     });
 
     it("drops old fast batches as soon as one slow batch covers the minimum time", () => {
       let window = recordAll(EMPTY_RATE_WINDOW, Array(MAX_WINDOW_BATCHES).fill(0.05));
-      window = recordBatch(window, { primeCount: PRIMES_PER_BATCH, measuredDurationMs: 80 });
+      window = recordBatch(window, { primeCount: PRIMES_PER_BATCH, sievingDurationMs: 80, setupDurationMs: 0 });
       assert.equal(window.length, 1);
       assert.equal(measurePrimesPerSecond(window), PRIMES_PER_BATCH / 0.08);
     });

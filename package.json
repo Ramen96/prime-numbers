@@ -5,7 +5,7 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "build:wasm": "emcc wasm/sieve.c -O3 --no-entry -sSTANDALONE_WASM -sALLOW_MEMORY_GROWTH -sEXPORTED_FUNCTIONS=_sieve_next,_sieve_prev,_output_buffer -o public/sieve.wasm",
+    "build:wasm": "emcc wasm/sieve.c -O3 --no-entry -sSTANDALONE_WASM -sALLOW_MEMORY_GROWTH -sWASM_BIGINT -sEXPORTED_FUNCTIONS=_sieve_next,_sieve_prev,_output_buffer,_base_prime_limit,_extend_base_primes -o public/sieve.wasm",
     "start": "next start",
     "lint": "eslint",
     "test": "npm run test:unit && npm run test:native",
