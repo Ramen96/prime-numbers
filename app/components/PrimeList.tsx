@@ -394,7 +394,7 @@ export function PrimeList({
         ref={scrollContainerRef}
         data-testid="prime-list"
         data-status={status}
-        className={`${scrollbar.themedScrollbar} min-h-0 flex-1 overflow-y-auto [overflow-anchor:none]`}
+        className={`${scrollbar.themedScrollbar} min-h-0 flex-1 overflow-x-hidden overflow-y-auto [overflow-anchor:none]`}
         onScroll={handleScroll}
       >
         <div className="relative w-full" style={{ height: totalScreenRows * ROW_HEIGHT_PX }}>

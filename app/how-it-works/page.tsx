@@ -10,7 +10,7 @@ const PAGE_PATH = "/how-it-works";
 const PAGE_TITLE = "How It Works: Sieves, Prime Counting and Big Numbers | Every Prime Number";
 const PAGE_HEADLINE = "How Every Prime Number works";
 const PAGE_DESCRIPTION =
-  "How Every Prime Number finds primes live in your browser: the segmented sieve of Eratosthenes, a constant-memory infinite scroll, estimating π(x) with li(x), and fun facts about primes.";
+  "How Every Prime Number finds primes live in your browser: the segmented sieve of Eratosthenes on several threads, a constant-memory infinite scroll, estimating π(x) with li(x), numbers bigger than 64 bits as 32-bit limbs, and fun facts about primes.";
 
 export const metadata = pageMetadata({
   title: PAGE_TITLE,
@@ -37,6 +37,8 @@ const SECTIONS = [
   { id: "ramanujan-series", title: "Computing li(x) with Ramanujan’s series" },
   { id: "estimated-positions", title: "How the site estimates a prime’s position after a jump" },
   { id: "javascript-number-limit", title: "What is the largest number JavaScript can store exactly?" },
+  { id: "numbers-bigger-than-64-bits", title: "How to work with numbers bigger than 64 bits: 32-bit limbs" },
+  { id: "displaying-long-primes", title: "How the list shows primes too long for the screen" },
   { id: "measuring-speed", title: "Why measuring speed in a browser is harder than it looks" },
   { id: "fun-facts", title: "Fun facts about prime numbers" },
 ] as const;
@@ -347,7 +349,8 @@ function sieveSegment(low, high, basePrimes, isComposite) {
       <SectionHeading id="ramanujan-series" />
       <p>
         The integral above can’t be computed directly with a calculator button. The site uses a
-        series found by Srinivasa Ramanujan, which converges quickly for any <code>x</code>:
+        series found by Srinivasa Ramanujan, which converges quickly for every <code>x</code>{" "}
+        it needs:
       </p>
       <math display="block">
         <mrow>
@@ -457,7 +460,7 @@ let sum = 0;
 let powerOverFactorial = 1; // (ln x)^n / (n! · 2^(n−1))
 let oddReciprocalSum = 0;   // 1 + 1/3 + 1/5 + …
 
-for (let n = 1; n <= 200; n++) {
+for (let n = 1; n <= 2000; n++) {
   powerOverFactorial *= n === 1 ? lnX : lnX / (2 * n);
   if (n % 2 === 1) oddReciprocalSum += 1 / n;
   const term = (n % 2 === 1 ? 1 : -1) * powerOverFactorial * oddReciprocalSum;
@@ -469,6 +472,54 @@ return EULER_MASCHERONI + Math.log(lnX) + Math.sqrt(x) * sum;`}
       <p>
         The site’s tests check it against known values: li(10⁶) ≈ 78,627.5, li(10⁹) ≈
         50,849,234.9 and li(10¹²) ≈ 37,607,950,280.8, all to within 0.1.
+      </p>
+      <p>
+        Past 10³⁰⁰, li(x) is too big for a JavaScript number, so the site switches to the
+        asymptotic expansion{" "}
+        <math>
+          <mrow>
+            <mi>li</mi>
+            <mo>(</mo>
+            <mi>x</mi>
+            <mo>)</mo>
+          </mrow>
+          <mo>≈</mo>
+          <mfrac>
+            <mi>x</mi>
+            <mrow>
+              <mi>ln</mi>
+              <mspace width="0.17em" />
+              <mi>x</mi>
+            </mrow>
+          </mfrac>
+          <munderover>
+            <mo>∑</mo>
+            <mrow>
+              <mi>k</mi>
+              <mo>=</mo>
+              <mn>0</mn>
+            </mrow>
+            <mi>K</mi>
+          </munderover>
+          <mfrac>
+            <mrow>
+              <mi>k</mi>
+              <mo>!</mo>
+            </mrow>
+            <msup>
+              <mrow>
+                <mo>(</mo>
+                <mi>ln</mi>
+                <mspace width="0.17em" />
+                <mi>x</mi>
+                <mo>)</mo>
+              </mrow>
+              <mi>k</mi>
+            </msup>
+          </mfrac>
+        </math>
+        , with <em>K</em> where its terms are smallest, and does the final multiplication by{" "}
+        <em>x</em> in <code>BigInt</code>.
       </p>
 
       {/* 8 */}
@@ -519,10 +570,9 @@ return EULER_MASCHERONI + Math.log(lnX) + Math.sqrt(x) * sum;`}
         each one is a JavaScript <code>BigInt</code>, exact at any size.
       </p>
       <p>
-        Past 2⁶⁴, even C’s largest built-in integers run out, so the sieve keeps big numbers as
-        arrays of 32-bit pieces (“limbs”), with as many as a number needs. Only where a segment
-        starts is a big number; inside a segment everything is a small offset, so the inner
-        loop is the same as before.
+        Past 2⁶⁴, even C’s largest built-in integers run out, so the sieve builds its own big
+        numbers out of 32-bit pieces. That gets{" "}
+        <a href="#numbers-bigger-than-64-bits">its own section below</a>.
       </p>
       <p>
         The real limit is memory. To sieve near <em>x</em>, the worker first needs every prime
@@ -546,6 +596,145 @@ return EULER_MASCHERONI + Math.log(lnX) + Math.sqrt(x) * sum;`}
       </p>
 
       {/* 10 */}
+      <SectionHeading id="numbers-bigger-than-64-bits" />
+      <p>
+        Inside the sieve, a window that stays below 2⁶⁴ works with plain 64-bit integers
+        (<code>uint64_t</code> in C), the fast path. A window that reaches 2⁶⁴ works with
+        numbers made of 32-bit <strong>limbs</strong>: an array of them, least significant
+        first, plus a count of how many there are:
+      </p>
+      <math display="block">
+        <mi>x</mi>
+        <mo>=</mo>
+        <msub>
+          <mi>ℓ</mi>
+          <mn>0</mn>
+        </msub>
+        <mo>+</mo>
+        <msub>
+          <mi>ℓ</mi>
+          <mn>1</mn>
+        </msub>
+        <mo>·</mo>
+        <msup>
+          <mn>2</mn>
+          <mn>32</mn>
+        </msup>
+        <mo>+</mo>
+        <msub>
+          <mi>ℓ</mi>
+          <mn>2</mn>
+        </msub>
+        <mo>·</mo>
+        <msup>
+          <mn>2</mn>
+          <mn>64</mn>
+        </msup>
+        <mo>+</mo>
+        <mo>⋯</mo>
+      </math>
+      <p>
+        There’s no fixed maximum: a number gets as many limbs as it needs. The first prime past
+        2⁶⁴, 18,446,744,073,709,551,629, is three limbs: 13, 0 and 1, because it equals 13 + 0 ·
+        2³² + 1 · 2⁶⁴. The sieve needs only a few operations on these: compare, add or subtract a
+        small number (to step from one window to the next), a square root that may round up
+        but never down (to know which base primes a window needs), and the one that does the
+        real work, <strong>big mod small</strong>. The tests run the big-number code below 2⁶⁴
+        too, where it has to find exactly the same primes as the fast path.
+      </p>
+
+      <h3 id="big-mod-small">Where a base prime lands: big mod small</h3>
+      <p>
+        To cross off the multiples of a base prime <em>p</em> in a window starting at{" "}
+        <code>low</code>, the sieve needs the first multiple of <em>p</em> at or after{" "}
+        <code>low</code>, and that comes from the remainder <code>low mod p</code>. It’s long
+        division done one limb at a time, from the most significant down, the way you’d divide
+        by hand one digit at a time, except that each digit is 32 bits:
+      </p>
+      <math display="block">
+        <mi>r</mi>
+        <mo>←</mo>
+        <mrow>
+          <mo>(</mo>
+          <mi>r</mi>
+          <mo>·</mo>
+          <msup>
+            <mn>2</mn>
+            <mn>32</mn>
+          </msup>
+          <mo>+</mo>
+          <msub>
+            <mi>ℓ</mi>
+            <mi>i</mi>
+          </msub>
+          <mo>)</mo>
+        </mrow>
+        <mspace width="0.3em" />
+        <mi>mod</mi>
+        <mspace width="0.3em" />
+        <mi>p</mi>
+      </math>
+      <CodeBlock
+        language="c"
+        code={`// low mod p: one 32-bit limb at a time, most significant first
+uint64_t remainder = 0;
+for (size_t index = limb_count; index-- > 0;)
+  remainder = ((remainder << 32) | limbs[index]) % p;`}
+      />
+      <p>
+        The first multiple is then <em>p</em> − <em>r</em> past <code>low</code> (or right at it
+        if <em>r</em> is 0). Segments hold only odd numbers, so if that lands on an even
+        number, it moves on by one more <em>p</em>.
+      </p>
+
+      <h3 id="small-inner-loop">Why the inner loop never touches a big number</h3>
+      <p>
+        Everything after that is small. A window covers 65,536 numbers, so every position in
+        it is an offset below 65,536, and the marking loop is the same one the fast path uses:
+        start at the first offset and step by <em>p</em>. The big-number arithmetic happens
+        once per base prime per window, never once per multiple. Primes leave the sieve the
+        same way: the window’s first prime as limbs, and every other prime as a small offset
+        from it. JavaScript rebuilds each one as a <code>BigInt</code>, most significant limb
+        first, with <code>(result &lt;&lt; 32n) | limb</code>, so no prime ever passes through an
+        ordinary JavaScript number.
+      </p>
+
+      <h3 id="64-bit-remainder">Why the remainder uses 64-bit arithmetic in WebAssembly</h3>
+      <p>
+        The remainder <em>r</em> is always less than <em>p</em>. While <em>p</em> is below 2³²,{" "}
+        <em>r</em> · 2³² + a limb is below 2⁶⁴, so each step is one 64-bit division, a single
+        WebAssembly instruction. A base prime of 2³² or more would need a 128-bit intermediate,
+        and WebAssembly has no 128-bit division at all: the compiler turns it into a call to a
+        software routine. Every base prime stays below 2³² until about 2⁶⁴ + 1.3 × 10¹¹ (that’s
+        where (2³² + 15)², the next prime’s square, falls), so the sieve uses the 64-bit version
+        whenever it can and keeps the 128-bit one for the rest. Near 2⁶⁴, that alone made a
+        batch on one thread about five times faster: from 2.6 seconds to under half a second.
+      </p>
+      <p>
+        <strong>Planned, not built yet:</strong> a GPU version, using WebGPU, to test candidates
+        further out. GPU shaders only have 32-bit integers, which is one reason the limbs are
+        32 bits: the same representation will work there.
+      </p>
+
+      {/* 11 */}
+      <SectionHeading id="displaying-long-primes" />
+      <p>
+        Every row in the list has the same height, 44 pixels. That’s what lets the list draw
+        only the rows near the screen and still know exactly where every row is. So a prime too
+        long for its row can’t wrap onto a second line. Instead it’s shortened in the middle,
+        at the commas, keeping as many digit groups as fit from each end:
+        18,446,744,…,551,629. The first and last groups always stay. Tap or click a shortened
+        prime and a small popup shows every digit, how many there are, and a Copy button.
+      </p>
+      <p>
+        How much fits is worked out without measuring each row. The primes are set in a font
+        where every digit has the same width, so the list measures a digit, a comma and the
+        “…” once, and again when the window changes size; the rest is arithmetic. Screen readers
+        always get the whole number, and primes that fit are left exactly as they are. The
+        frontier and records under the counter work the same way.
+      </p>
+
+      {/* 12 */}
       <SectionHeading id="measuring-speed" />
       <p>
         The primes-per-second counter is the joke of the site: it starts huge and sinks as the
@@ -581,7 +770,7 @@ return EULER_MASCHERONI + Math.log(lnX) + Math.sqrt(x) * sum;`}
         timing runs that decide when to split a segment across threads.
       </p>
 
-      {/* 11 */}
+      {/* 13 */}
       <SectionHeading id="fun-facts" />
 
       <h3 id="infinitely-many-primes">Why are there infinitely many primes?</h3>
