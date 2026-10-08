@@ -1,11 +1,15 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
+  basePrimeBudgetWithin,
   basePrimeMemoryBudget,
   basePrimesCouldFit,
   estimatedBasePrimeBytes,
   fewestBasePrimeBytes,
   LARGEST_BASE_PRIME_BUDGET_BYTES,
+  moduleMemoryBudget,
+  sharedMemoryMaximumsToTry,
+  WASM_PAGE_BYTES,
   shouldRestartWorkerToReleaseMemory,
 } from "./memoryBudget.ts";
 import { basePrimeLimitNeededFor } from "./wasmSieve.ts";
@@ -23,20 +27,53 @@ const PRIMES_BELOW_POWERS_OF_TEN = [
 /** Bytes sieve.c actually stores for base primes below x: one per odd prime after 3. */
 const storedBytes = (primeCount: bigint) => Number(primeCount - 2n);
 
-describe("basePrimeMemoryBudget", () => {
-  it("is half the device's memory, up to what a 4 GiB module can hold", () => {
-    assert.equal(basePrimeMemoryBudget(0.5), 0.25 * GiB);
-    assert.equal(basePrimeMemoryBudget(4), 2 * GiB);
+describe("memory budgets", () => {
+  it("are a quarter of the device's memory for the whole module, up to 4 GiB", () => {
+    assert.equal(moduleMemoryBudget(0.5), 128 * MiB);
+    assert.equal(moduleMemoryBudget(4), 1 * GiB);
     // browsers cap deviceMemory at 8, meaning "8 or more"
-    assert.equal(basePrimeMemoryBudget(8), LARGEST_BASE_PRIME_BUDGET_BYTES);
-    assert.equal(basePrimeMemoryBudget(64), LARGEST_BASE_PRIME_BUDGET_BYTES);
-    assert.ok(LARGEST_BASE_PRIME_BUDGET_BYTES > 3.9 * GiB);
+    assert.equal(moduleMemoryBudget(8), 2 * GiB);
+    assert.equal(moduleMemoryBudget(64), 4 * GiB);
   });
 
-  it("is null (grow until an allocation fails) when the browser doesn't say", () => {
+  it("leave base primes all but an allowance for the rest of the module", () => {
+    assert.equal(basePrimeMemoryBudget(4), 1 * GiB - 64 * MiB);
+    assert.equal(basePrimeMemoryBudget(8), 2 * GiB - 64 * MiB);
+    assert.equal(basePrimeMemoryBudget(64), LARGEST_BASE_PRIME_BUDGET_BYTES);
+    assert.equal(LARGEST_BASE_PRIME_BUDGET_BYTES, 4 * GiB - 64 * MiB);
+    // a small budget keeps at least half for base primes
+    assert.equal(basePrimeMemoryBudget(0.25), 32 * MiB);
+    assert.equal(basePrimeBudgetWithin(100 * MiB), 50 * MiB);
+  });
+
+  it("are null (grow until an allocation fails) when the browser doesn't say", () => {
+    assert.equal(moduleMemoryBudget(undefined), null);
     assert.equal(basePrimeMemoryBudget(undefined), null);
     assert.equal(basePrimeMemoryBudget(0), null);
     assert.equal(basePrimeMemoryBudget(Number.NaN), null);
+  });
+
+  it("come in whole Wasm pages", () => {
+    const budget = moduleMemoryBudget(3.3);
+    assert.ok(budget !== null && budget % WASM_PAGE_BYTES === 0);
+  });
+});
+
+describe("sharedMemoryMaximumsToTry", () => {
+  it("tries the budget first, then halves down to 256 MiB", () => {
+    assert.deepEqual(sharedMemoryMaximumsToTry(2 * GiB), [2 * GiB, 1 * GiB, 512 * MiB, 256 * MiB]);
+  });
+
+  it("tries 4 GiB first when the browser doesn't report its memory (iOS Safari refuses that)", () => {
+    assert.deepEqual(sharedMemoryMaximumsToTry(null), [4 * GiB, 2 * GiB, 1 * GiB, 512 * MiB, 256 * MiB]);
+  });
+
+  it("tries nothing below 256 MiB, which means the standalone build", () => {
+    assert.deepEqual(sharedMemoryMaximumsToTry(128 * MiB), []);
+  });
+
+  it("keeps every maximum in whole pages", () => {
+    for (const maximum of sharedMemoryMaximumsToTry(1.3 * GiB)) assert.equal(maximum % WASM_PAGE_BYTES, 0);
   });
 });
 

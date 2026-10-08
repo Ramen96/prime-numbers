@@ -27,6 +27,8 @@ export interface RawSieveExports {
   set_base_prime_memory_budget(bytes: number): void;
   reserve_base_prime_storage(bytes: number): number;
   base_prime_memory_bytes(): number;
+  /** Threaded build only: time spent measuring where splitting pays, since last asked. */
+  take_measuring_ms?(): number;
 }
 
 /** A uint64_t returned by a Wasm function, as the unsigned value C meant. */
@@ -46,6 +48,11 @@ export interface SieveBatch {
   /** Ascending, exact, any size. */
   primes: bigint[];
   reachedMemoryLimit: boolean;
+  /**
+   * Part of the call spent measuring where splitting windows across threads
+   * pays (threaded build only): setup, not sieving speed.
+   */
+  measuringMs: number;
 }
 
 /** Splits a non-negative BigInt into 32-bit limbs, least significant first. */
@@ -110,7 +117,7 @@ export class WasmSieve {
     const raw = this.#raw;
     const requestLimbs = toLimbs(from);
     const requestPointer = unsigned32(raw.request_buffer(requestLimbs.length));
-    if (requestLimbs.length > 0 && requestPointer === 0) return { primes: [], reachedMemoryLimit: true };
+    if (requestLimbs.length > 0 && requestPointer === 0) return { primes: [], reachedMemoryLimit: true, measuringMs: 0 };
     // A fresh view after every call: memory growth detaches old ones.
     new Uint32Array(raw.memory.buffer, requestPointer, requestLimbs.length).set(requestLimbs);
 
@@ -120,7 +127,8 @@ export class WasmSieve {
         : raw.sieve_prev(requestLimbs.length, count),
     );
     const reachedMemoryLimit = raw.batch_reached_memory_limit() !== 0;
-    if (primeCount === 0) return { primes: [], reachedMemoryLimit };
+    const measuringMs = raw.take_measuring_ms?.() ?? 0;
+    if (primeCount === 0) return { primes: [], reachedMemoryLimit, measuringMs };
 
     const base = fromLimbs(
       new Uint32Array(
@@ -130,7 +138,7 @@ export class WasmSieve {
       ),
     );
     const offsets = new BigUint64Array(raw.memory.buffer, unsigned32(raw.batch_offset_buffer()), primeCount);
-    return { primes: Array.from(offsets, (offset) => base + offset), reachedMemoryLimit };
+    return { primes: Array.from(offsets, (offset) => base + offset), reachedMemoryLimit, measuringMs };
   }
 }
 

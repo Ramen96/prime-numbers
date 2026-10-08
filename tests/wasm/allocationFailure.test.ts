@@ -52,7 +52,7 @@ describe("a real allocation failure in Wasm", () => {
 
   it("reports the memory limit for a batch that needs more, with nothing guessed", () => {
     const batch = sieve.findPrimes("next", 10n ** 20n, 500); // needs base primes up to 10^10
-    assert.deepEqual(batch, { primes: [], reachedMemoryLimit: true });
+    assert.deepEqual(batch, { primes: [], reachedMemoryLimit: true, measuringMs: 0 });
   });
 
   it("still finds exactly the right primes afterwards", () => {

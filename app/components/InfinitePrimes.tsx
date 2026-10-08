@@ -47,6 +47,7 @@ export function InfinitePrimes({ intro, firstBatchFromServer }: Props) {
     lastBasePrimeSetupMs,
     lastVerificationMs,
     basePrimeMemoryBytes,
+    sievingThreads,
     errorMessage,
     calculationIsSlow,
     reachedMemoryLimit,
@@ -146,12 +147,14 @@ export function InfinitePrimes({ intro, firstBatchFromServer }: Props) {
               <dd className="text-foreground">
                 {lastBasePrimeSetupMs === null
                   ? "—"
-                  : `built in ${formatBatchDuration(lastBasePrimeSetupMs)}`}
+                  : `set up in ${formatBatchDuration(lastBasePrimeSetupMs)}`}
               </dd>
               <dt>memory</dt>
               <dd className="text-foreground">
                 {basePrimeMemoryBytes === null ? "—" : `${formatMemory(basePrimeMemoryBytes)} of base primes`}
               </dd>
+              <dt>threads</dt>
+              <dd className="text-foreground">{sievingThreads ?? "—"}</dd>
               <dt>checked</dt>
               <dd className="text-foreground">
                 {lastVerificationMs === null ? "—" : `in ${formatBatchDuration(lastVerificationMs)}`}

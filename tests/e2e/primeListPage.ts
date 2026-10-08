@@ -1,4 +1,4 @@
-import { expect, type Locator, type Page } from "@playwright/test";
+import { expect, type Locator, type Page, type Worker } from "@playwright/test";
 
 export const ROW_HEIGHT_PX = 44;
 export const ESTIMATE_BANNER_TEXT =
@@ -12,6 +12,34 @@ export interface VisibleRow {
   ordinal: number;
   /** Distance from the top of the browser window, in px. */
   topPx: number;
+}
+
+/** A sieve thread: one of the workers the threaded build starts inside the prime worker. */
+export function isSieveThread(worker: Worker): boolean {
+  return new URL(worker.url()).pathname === "/sieve-threads/sieve.mjs";
+}
+
+/** A Miller–Rabin worker, also nested inside the prime worker. */
+export function isVerificationWorker(worker: Worker): boolean {
+  return worker.url().includes("verification");
+}
+
+/** Collects the page's prime workers as they start (not the workers nested inside them). */
+export function collectPrimeWorkers(page: Page): Worker[] {
+  const workers: Worker[] = [];
+  page.on("worker", (worker) => {
+    if (!isSieveThread(worker) && !isVerificationWorker(worker)) workers.push(worker);
+  });
+  return workers;
+}
+
+/** Collects every sieve thread as it starts. */
+export function collectSieveThreads(page: Page): Worker[] {
+  const threads: Worker[] = [];
+  page.on("worker", (worker) => {
+    if (isSieveThread(worker)) threads.push(worker);
+  });
+  return threads;
 }
 
 /** Helpers for driving the Infinite Primes page the way a user would. */

@@ -84,6 +84,8 @@ export interface PrimeBuffer {
   lastBatchDurationMs: number | null;
   /** How long building base primes took the last time it was needed; null before then. */
   lastBasePrimeSetupMs: number | null;
+  /** Threads sieving each window (1 on the single-threaded fallback); null until the first batch. */
+  sievingThreads: number | null;
   /** Bytes the worker holds for base primes; null until it has reported. */
   basePrimeMemoryBytes: number | null;
   /** How long re-checking the last batch with Miller–Rabin took; null before the first. */
@@ -145,6 +147,7 @@ export function usePrimeBuffer(firstBatchFromServer: readonly string[]): PrimeBu
   const [lastBasePrimeSetupMs, setLastBasePrimeSetupMs] = useState<number | null>(null);
   const [lastVerificationMs, setLastVerificationMs] = useState<number | null>(null);
   const [basePrimeMemoryBytes, setBasePrimeMemoryBytes] = useState<number | null>(null);
+  const [sievingThreads, setSievingThreads] = useState<number | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [calculationIsSlow, setCalculationIsSlow] = useState(false);
   const [lastJump, setLastJump] = useState<JumpResult | null>(null);
@@ -391,6 +394,7 @@ export function usePrimeBuffer(firstBatchFromServer: readonly string[]): PrimeBu
       const { primes: newPrimes, sievingDurationMs, setupDurationMs, direction } = response;
       if (setupDurationMs > 0) setLastBasePrimeSetupMs(setupDurationMs);
       setLastVerificationMs(response.verificationDurationMs);
+      setSievingThreads(response.threads);
       if (response.reachedMemoryLimit && direction === "next") {
         // These primes are proven; nothing after them could be checked.
         memoryLimitReachedRef.current = true;
@@ -525,6 +529,7 @@ export function usePrimeBuffer(firstBatchFromServer: readonly string[]): PrimeBu
     lastBasePrimeSetupMs,
     lastVerificationMs,
     basePrimeMemoryBytes,
+    sievingThreads,
     errorMessage,
     calculationIsSlow,
     reachedMemoryLimit,

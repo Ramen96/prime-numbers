@@ -202,9 +202,21 @@ function sieveSegment(low, high, basePrimes, isComposite) {
       <p>
         A batch on the site is always 500 primes, not a fixed range of numbers. Primes thin out
         as numbers grow, so each batch covers a wider stretch of numbers, and every segment has
-        more base primes to cross off with. On a recent laptop a batch near a million takes
-        about 0.04 ms; near a trillion, 0.2 ms; near 2⁵³, about 6 ms; near 2⁶⁴, about half a
-        second. That’s the slowdown the counter shows.
+        more base primes to cross off with. On a recent laptop, sieving on 9 threads, a batch
+        near a million takes about 0.03 ms; near a trillion, 0.2 ms; near 2⁵³, about 2 ms; near
+        2⁶⁴, about an eighth of a second. That’s the slowdown the counter shows.
+      </p>
+      <p>
+        On a device with several cores, the sieve runs on several threads at once: one fewer
+        than the cores, so the page keeps one for scrolling. A batch of 500 primes almost always
+        fits in a single segment, so the threads don’t each take a segment of their own. They
+        share one, each crossing off with its own slice of the base primes, and their marks are
+        combined at the end. Splitting only pays once a segment needs a lot of base primes, so
+        the worker measures where that starts on your device. Building the base primes is split
+        the other way: each thread sieves a whole segment of its own. Threads need shared
+        memory, which browsers allow only on cross-origin isolated pages; where they can’t
+        start, the worker sieves on one thread instead. The primes are the same either way,
+        just slower, and the “threads” line under the counter shows which you have.
       </p>
       <p>
         Before a batch is shown, every prime in it is checked again by a completely separate
@@ -212,8 +224,9 @@ function sieveSegment(low, high, basePrimes, isComposite) {
         With the first 13 primes as its test bases, it’s proven never to call a composite prime
         below about 3.3 × 10²⁴, beyond anything the sieve can reach in a browser’s memory. If
         the two ever disagreed, the site would stop with an error rather than show the disputed
-        number. The check takes about 1 ms per batch near a million and about 30 ms near 2⁶⁴.
-        It appears separately under “checked” and doesn’t count toward the speed.
+        number. The check takes about 1 ms per batch near a million. For big primes it’s split
+        between several background workers, about 2 ms near 2⁶³ on a laptop instead of 9 ms on
+        one core. It appears separately under “checked” and doesn’t count toward the speed.
       </p>
 
       {/* 5 */}
@@ -247,8 +260,8 @@ function sieveSegment(low, high, basePrimes, isComposite) {
       </p>
       <p>
         The worker only computes when the buffer asks for more, so it never races ahead into
-        numbers nobody has scrolled to. When it is working, it runs flat out in a background
-        thread, so the page stays responsive.
+        numbers nobody has scrolled to. When it is working, it runs flat out in background
+        threads, leaving one core free, so the page stays responsive.
       </p>
 
       {/* 6 */}
@@ -517,10 +530,15 @@ return EULER_MASCHERONI + Math.log(lnX) + Math.sqrt(x) * sum;`}
         prime it could prove and says so, rather than guessing or skipping ahead.
       </p>
       <p>
-        How much memory that is comes from your device, not from the code: half of its memory
-        where the browser reports it, up to the 4 GB a WebAssembly module can address. Where
-        the browser doesn’t say, the worker keeps growing until an allocation fails, and then
-        puts its base primes back exactly as they were. Before a jump, it works out the least
+        How much memory that is comes from your device, not from the code: a quarter of its
+        memory where the browser reports it (browsers report at most 8 GB, so at most 2 GB).
+        Stopping early with an honest notice is better than the browser closing the tab. Where
+        the browser doesn’t say, the worker keeps growing until an allocation fails, at most to
+        the 4 GB a WebAssembly module can address, and then puts its base primes back exactly
+        as they were. The threaded sieve’s shared memory has to be reserved in full up front,
+        so it’s sized from the same budget; some browsers won’t reserve much (iOS Safari refuses
+        4 GB), so where one says no, the worker asks for half, then half again. Before a jump,
+        it works out the least
         memory the base primes could possibly need; if even that won’t fit, it says so straight
         away instead of building for minutes first. A WebAssembly module’s memory never shrinks,
         so after a far jump, jumping back somewhere smaller starts a fresh worker to give the
@@ -557,9 +575,10 @@ return EULER_MASCHERONI + Math.log(lnX) + Math.sqrt(x) * sum;`}
       </ul>
       <p>
         The counter measures sieving time, not wall-clock time: when you stop scrolling, the
-        worker rests and the counter keeps its last value instead of sinking to zero. Building
-        base primes, which can take a noticeable moment after a big jump, is timed separately
-        and left out, so the counter shows steady sieving speed.
+        worker rests and the counter keeps its last value instead of sinking to zero. Setting
+        up after a big jump is timed separately and left out, so the counter shows steady
+        sieving speed: building base primes, which can take a noticeable moment, and the brief
+        timing runs that decide when to split a segment across threads.
       </p>
 
       {/* 11 */}

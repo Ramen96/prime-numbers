@@ -1,10 +1,13 @@
 // How much memory the base primes may use, how much a batch will need, and
 // when to restart the worker to give memory back.
 //
-// The limit is the device, not the code (CLAUDE.md, rule 2). sieve.wasm is
-// built with -sMAXIMUM_MEMORY=4GB, all a 32-bit Wasm module can address. The
-// budget is half the device's memory where the browser reports it; otherwise
-// there's no budget and the base primes grow until an allocation fails. Either
+// The limit is the device, not the code (CLAUDE.md, rule 2). Both builds can
+// address 4 GiB, all a 32-bit Wasm module can. The budget is for the whole
+// module: a quarter of the device's memory where the browser reports it.
+// Base primes get the budget minus an allowance for everything else. The
+// threaded build's shared memory is created with the budget as its maximum,
+// so nothing in the module can pass it; where the browser doesn't report its
+// memory, the largest maximum it agrees to reserve is used instead. Either
 // way, a failed allocation rolls the base primes back (wasm/sieve.c) and the
 // list stops at the last proven prime.
 
@@ -13,28 +16,63 @@ import { logarithmicIntegral } from "./logarithmicIntegral.ts";
 /** All a wasm32 module can address (and what `npm run build:wasm` allows). */
 export const WASM_ADDRESS_SPACE_BYTES = 2 ** 32;
 
+/** Wasm memory comes in pages of 64 KiB. */
+export const WASM_PAGE_BYTES = 65_536;
+
 /**
- * Left for everything that isn't base primes: the 32 KB segment, the batch
- * buffers, the stack, malloc's own bookkeeping.
+ * Left for everything in the module that isn't base primes: its 16 MB
+ * starting memory (code, stack, the 32 KB segment, batch buffers), each
+ * sieving thread's stack and copy of the segment, malloc's own bookkeeping.
+ * At most half of a small budget.
  */
-const NON_BASE_PRIME_HEADROOM_BYTES = 64 * 2 ** 20;
+const NON_BASE_PRIME_ALLOWANCE_BYTES = 64 * 2 ** 20;
+
+/** The base-prime budget within a module that may use `moduleBytes` in all. */
+export function basePrimeBudgetWithin(moduleBytes: number): number {
+  return moduleBytes - Math.min(NON_BASE_PRIME_ALLOWANCE_BYTES, Math.floor(moduleBytes / 2));
+}
 
 /** The most the base primes could ever use, on any device. */
-export const LARGEST_BASE_PRIME_BUDGET_BYTES = WASM_ADDRESS_SPACE_BYTES - NON_BASE_PRIME_HEADROOM_BYTES;
+export const LARGEST_BASE_PRIME_BUDGET_BYTES = basePrimeBudgetWithin(WASM_ADDRESS_SPACE_BYTES);
 
 /**
- * The base-prime budget for a device with `deviceMemoryGiB` of RAM
- * (navigator.deviceMemory), or null when the browser doesn't say (Safari and
- * Firefox don't), meaning "grow until an allocation fails".
+ * The whole module's budget on a device with `deviceMemoryGiB` of RAM
+ * (navigator.deviceMemory), in whole 64 KiB Wasm pages, or null when the
+ * browser doesn't say (Safari and Firefox don't).
  *
- * Half the RAM leaves the rest for the system, the browser and other tabs.
- * Browsers round deviceMemory down and cap it at 8 (a privacy measure), so
- * "8" means "at least 8 GiB", and half of that already reaches the module's
- * 4 GiB address space.
+ * A quarter of the RAM leaves plenty for the system, the browser and other
+ * tabs: stopping honestly at the memory-limit notice is better than the
+ * browser killing the tab. Browsers round deviceMemory down and cap it at 8
+ * (a privacy measure), so "8" means "at least 8 GiB" and gives 2 GiB.
  */
-export function basePrimeMemoryBudget(deviceMemoryGiB: number | undefined): number | null {
+export function moduleMemoryBudget(deviceMemoryGiB: number | undefined): number | null {
   if (deviceMemoryGiB === undefined || !(deviceMemoryGiB > 0)) return null;
-  return Math.min(Math.floor((deviceMemoryGiB * 2 ** 30) / 2), LARGEST_BASE_PRIME_BUDGET_BYTES);
+  const quarter = Math.floor((deviceMemoryGiB * 2 ** 30) / 4 / WASM_PAGE_BYTES) * WASM_PAGE_BYTES;
+  return Math.min(quarter, WASM_ADDRESS_SPACE_BYTES);
+}
+
+/** The base-prime budget on such a device, or null for "grow until an allocation fails". */
+export function basePrimeMemoryBudget(deviceMemoryGiB: number | undefined): number | null {
+  const moduleBudget = moduleMemoryBudget(deviceMemoryGiB);
+  return moduleBudget === null ? null : basePrimeBudgetWithin(moduleBudget);
+}
+
+/** Below this, a threaded module isn't worth starting: the standalone build is used. */
+const SMALLEST_SHARED_MEMORY_BYTES = 256 * 2 ** 20;
+
+/**
+ * The maximums to try, largest first, when creating the threaded build's
+ * shared memory. Browsers reserve a shared memory's whole maximum up front,
+ * and some refuse large ones: iOS Safari throws "Out of memory" for 4 GiB
+ * while 2 GiB works, and 32-bit Android can't reserve 4 GiB at all. So: the
+ * budget if there is one, else 4 GiB; then halves, down to 256 MiB.
+ */
+export function sharedMemoryMaximumsToTry(moduleBudget: number | null): number[] {
+  const maximums: number[] = [];
+  for (let maximum = moduleBudget ?? WASM_ADDRESS_SPACE_BYTES; maximum >= SMALLEST_SHARED_MEMORY_BYTES; maximum /= 2) {
+    maximums.push(Math.floor(maximum / WASM_PAGE_BYTES) * WASM_PAGE_BYTES);
+  }
+  return maximums;
 }
 
 /**

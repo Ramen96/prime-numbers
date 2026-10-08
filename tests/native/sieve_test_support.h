@@ -32,9 +32,13 @@ void set_base_prime_memory_budget(size_t bytes);
 size_t base_prime_memory_bytes(void);
 int reserve_base_prime_storage(size_t bytes);
 uint64_t base_prime_limit(void);
+void set_parallel_threshold(size_t checkpoints);
+int sieve_start_helpers(int count); // SIEVE_THREADS builds only
 // SIEVE_TEST_HOOKS only
 void sieve_force_multi_limb_windows(int force);
 int sieve_test_gap_encoding_round_trip(const uint64_t *primes, size_t count);
+int sieve_test_base_primes_consistent(void);
+size_t measured_parallel_threshold(void);
 
 #define BATCH_SIZE 500
 #define MAX_PRIMES 8192
@@ -203,6 +207,21 @@ static void check_record_gap(const char *test_name, u128 prime, unsigned gap) {
   expect(test_name, "next prime after it", prime + gap, written == 1 ? found[0] : 0);
   written = sieve_primes(0, prime + gap, 1, found);
   expect(test_name, "previous prime before the gap's end", prime, written == 1 ? found[0] : 0);
+}
+
+// In a threaded build, SIEVE_TEST_HELPERS=n starts n helper threads and
+// splits every window across them, however few base primes it needs.
+static void start_test_threads(void) {
+#ifdef SIEVE_THREADS
+  // SIEVE_TEST_MEASURE=1 leaves the threshold to be measured, as in the app
+  const char *requested = getenv("SIEVE_TEST_HELPERS");
+  int helpers = requested ? atoi(requested) : 0;
+  if (helpers > 0) {
+    printf("threads: %d helpers started\n", sieve_start_helpers(helpers));
+    if (!getenv("SIEVE_TEST_MEASURE"))
+      set_parallel_threshold(1);
+  }
+#endif
 }
 
 static int report(const char *suite_name) {

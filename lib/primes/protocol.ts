@@ -60,7 +60,11 @@ export interface BatchResponse extends RequestTags {
   reachedMemoryLimit: boolean;
   /** Time spent sieving this batch, from performance.now(). The speed counter uses only this. */
   sievingDurationMs: number;
-  /** Time spent building base primes before sieving; 0 when none were needed. */
+  /**
+   * Time spent setting up, not sieving: building base primes, and on the
+   * threaded build, timing where splitting a window across threads pays.
+   * 0 when neither was needed.
+   */
   setupDurationMs: number;
   /**
    * Time spent re-checking every prime with Miller–Rabin before sending it
@@ -68,6 +72,8 @@ export interface BatchResponse extends RequestTags {
    */
   verificationDurationMs: number;
   memory: WorkerMemory;
+  /** Threads sieving each window: 1 on the single-threaded build. */
+  threads: number;
 }
 
 /**

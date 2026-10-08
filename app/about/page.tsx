@@ -85,8 +85,8 @@ const FREQUENTLY_ASKED_QUESTIONS = [
     question: "Will it break my computer?",
     answer: (
       <>
-        No. It works your processor hard while it’s calculating, but it does so in a background
-        worker, so the page stays responsive and you can stop at any time. It only computes when
+        No. It works your processor hard while it’s calculating, on every core but one, in
+        background threads, so the page stays responsive and you can stop at any time. It only computes when
         you scroll toward primes it doesn’t have yet; when you stop, it rests.
       </>
     ),
@@ -104,7 +104,7 @@ export default function AboutPage() {
       </p>
       <p>
         Doing that properly turned into a real engineering project: a prime finder running in
-        a background thread, a list that scrolls forever without memory growing, position
+        background threads, a list that scrolls forever without memory growing, position
         estimates good to a ten-thousandth of a percent, and a fight with the browser’s own
         timers just to measure the speed honestly.{" "}
         <Link href="/how-it-works">How it works</Link> explains all of it.

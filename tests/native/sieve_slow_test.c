@@ -51,6 +51,7 @@ static void test_prime_count_up_to_two_to_the_32(void) {
 }
 
 int main(void) {
+  start_test_threads();
   test_crossing_two_to_the_64();
   test_record_gaps_near_two_to_the_64();
   test_prime_count_up_to_two_to_the_32();

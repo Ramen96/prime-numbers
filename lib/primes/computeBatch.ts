@@ -9,7 +9,7 @@
 
 import { basePrimesCouldFit, estimatedBasePrimeBytes } from "./memoryBudget.ts";
 import type { BatchRequest, WorkerMemory, WorkerResponse } from "./protocol.ts";
-import { verifyPrimes } from "./verifyPrimes.ts";
+import { verifyPrimes, type BatchVerification } from "./verifyPrimes.ts";
 import { basePrimeLimitNeededFor, type SieveBatch } from "./wasmSieve.ts";
 
 /** The parts of WasmSieve a batch uses (so tests can stand in for it). */
@@ -25,15 +25,19 @@ export interface Sieve {
 export interface ComputeBatchOptions {
   /** The base-prime budget set in the sieve, or null for none (see memoryBudget.ts). */
   memoryBudgetBytes: number | null;
+  /** Threads sieving each window, reported with the batch. */
+  threads?: number;
+  /** How to verify a batch: inline by default, or spread over workers (verificationPool.ts). */
+  verify?: (primes: bigint[]) => BatchVerification | Promise<BatchVerification>;
   now?: () => number;
 }
 
-export function computeBatch(
+export async function computeBatch(
   sieve: Sieve,
   { id, generation, direction, from, count }: BatchRequest,
   send: (response: WorkerResponse) => void,
-  { memoryBudgetBytes, now = () => performance.now() }: ComputeBatchOptions,
-): void {
+  { memoryBudgetBytes, threads = 1, verify = verifyPrimes, now = () => performance.now() }: ComputeBatchOptions,
+): Promise<void> {
   const memory = (): WorkerMemory => ({
     basePrimeBytes: sieve.basePrimeMemoryBytes(),
     moduleBytes: sieve.moduleMemoryBytes(),
@@ -73,8 +77,12 @@ export function computeBatch(
   // Step 2: sieve. (sieve_next/sieve_prev still extend the base primes
   // themselves if step 1 guessed short.)
   const sievingStartTime = now();
-  const { primes, reachedMemoryLimit } = sieve.findPrimes(direction, from, count);
-  const sievingDurationMs = now() - sievingStartTime;
+  const { primes, reachedMemoryLimit, measuringMs } = sieve.findPrimes(direction, from, count);
+  // Measuring where splitting windows across threads pays (once per window
+  // size, at most a dozen times a worker) is setup, like building base
+  // primes: the speed counter only counts sieving.
+  const sievingDurationMs = now() - sievingStartTime - measuringMs;
+  setupDurationMs += measuringMs;
   if (primes.length === 0 && reachedMemoryLimit) {
     send({ type: "memory-limit", id, generation, memory: memory() });
     return;
@@ -83,7 +91,7 @@ export function computeBatch(
   // Step 3: verify every prime before it's shown. If the check and the sieve
   // ever disagree, stop: the disputed batch is never sent.
   const verificationStartTime = now();
-  const verification = verifyPrimes(primes);
+  const verification = await verify(primes);
   const verificationDurationMs = now() - verificationStartTime;
   if (!verification.verified) {
     const problem =
@@ -112,5 +120,6 @@ export function computeBatch(
     setupDurationMs,
     verificationDurationMs,
     memory: memory(),
+    threads,
   });
 }

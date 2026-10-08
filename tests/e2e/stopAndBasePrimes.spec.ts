@@ -1,5 +1,5 @@
-import { expect, test, type Page, type Worker } from "@playwright/test";
-import { PrimeListPage } from "./primeListPage";
+import { expect, test, type Page } from "@playwright/test";
+import { collectPrimeWorkers, PrimeListPage } from "./primeListPage";
 
 function parseNumber(text: string): number {
   return Number(text.replace(/[^\d.]/g, ""));
@@ -37,7 +37,7 @@ test.describe("building base primes", () => {
     await expect(page.getByText("Building base primes…")).toBeHidden();
 
     // The jump timed one batch of base-prime building and two batches of sieving.
-    const setupMs = parseNumber(await statValue(page, "base primes")); // "built in 64.10 ms"
+    const setupMs = parseNumber(await statValue(page, "base primes")); // "set up in 64.10 ms"
     const lastSievingMs = parseNumber(await statValue(page, "last batch"));
     const counterRate = parseNumber(await page.locator("header .font-mono").first().innerText());
     expect(setupMs).toBeGreaterThan(lastSievingMs);
@@ -66,8 +66,7 @@ test.describe("base-prime memory", () => {
   });
 
   test("a jump back from far away starts a fresh worker, giving the memory back", async ({ page }) => {
-    const workers: Worker[] = [];
-    page.on("worker", (worker) => workers.push(worker));
+    const workers = collectPrimeWorkers(page);
     const primeListPage = new PrimeListPage(page);
     await primeListPage.open();
 
@@ -104,8 +103,7 @@ test.describe("Stop button", () => {
       await route.continue().catch(() => {}); // the first worker is gone by then
     });
 
-    const workers: Worker[] = [];
-    page.on("worker", (worker) => workers.push(worker));
+    const workers = collectPrimeWorkers(page);
 
     await page.goto("/");
     const primeListPage = new PrimeListPage(page);

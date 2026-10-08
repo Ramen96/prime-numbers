@@ -32,6 +32,8 @@ static void test_extending_base_primes(void) {
   check_prev("prev before 4 × 10^14 (base primes already built)", 400000000000000ULL, BATCH_SIZE);
   expect(name, "sieving didn't extend them again", limit_after_extending, base_prime_limit());
 
+  expect(name, "ascending, below the limit, checkpoints where they belong", 1, (u128)sieve_test_base_primes_consistent());
+
   // Asking for less than what's there is a no-op.
   expect(name, "extending to less succeeds", 1, (u128)extend_base_primes(1000));
   expect(name, "and changes nothing", limit_after_extending, base_prime_limit());
@@ -85,6 +87,7 @@ static void test_memory_budget(void) {
   expect(name, "extension past the budget fails", 0, (u128)extend_base_primes(limit_before * 100));
   expect(name, "limit unchanged", limit_before, base_prime_limit());
   expect(name, "memory unchanged", reserved, base_prime_memory_bytes());
+  expect(name, "rolled back whole, checkpoints too", 1, (u128)sieve_test_base_primes_consistent());
   // the space the failed extension used is free again: a small extension
   // (about 3,000 primes; 100,000 bytes are free) still fits
   expect(name, "small extension fits after rollback", 1, (u128)extend_base_primes(limit_before + 50000));
@@ -298,6 +301,7 @@ static void test_sweeps_against_a_plain_sieve(void) {
 }
 
 int main(void) {
+  start_test_threads();
   test_extending_base_primes();
   test_gap_encoding();
   test_memory_budget();
@@ -308,5 +312,17 @@ int main(void) {
   test_prime_counts();
   test_record_gaps();
   test_sweeps_against_a_plain_sieve();
+  // after everything, including the rolled-back extensions
+  expect("base prime storage", "ascending, below the limit, checkpoints where they belong", 1, (u128)sieve_test_base_primes_consistent());
+#ifdef SIEVE_THREADS
+  // left to be measured, it must have settled on splitting somewhere: these
+  // tests sieve windows needing up to about 2,700 checkpoints (near 2^64 / 4)
+  if (getenv("SIEVE_TEST_MEASURE") && getenv("SIEVE_TEST_HELPERS")) {
+    printf("measured parallel threshold: %zu checkpoints\n", measured_parallel_threshold());
+    checks_run++;
+    if (measured_parallel_threshold() == 0)
+      fail("measured parallel threshold", "settled on a threshold", 1, 0);
+  }
+#endif
   return report("native sieve tests");
 }
