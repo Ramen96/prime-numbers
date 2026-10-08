@@ -1,48 +1,7 @@
-// The scrollbar for every scrolling list on the site (the prime list, the
-// favorites list), in one place so they can't drift apart.
-
-// A transitionable color (unregistered custom properties can't animate).
-@property --scrollbar-thumb-color {
-  syntax: "<color>";
-  inherits: true;
-  initial-value: transparent;
-}
-
-$track-width: 12px;
-$thumb-inset-resting: 3.5px;
-$thumb-inset-active: 1.5px;
+// The scrolling lists (the prime list, the favorites list) apply this class.
+// The styles themselves are the shared mixin in _themedScrollbar.scss.
+@use "themedScrollbar" as *;
 
 .themedScrollbar {
-  --scrollbar-thumb-color: color-mix(in oklch, var(--heat-color) 45%, transparent);
-  transition: --scrollbar-thumb-color 0.15s ease-out;
-
-  &:hover {
-    --scrollbar-thumb-color: color-mix(in oklch, var(--heat-color) 75%, transparent);
-  }
-
-  @supports not selector(::-webkit-scrollbar) {
-    scrollbar-width: thin;
-    scrollbar-color: var(--scrollbar-thumb-color) transparent;
-  }
-
-  &::-webkit-scrollbar {
-    width: $track-width;
-    background: transparent;
-  }
-
-  &::-webkit-scrollbar-thumb {
-    border: $thumb-inset-resting solid transparent;
-    border-radius: $track-width;
-    background: var(--scrollbar-thumb-color) padding-box;
-  }
-
-  &::-webkit-scrollbar-thumb:hover,
-  &::-webkit-scrollbar-thumb:active {
-    border-width: $thumb-inset-active;
-    background-color: var(--heat-color);
-  }
-
-  &::-webkit-scrollbar-button {
-    display: none;
-  }
+  @include themed-scrollbar;
 }

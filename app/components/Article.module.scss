@@ -1,3 +1,5 @@
+@use "themedScrollbar" as *;
+
 .prose {
   line-height: 1.7;
 
@@ -58,7 +60,9 @@
     background: var(--rule);
   }
 
+  // code blocks and wide formulas scroll sideways, with the site's scrollbar
   pre {
+    @include themed-scrollbar;
     margin: 0 0 1.25rem;
     padding: 1rem;
     overflow-x: auto;
@@ -70,6 +74,7 @@
   }
 
   math[display="block"] {
+    @include themed-scrollbar;
     margin: 1.25rem 0;
     overflow-x: auto;
     overflow-y: hidden;

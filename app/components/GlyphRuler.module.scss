@@ -1,0 +1,13 @@
+// The runs GlyphRuler measures, as generated content: laid out and measurable,
+// but not text on the page (not in its HTML, copied text or search snippets).
+.digit::before {
+  content: "0000000000";
+}
+
+.comma::before {
+  content: ",,,,,,,,,,";
+}
+
+.ellipsis::before {
+  content: "…………………………";
+}

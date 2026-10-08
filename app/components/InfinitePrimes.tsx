@@ -9,7 +9,8 @@ import { Cpu } from "./Cpu";
 import fadingNotice from "./FadingNotice.module.scss";
 import { JumpForm } from "./JumpForm";
 import { PrimeList } from "./PrimeList";
-import { WrappableNumber } from "./WrappableNumber";
+import { FittedNumber } from "./FittedNumber";
+import { useNumberPopover } from "./NumberPopover";
 
 const numberFormatter = new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 });
 
@@ -93,6 +94,9 @@ export function InfinitePrimes({ intro, firstBatchFromServer }: Props) {
     [jumpTo],
   );
 
+  // One popup for every shortened number on the page: the list's and the stats'.
+  const { show: showFullNumber, popover: fullNumberPopover } = useNumberPopover();
+
   // The frontier is the largest prime currently held.
   const lastBatch = batches[batches.length - 1];
   const frontier = lastBatch ? lastBatch.primes[lastBatch.primes.length - 1] : null;
@@ -138,8 +142,8 @@ export function InfinitePrimes({ intro, firstBatchFromServer }: Props) {
             </div>
             <dl className="mt-1 grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-0.5 text-[0.8rem] text-muted tabular-nums">
               <dt>frontier</dt>
-              <dd className="text-foreground">
-                <WrappableNumber value={frontier} />
+              <dd className="min-w-0 text-foreground">
+                <FittedNumber value={frontier} onShowFull={showFullNumber} />
               </dd>
               <dt>last batch</dt>
               <dd className="text-foreground">{formatBatchDuration(lastBatchDurationMs)}</dd>
@@ -160,19 +164,27 @@ export function InfinitePrimes({ intro, firstBatchFromServer }: Props) {
                 {lastVerificationMs === null ? "—" : `in ${formatBatchDuration(lastVerificationMs)}`}
               </dd>
               <dt>furthest scroll</dt>
-              <dd className="text-foreground">
-                <WrappableNumber value={storedPrime(personalData.data.records.furthestScroll)} />
+              <dd className="flex min-w-0 items-baseline text-foreground">
+                <FittedNumber
+                  value={storedPrime(personalData.data.records.furthestScroll)}
+                  onShowFull={showFullNumber}
+                  className="flex-1"
+                />
                 {personalData.furthestScrollRecordBeaten && (
-                  <span role="status" className={`${fadingNotice.fadingNotice} ml-2 text-(--heat-text)`}>
+                  <span role="status" className={`${fadingNotice.fadingNotice} ml-2 shrink-0 text-(--heat-text)`}>
                     New record!
                   </span>
                 )}
               </dd>
               <dt>biggest visited</dt>
-              <dd className="text-foreground">
-                <WrappableNumber value={storedPrime(personalData.data.records.biggestPrimeVisited)} />
+              <dd className="min-w-0 text-foreground">
+                <FittedNumber
+                  value={storedPrime(personalData.data.records.biggestPrimeVisited)}
+                  onShowFull={showFullNumber}
+                />
               </dd>
             </dl>
+            {fullNumberPopover}
             {personalData.storageIsFull && (
               <p role="status" className="mt-1 text-xs text-(--hot-text)">
                 Your browser’s storage is full, so favorites and records aren’t being saved.
@@ -199,6 +211,7 @@ export function InfinitePrimes({ intro, firstBatchFromServer }: Props) {
               takeScrollInstruction={takeScrollInstruction}
               favoritePrimes={favoritePrimes}
               onToggleFavorite={toggleFavorite}
+              onShowFullPrime={showFullNumber}
               onLargestVisiblePrime={handleLargestVisiblePrime}
             />
           </div>

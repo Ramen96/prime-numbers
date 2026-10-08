@@ -3,6 +3,9 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { bufferLabelsAreEstimated } from "@/lib/primes/rollingBuffer";
 import type { Batch, BufferStatus, ScrollInstruction } from "@/lib/primes/usePrimeBuffer";
+import { fitNumber, textWidth, type GlyphWidths } from "@/lib/shortenNumber";
+import { SHORTENED_NUMBER_CLASSES } from "./FittedNumber";
+import { GlyphRuler, readGlyphWidths } from "./GlyphRuler";
 import { StarIcon } from "./StarIcon";
 import scrollbar from "./ThemedScrollbar.module.scss";
 
@@ -34,6 +37,8 @@ interface Props {
   onToggleFavorite: (prime: bigint) => void;
   /** The largest prime actually on screen (for personal records). */
   onLargestVisiblePrime: (prime: bigint) => void;
+  /** Opens the popup with a shortened prime in full. */
+  onShowFullPrime: (prime: bigint, opener: HTMLElement) => void;
 }
 
 const numberFormatter = new Intl.NumberFormat("en-US");
@@ -44,8 +49,37 @@ const PRIME_ROW_CLASSES =
   "absolute inset-x-0 top-0 flex items-center gap-1 border-b border-rule pr-4 pl-1 whitespace-nowrap tabular-nums sm:gap-3 sm:pr-5 sm:pl-2";
 const PRIME_AND_LABEL_CLASSES =
   "flex min-w-0 flex-1 flex-col items-end leading-tight sm:flex-row sm:items-baseline sm:justify-between";
+const LABEL_FONT_CLASSES = "text-[0.7rem] sm:text-[0.8rem]";
+const PRIME_FONT_CLASSES = "font-mono text-[clamp(1rem,4.6vw,1.25rem)]";
 const STATUS_ROW_CLASSES =
   "absolute inset-x-0 top-0 flex items-center justify-center border-b border-rule px-4 text-muted italic";
+
+/**
+ * What a row has room for, measured once from an invisible row laid out like
+ * the real ones (and again when the list's width changes), so no row is
+ * measured on its own. Every row has the same space; only its position
+ * label's length differs, and that's worked out from the label font's widths.
+ */
+interface RowSpace {
+  /** The width the prime and its position label share. */
+  columnPx: number;
+  /** From 640px up the label sits beside the prime; below, under it. */
+  labelBesidePrime: boolean;
+  primeGlyphs: GlyphWidths;
+  labelGlyphs: GlyphWidths;
+  /** The width of the label before its digits: "#", or "≈ #" after a jump. */
+  labelPrefixPx: { exact: number; estimated: number };
+}
+
+function sameRowSpace(a: RowSpace | null, b: RowSpace): boolean {
+  return (
+    a !== null &&
+    a.columnPx === b.columnPx &&
+    a.labelBesidePrime === b.labelBesidePrime &&
+    a.primeGlyphs.digit === b.primeGlyphs.digit &&
+    a.labelGlyphs.digit === b.labelGlyphs.digit
+  );
+}
 
 /** Converts a row position on screen to a position in the prime buffer. */
 function screenRowToPrimeIndex(screenRow: number): number {
@@ -62,6 +96,7 @@ export function PrimeList({
   favoritePrimes,
   onToggleFavorite,
   onLargestVisiblePrime,
+  onShowFullPrime,
 }: Props) {
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   /** Holds the notices above the list (the memory limit, the estimate banner). */
@@ -71,6 +106,13 @@ export function PrimeList({
   // Until the browser can measure, assume a typical screen so the server
   // renders a full first screen of primes into the HTML.
   const [viewportHeightPx, setViewportHeightPx] = useState(INITIAL_VIEWPORT_HEIGHT_GUESS_PX);
+  // Null until measured (and on the server): primes are shown whole until then.
+  const [rowSpace, setRowSpace] = useState<RowSpace | null>(null);
+  const measuringColumnRef = useRef<HTMLDivElement>(null);
+  const primeRulerRef = useRef<HTMLSpanElement>(null);
+  const labelRulerRef = useRef<HTMLSpanElement>(null);
+  const exactPrefixRef = useRef<HTMLSpanElement>(null);
+  const estimatedPrefixRef = useRef<HTMLSpanElement>(null);
 
   // Join the batches into one array so each screen row maps to one prime.
   const { allPrimes, ordinalOfFirstPrime, labelsAreEstimated } = useMemo(() => {
@@ -185,6 +227,36 @@ export function PrimeList({
     return () => resizeObserver.disconnect();
   }, []);
 
+  // Measures the invisible row: on mount, whenever the list's size changes
+  // (the prime's font size follows the window's width too), and once the
+  // web fonts have loaded.
+  useLayoutEffect(() => {
+    const scrollContainer = scrollContainerRef.current;
+    if (!scrollContainer) return;
+    const measure = () => {
+      const column = measuringColumnRef.current;
+      const primeGlyphs = readGlyphWidths(primeRulerRef.current);
+      const labelGlyphs = readGlyphWidths(labelRulerRef.current);
+      if (!column || !primeGlyphs || !labelGlyphs) return;
+      const measured: RowSpace = {
+        columnPx: column.clientWidth,
+        labelBesidePrime: getComputedStyle(column).flexDirection === "row",
+        primeGlyphs,
+        labelGlyphs,
+        labelPrefixPx: {
+          exact: exactPrefixRef.current?.getBoundingClientRect().width ?? 0,
+          estimated: estimatedPrefixRef.current?.getBoundingClientRect().width ?? 0,
+        },
+      };
+      setRowSpace((previous) => (sameRowSpace(previous, measured) ? previous : measured));
+    };
+    measure();
+    const resizeObserver = new ResizeObserver(measure);
+    resizeObserver.observe(scrollContainer);
+    document.fonts?.ready.then(measure);
+    return () => resizeObserver.disconnect();
+  }, []);
+
   const handleScroll = () => {
     const scrollContainer = scrollContainerRef.current;
     if (!scrollContainer) return;
@@ -240,6 +312,18 @@ export function PrimeList({
       const ordinal = numberFormatter.format(ordinalOfFirstPrime + BigInt(primeIndex));
       const formattedPrime = numberFormatter.format(prime);
       const isFavorite = favoritePrimes.has(String(prime));
+      // Shortened in the middle if it doesn't fit beside (or above) its label.
+      let shownPrime = { text: formattedPrime, shortened: false };
+      if (rowSpace) {
+        const labelPx =
+          (labelsAreEstimated ? rowSpace.labelPrefixPx.estimated : rowSpace.labelPrefixPx.exact) +
+          textWidth(ordinal, rowSpace.labelGlyphs);
+        // beside the label, keep at least a digit's width between them
+        const availablePx = rowSpace.labelBesidePrime
+          ? rowSpace.columnPx - labelPx - rowSpace.primeGlyphs.digit
+          : rowSpace.columnPx;
+        shownPrime = fitNumber(formattedPrime, availablePx, rowSpace.primeGlyphs);
+      }
       renderedRows.push(
         <div
           key={String(prime)}
@@ -260,13 +344,24 @@ export function PrimeList({
           <div className={PRIME_AND_LABEL_CLASSES}>
             <span
               data-testid="prime-label"
-              className={`order-2 text-[0.7rem] text-muted sm:order-1 sm:text-[0.8rem] ${labelsAreEstimated ? "opacity-70" : ""}`}
+              className={`order-2 ${LABEL_FONT_CLASSES} text-muted sm:order-1 ${labelsAreEstimated ? "opacity-70" : ""}`}
             >
               {labelsAreEstimated ? `≈ #${ordinal}` : `#${ordinal}`}
             </span>
-            <span className="order-1 font-mono text-[clamp(1rem,4.6vw,1.25rem)] sm:order-2">
-              {formattedPrime}
-            </span>
+            {shownPrime.shortened ? (
+              // The whole prime stays the accessible name; a tap shows it all.
+              <button
+                type="button"
+                aria-label={formattedPrime}
+                aria-haspopup="dialog"
+                onClick={(event) => onShowFullPrime(prime, event.currentTarget)}
+                className={`order-1 ${PRIME_FONT_CLASSES} sm:order-2 ${SHORTENED_NUMBER_CLASSES}`}
+              >
+                <span aria-hidden>{shownPrime.text}</span>
+              </button>
+            ) : (
+              <span className={`order-1 ${PRIME_FONT_CLASSES} sm:order-2`}>{formattedPrime}</span>
+            )}
           </div>
         </div>,
       );
@@ -303,6 +398,26 @@ export function PrimeList({
         onScroll={handleScroll}
       >
         <div className="relative w-full" style={{ height: totalScreenRows * ROW_HEIGHT_PX }}>
+          {/* Laid out like a prime row, never seen: measured for RowSpace. */}
+          <div aria-hidden className={`${PRIME_ROW_CLASSES} pointer-events-none invisible`} style={{ height: ROW_HEIGHT_PX }}>
+            <span className="h-11 w-11 shrink-0" />
+            <div ref={measuringColumnRef} className={PRIME_AND_LABEL_CLASSES}>
+              <span className={`relative order-2 ${LABEL_FONT_CLASSES} sm:order-1`}>
+                <span ref={labelRulerRef}>
+                  <GlyphRuler />
+                </span>
+                <span ref={exactPrefixRef} className="absolute whitespace-pre">
+                  #
+                </span>
+                <span ref={estimatedPrefixRef} className="absolute whitespace-pre">
+                  ≈ #
+                </span>
+              </span>
+              <span ref={primeRulerRef} className={`relative order-1 ${PRIME_FONT_CLASSES} sm:order-2`}>
+                <GlyphRuler />
+              </span>
+            </div>
+          </div>
           {renderedRows}
         </div>
       </div>

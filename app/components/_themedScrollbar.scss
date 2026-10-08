@@ -1,0 +1,53 @@
+// The scrollbar for everything on the site that scrolls inside the page: the
+// prime list and favorites (ThemedScrollbar.module.scss), and the code
+// blocks and wide formulas on /how-it-works (Article.module.scss). One
+// mixin, so they can't drift apart.
+
+// A transitionable color (unregistered custom properties can't animate).
+@property --scrollbar-thumb-color {
+  syntax: "<color>";
+  inherits: true;
+  initial-value: transparent;
+}
+
+$track-width: 12px;
+$thumb-inset-resting: 3.5px;
+$thumb-inset-active: 1.5px;
+
+@mixin themed-scrollbar {
+  --scrollbar-thumb-color: color-mix(in oklch, var(--heat-color) 45%, transparent);
+  transition: --scrollbar-thumb-color 0.15s ease-out;
+
+  &:hover {
+    --scrollbar-thumb-color: color-mix(in oklch, var(--heat-color) 75%, transparent);
+  }
+
+  @supports not selector(::-webkit-scrollbar) {
+    scrollbar-width: thin;
+    scrollbar-color: var(--scrollbar-thumb-color) transparent;
+  }
+
+  // width for vertical scrollbars, height for horizontal ones
+  &::-webkit-scrollbar {
+    width: $track-width;
+    height: $track-width;
+    background: transparent;
+  }
+
+  &::-webkit-scrollbar-thumb {
+    border: $thumb-inset-resting solid transparent;
+    border-radius: $track-width;
+    background: var(--scrollbar-thumb-color) padding-box;
+  }
+
+  &::-webkit-scrollbar-thumb:hover,
+  &::-webkit-scrollbar-thumb:active {
+    border-width: $thumb-inset-active;
+    background-color: var(--heat-color);
+  }
+
+  &::-webkit-scrollbar-button,
+  &::-webkit-scrollbar-corner {
+    display: none;
+  }
+}
