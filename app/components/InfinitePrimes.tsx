@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, type ReactNode } from "react";
 import { urlForJump } from "@/lib/jumpUrl";
 import { NEW_RECORD_SESSION, sessionAfterJump } from "@/lib/personalRecords";
+import { CALCULATING_LINES } from "@/lib/mentatLines";
 import { usePrimeBuffer } from "@/lib/primes/usePrimeBuffer";
 import { reportVisiblePrime, toggleFavorite, usePersonalData } from "@/lib/usePersonalData";
 import { Cpu } from "./Cpu";
@@ -11,6 +12,7 @@ import { JumpForm } from "./JumpForm";
 import { PrimeList } from "./PrimeList";
 import { FittedNumber } from "./FittedNumber";
 import { useNumberPopover } from "./NumberPopover";
+import { useMentatLine } from "./useMentatLine";
 
 const numberFormatter = new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 });
 
@@ -101,6 +103,8 @@ export function InfinitePrimes({ intro, firstBatchFromServer }: Props) {
   const lastBatch = batches[batches.length - 1];
   const frontier = lastBatch ? lastBatch.primes[lastBatch.primes.length - 1] : null;
   const isBuildingBasePrimes = status === "building-base-primes";
+  // Dune easter egg: sometimes a Mentat line instead of the "—" (lib/mentatLines.ts).
+  const mentatLine = useMentatLine(CALCULATING_LINES, status === "computing" || isBuildingBasePrimes);
 
   return (
     <main
@@ -116,11 +120,21 @@ export function InfinitePrimes({ intro, firstBatchFromServer }: Props) {
           <Cpu />
           <div className="min-w-40 flex-1">
             <div className="font-mono text-[clamp(2rem,8vw,3.75rem)] leading-none font-bold tabular-nums wrap-anywhere text-(--heat-text) transition-colors duration-600 desktop:text-[3.25rem]">
-              {status === "stopped"
-                ? "stopped"
-                : primesPerSecond === null
-                  ? "—"
-                  : numberFormatter.format(primesPerSecond)}
+              {status === "stopped" ? (
+                "stopped"
+              ) : primesPerSecond !== null ? (
+                numberFormatter.format(primesPerSecond)
+              ) : mentatLine ? (
+                // Exactly one counter line tall (1em of the counter's font), so
+                // nothing below moves; the line itself is small, two lines at most.
+                <span data-testid="mentat-line" className="flex h-[1em] items-center">
+                  <span className="line-clamp-2 font-sans text-xs leading-tight font-normal italic desktop:text-sm">
+                    {mentatLine}
+                  </span>
+                </span>
+              ) : (
+                "—"
+              )}
             </div>
             <div className="flex min-h-11 items-center justify-between gap-3">
               <p aria-live="polite" className="text-xs tracking-widest text-muted uppercase">

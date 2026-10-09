@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useLayoutEffect, useMemo, useRef, useState } from "react";
 import scrollbar from "./ThemedScrollbar.module.scss";
 import { PI_PRIME, PiMark } from "./PiMark";
+import { Wolf359Mark, WOLF_359_PRIME } from "./Wolf359Mark";
 import { WrappableNumber } from "./WrappableNumber";
 
 /**
@@ -133,6 +134,7 @@ export function FavoritesList({ favorites, onRemoveFavorite }: Props) {
         <span className="min-w-0 flex-1 py-2 font-mono text-[clamp(1rem,4.6vw,1.25rem)] tabular-nums">
           <WrappableNumber value={BigInt(favorite)} />
           {BigInt(favorite) === PI_PRIME && <PiMark />}
+          {BigInt(favorite) === WOLF_359_PRIME && <Wolf359Mark />}
         </span>
         <Link
           href={`/?jump=${favorite}`}

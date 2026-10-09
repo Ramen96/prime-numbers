@@ -3,10 +3,13 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { bufferLabelsAreEstimated } from "@/lib/primes/rollingBuffer";
 import type { Batch, BufferStatus, ScrollInstruction } from "@/lib/primes/usePrimeBuffer";
+import { MEMORY_LIMIT_LINES } from "@/lib/mentatLines";
 import { fitNumber, textWidth, type GlyphWidths } from "@/lib/shortenNumber";
 import { SHORTENED_NUMBER_CLASSES } from "./FittedNumber";
 import { GlyphRuler, readGlyphWidths } from "./GlyphRuler";
 import { PI_PRIME, PiMark } from "./PiMark";
+import { useMentatLine } from "./useMentatLine";
+import { WOLF_359_PRIME, Wolf359Mark } from "./Wolf359Mark";
 import { StarIcon } from "./StarIcon";
 import scrollbar from "./ThemedScrollbar.module.scss";
 
@@ -128,6 +131,8 @@ export function PrimeList({
   }, [batches]);
 
   const bufferStartsAtTwo = allPrimes[0] === 2n;
+  // Dune easter egg: sometimes a second line under the memory-limit notice (lib/mentatLines.ts).
+  const memoryLimitMentatLine = useMentatLine(MEMORY_LIMIT_LINES, reachedMemoryLimit);
 
 
   /** Tells the buffer which primes are on screen so it can decide whether to fetch more. */
@@ -364,6 +369,7 @@ export function PrimeList({
               <span className={`order-1 ${PRIME_FONT_CLASSES} sm:order-2`}>
                 {formattedPrime}
                 {prime === PI_PRIME && <PiMark />}
+                {prime === WOLF_359_PRIME && <Wolf359Mark />}
               </span>
             )}
           </div>
@@ -386,6 +392,12 @@ export function PrimeList({
             <strong>This device’s memory limit.</strong> Going further needs more base primes than
             fit in its memory, so the list stops at the last prime it could prove. Nothing after
             it has been skipped or guessed; it just hasn’t been checked.
+          </p>
+        )}
+        {/* Outside the status region above, so it's never announced, only read in passing. */}
+        {reachedMemoryLimit && memoryLimitMentatLine && (
+          <p data-testid="mentat-line" className="-mt-2 bg-(--hot-surface) px-5 pb-3 text-white italic">
+            {memoryLimitMentatLine}
           </p>
         )}
         {labelsAreEstimated && (
