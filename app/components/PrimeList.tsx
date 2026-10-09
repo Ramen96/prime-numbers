@@ -6,6 +6,7 @@ import type { Batch, BufferStatus, ScrollInstruction } from "@/lib/primes/usePri
 import { fitNumber, textWidth, type GlyphWidths } from "@/lib/shortenNumber";
 import { SHORTENED_NUMBER_CLASSES } from "./FittedNumber";
 import { GlyphRuler, readGlyphWidths } from "./GlyphRuler";
+import { PI_PRIME, PiMark } from "./PiMark";
 import { StarIcon } from "./StarIcon";
 import scrollbar from "./ThemedScrollbar.module.scss";
 
@@ -80,12 +81,6 @@ function sameRowSpace(a: RowSpace | null, b: RowSpace): boolean {
     a.labelGlyphs.digit === b.labelGlyphs.digit
   );
 }
-
-/**
- * An easter egg: 314,159 is prime, and its digits are the first six of π,
- * so its row gets a π beside it.
- */
-const PI_PRIME = 314_159n;
 
 /** Converts a row position on screen to a position in the prime buffer. */
 function screenRowToPrimeIndex(screenRow: number): number {
@@ -368,14 +363,7 @@ export function PrimeList({
             ) : (
               <span className={`order-1 ${PRIME_FONT_CLASSES} sm:order-2`}>
                 {formattedPrime}
-                {prime === PI_PRIME && (
-                  <span
-                    title="Its digits are the first six of π"
-                    className="ml-2 font-serif text-(--heat-text) italic"
-                  >
-                    π<span className="sr-only">: its digits are the first six of pi</span>
-                  </span>
-                )}
+                {prime === PI_PRIME && <PiMark />}
               </span>
             )}
           </div>
