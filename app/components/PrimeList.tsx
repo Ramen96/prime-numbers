@@ -81,6 +81,12 @@ function sameRowSpace(a: RowSpace | null, b: RowSpace): boolean {
   );
 }
 
+/**
+ * An easter egg: 314,159 is prime, and its digits are the first six of π,
+ * so its row gets a π beside it.
+ */
+const PI_PRIME = 314_159n;
+
 /** Converts a row position on screen to a position in the prime buffer. */
 function screenRowToPrimeIndex(screenRow: number): number {
   return screenRow - HEADER_ROWS;
@@ -360,7 +366,17 @@ export function PrimeList({
                 <span aria-hidden>{shownPrime.text}</span>
               </button>
             ) : (
-              <span className={`order-1 ${PRIME_FONT_CLASSES} sm:order-2`}>{formattedPrime}</span>
+              <span className={`order-1 ${PRIME_FONT_CLASSES} sm:order-2`}>
+                {formattedPrime}
+                {prime === PI_PRIME && (
+                  <span
+                    title="Its digits are the first six of π"
+                    className="ml-2 font-serif text-(--heat-text) italic"
+                  >
+                    π<span className="sr-only">: its digits are the first six of pi</span>
+                  </span>
+                )}
+              </span>
             )}
           </div>
         </div>,
