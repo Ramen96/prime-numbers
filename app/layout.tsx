@@ -40,7 +40,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
     <html lang="en" className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}>
       <body className="min-h-full">
         {/* Desktop: sidebar + page, centered together on wide monitors. */}
-        <div className="desktop:mx-auto desktop:flex desktop:max-w-[calc(72rem+11rem)]">
+        <div className="desktop:mx-auto desktop:flex desktop:max-w-332">
           <SiteNav />
           <div className="min-w-0 flex-1">{children}</div>
         </div>
