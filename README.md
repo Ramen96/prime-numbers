@@ -86,12 +86,26 @@ The counter measures sieving time only. Building base primes, timing thread spli
 
 ## Setup
 
-Requires Node.js 22 or newer (the unit tests run TypeScript directly with Node's built-in test runner).
+### Dependencies
+
+| What | Needed for | Notes |
+|---|---|---|
+| Node.js 22 or newer | everything | The unit tests run TypeScript directly with Node's built-in test runner. Developed on Node 24. |
+| npm packages | everything | `npm install` |
+| Playwright's Chromium | `npm run test:e2e` | `npx playwright install chromium` |
+| Emscripten | `npm run build:wasm`, `npm run test:wasm` | Developed with 6.0.10 (`brew install emscripten` on macOS; see emscripten.org elsewhere). Only needed to change the C: both builds are committed. |
+| A C compiler with `unsigned __int128` | `npm run test:native` | clang or gcc on a 64-bit machine. |
+| ThreadSanitizer | `npm run test:native:tsan` | Built into clang on macOS (and gcc/clang on Linux). |
+
+### First run
 
 ```bash
 npm install
+npx playwright install chromium
 npm run dev        # http://localhost:3000
 ```
+
+On a new machine, check everything works with `npm test` and `npm run test:e2e`.
 
 ### The WebAssembly sieve
 
