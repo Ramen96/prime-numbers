@@ -1,6 +1,7 @@
 import Link from "next/link";
 import type { Metadata } from "next";
 import { Article } from "./components/Article";
+import { NotFoundSieve } from "./components/NotFoundSieve";
 
 export const metadata: Metadata = {
   title: "404: Page not found | Every Prime Number",
@@ -12,6 +13,7 @@ export default function NotFound() {
       <p>
         404 = 2² × 101, so it isn’t prime. This page isn’t anything, either: it doesn’t exist.
       </p>
+      <NotFoundSieve />
       <p>
         <Link href="/">Back to the primes →</Link>
       </p>
