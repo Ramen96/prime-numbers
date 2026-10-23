@@ -4,7 +4,7 @@ test.describe("code samples on /how-it-works", () => {
   test("are highlighted in the server-rendered HTML", async ({ request }) => {
     const html = await (await request.get("/how-it-works")).text();
     const highlightedBlocks = html.match(/<pre class="shiki[^"]*"[\s\S]*?<\/pre>/g) ?? [];
-    expect(highlightedBlocks).toHaveLength(2);
+    expect(highlightedBlocks).toHaveLength(3);
     for (const block of highlightedBlocks) {
       // Every token carries its colour for both themes.
       const coloredTokens = block.match(/<span style="--shiki-light:#[0-9a-fA-F]{6};--shiki-dark:#[0-9a-fA-F]{6}"/g) ?? [];

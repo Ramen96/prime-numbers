@@ -7,12 +7,13 @@ const RUN_LENGTH = 10;
 /**
  * Invisible runs of digits, commas and ellipses in the given font classes,
  * so their widths can be read with readGlyphWidths. Hidden from everything:
- * no layout space (absolute), no paint, no accessibility tree, and no text
+ * no layout space (absolute), no scroll width (zero wide and clipped; the runs
+ * inside keep their own widths), no paint, no accessibility tree, and no text
  * (the runs are CSS generated content).
  */
 export function GlyphRuler({ className = "" }: { className?: string }) {
   return (
-    <span aria-hidden className={`pointer-events-none invisible absolute top-0 left-0 whitespace-nowrap ${className}`}>
+    <span aria-hidden className={`pointer-events-none invisible absolute top-0 left-0 w-0 overflow-hidden whitespace-nowrap ${className}`}>
       <span data-glyph="digit" className={styles.digit} />
       <span data-glyph="comma" className={styles.comma} />
       <span data-glyph="ellipsis" className={styles.ellipsis} />
