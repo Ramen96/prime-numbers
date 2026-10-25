@@ -16,6 +16,7 @@ import {
 import { estimatedBasePrimeBytes, shouldRestartWorkerToReleaseMemory } from "./memoryBudget.ts";
 import { addBatch, MAX_BATCHES, type Batch } from "./rollingBuffer.ts";
 import { basePrimeLimitNeededFor } from "./wasmSieve.ts";
+import { PRIME_WORKER_NAME } from "./workerNames.ts";
 
 export type { Batch };
 
@@ -200,6 +201,7 @@ export function usePrimeBuffer(firstBatchFromServer: readonly string[]): PrimeBu
   const startWorker = useCallback((): Worker => {
     const worker = new Worker(new URL("./primes.worker.ts", import.meta.url), {
       type: "module",
+      name: PRIME_WORKER_NAME,
     });
     worker.onmessage = (event: MessageEvent<WorkerResponse>) =>
       handleWorkerMessageRef.current(event.data);

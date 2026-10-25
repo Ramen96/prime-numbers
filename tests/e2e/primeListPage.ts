@@ -1,4 +1,5 @@
 import { expect, type Locator, type Page, type Worker } from "@playwright/test";
+import { PRIME_WORKER_NAME } from "../../lib/primes/workerNames.ts";
 
 export const ROW_HEIGHT_PX = 44;
 export const ESTIMATE_BANNER_TEXT =
@@ -30,16 +31,28 @@ export function isSieveThread(worker: Worker): boolean {
   return new URL(worker.url()).pathname === "/sieve-threads/sieve.mjs";
 }
 
-/** A Miller–Rabin worker, also nested inside the prime worker. */
-export function isVerificationWorker(worker: Worker): boolean {
-  return worker.url().includes("verification");
+/**
+ * A worker's name (lib/primes/workerNames.ts), or null if it closed before it
+ * could be asked. The URL can't tell workers apart: Turbopack starts each one
+ * through the same loader script, with hashed chunk names in production.
+ */
+export async function workerName(worker: Worker): Promise<string | null> {
+  try {
+    return await worker.evaluate(() => self.name);
+  } catch {
+    return null;
+  }
 }
 
-/** Collects the page's prime workers as they start (not the workers nested inside them). */
+/**
+ * Collects the page's prime workers as they start (not the sieve threads or
+ * Miller–Rabin workers nested inside them). Each is added once its name has
+ * been read, a moment after it starts.
+ */
 export function collectPrimeWorkers(page: Page): Worker[] {
   const workers: Worker[] = [];
-  page.on("worker", (worker) => {
-    if (!isSieveThread(worker) && !isVerificationWorker(worker)) workers.push(worker);
+  page.on("worker", async (worker) => {
+    if ((await workerName(worker)) === PRIME_WORKER_NAME) workers.push(worker);
   });
   return workers;
 }

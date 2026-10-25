@@ -11,6 +11,7 @@ import { computeBatch } from "./computeBatch";
 import { loadSieve, sievingThreadsFor } from "./loadSieve";
 import type { WorkerRequest, WorkerResponse } from "./protocol";
 import { VerificationPool } from "./verificationPool";
+import { VERIFICATION_WORKER_NAME } from "./workerNames";
 
 declare const self: DedicatedWorkerGlobalScope;
 
@@ -21,7 +22,11 @@ const sieveReady = loadSieve();
 // can use as many workers as there are sieving threads.
 const verificationPool = new VerificationPool(
   sievingThreadsFor(self.navigator.hardwareConcurrency),
-  () => new Worker(new URL("./verification.worker.ts", import.meta.url), { type: "module" }),
+  () =>
+    new Worker(new URL("./verification.worker.ts", import.meta.url), {
+      type: "module",
+      name: VERIFICATION_WORKER_NAME,
+    }),
 );
 
 function sendToMainThread(response: WorkerResponse) {
