@@ -1,4 +1,5 @@
-// The scrolling lists (the prime list, the favorites list) apply this class.
+// The scrolling lists (the prime list, the favorites list) and the full-number
+// popup apply this class.
 // The styles themselves are the shared mixin in _themedScrollbar.scss.
 @use "themedScrollbar" as *;
 

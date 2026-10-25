@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import scrollbar from "./ThemedScrollbar.module.scss";
 import { WrappableNumber } from "./WrappableNumber";
 
 const numberFormatter = new Intl.NumberFormat("en-US");
@@ -11,7 +12,9 @@ const COPIED_MESSAGE_MS = 2000;
  * PrimeList.tsx): every digit, wrapped at commas, how many digits there are,
  * and a Copy button. A native popover, so Escape and clicking outside close
  * it, and the browser keeps it above everything. When it closes, focus goes
- * back to the number that opened it.
+ * back to the number that opened it. It's never taller than the screen: a
+ * number too long for that scrolls inside it, and the heading and buttons
+ * stay in view.
  *
  * Returns `show(value, opener)` and the popover element to render once.
  */
@@ -80,12 +83,17 @@ export function useNumberPopover(): {
       popover="auto"
       role="dialog"
       aria-labelledby={titleId}
-      className="m-auto w-[min(28rem,calc(100vw-2rem))] rounded-lg border border-rule bg-background p-5 text-foreground shadow-xl backdrop:bg-black/30"
+      // open:flex, not flex: a plain display would override the browser's display: none while it's closed
+      className="m-auto max-h-[calc(100dvh-2rem)] w-[min(28rem,calc(100vw-2rem))] flex-col rounded-lg border border-rule bg-background p-5 text-foreground shadow-xl backdrop:bg-black/30 open:flex"
     >
       <h2 id={titleId} className="text-xs tracking-widest text-muted uppercase">
         {numberFormatter.format(digitCount)} digits
       </h2>
-      <p className="mt-2 font-mono text-lg leading-snug tabular-nums">
+      {/* Focusable so the keyboard can scroll it when it's too long to show at once. */}
+      <p
+        tabIndex={0}
+        className={`${scrollbar.themedScrollbar} mt-2 min-h-0 overflow-y-auto rounded-sm font-mono text-lg leading-snug tabular-nums focus-visible:outline-2 focus-visible:outline-(--heat-text)`}
+      >
         <WrappableNumber value={request?.value ?? null} />
       </p>
       <div className="mt-4 flex items-center gap-2">
