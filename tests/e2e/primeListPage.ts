@@ -14,6 +14,17 @@ export interface VisibleRow {
   topPx: number;
 }
 
+export interface VisiblePrimeDisplay {
+  /** The exact prime, from data-prime. */
+  prime: string;
+  /** What the row shows: the whole formatted prime, or a shortened one with "…". */
+  shownText: string;
+  shortened: boolean;
+  /** A shortened prime's accessible name (the whole number); null when it's shown whole. */
+  accessibleName: string | null;
+  rowHeightPx: number;
+}
+
 /** A sieve thread: one of the workers the threaded build starts inside the prime worker. */
 export function isSieveThread(worker: Worker): boolean {
   return new URL(worker.url()).pathname === "/sieve-threads/sieve.mjs";
@@ -146,6 +157,36 @@ export class PrimeListPage {
         .map((row) => row.dataset.prime!);
     });
     return primeStrings.map((prime) => BigInt(prime));
+  }
+
+  /**
+   * How each fully visible prime is shown, top to bottom: the exact prime
+   * (data-prime), the text on screen, and, when shortened, the button that
+   * opens it in full with its accessible name. With `onlyFullyVisible: false`,
+   * every rendered row, including those just off screen.
+   */
+  async visiblePrimeDisplays({ onlyFullyVisible = true } = {}): Promise<VisiblePrimeDisplay[]> {
+    return this.primeList.evaluate((list, onlyFullyVisible) => {
+      const listBox = list.getBoundingClientRect();
+      return [...list.querySelectorAll<HTMLElement>('[data-testid="prime-row"]')]
+        .filter((row) => {
+          if (!onlyFullyVisible) return true;
+          const rowBox = row.getBoundingClientRect();
+          return rowBox.top >= listBox.top - 0.5 && rowBox.bottom <= listBox.bottom + 0.5;
+        })
+        .sort((rowA, rowB) => rowA.getBoundingClientRect().top - rowB.getBoundingClientRect().top)
+        .map((row) => {
+          const shortenedButton = row.querySelector<HTMLElement>('button[aria-haspopup="dialog"]');
+          const primeText = row.querySelector<HTMLElement>(".font-mono")?.textContent ?? "";
+          return {
+            prime: row.dataset.prime!,
+            shownText: primeText,
+            shortened: shortenedButton !== null,
+            accessibleName: shortenedButton?.getAttribute("aria-label") ?? null,
+            rowHeightPx: row.getBoundingClientRect().height,
+          };
+        });
+    }, onlyFullyVisible);
   }
 
   /**
