@@ -66,37 +66,52 @@ test.describe("long primes in the list", () => {
     }
     const overflow = await primeListPage.primeList.evaluate((list) => ({
       list: { content: list.scrollWidth, visible: list.clientWidth },
-      clippedPrimes: [...list.querySelectorAll<HTMLElement>('[data-testid="prime-row"] button[aria-haspopup]')]
-        .filter((button) => button.scrollWidth > button.clientWidth)
-        .map((button) => button.textContent),
+      clippedPrimes: [...list.querySelectorAll<HTMLElement>('[data-testid="prime-row"] button[aria-haspopup] .font-mono')]
+        .filter((shownPrime) => shownPrime.scrollWidth > shownPrime.clientWidth)
+        .map((shownPrime) => shownPrime.textContent),
     }));
     expect(overflow.list.content).toBeLessThanOrEqual(overflow.list.visible);
-    expect(overflow.clippedPrimes, "shortened primes cut off inside their button").toEqual([]);
+    expect(overflow.clippedPrimes, "shortened primes cut off at the edge of their row").toEqual([]);
   });
 
-  test("are tap targets at least 44px tall, inside their own row", async ({ page }) => {
+  test("are tap targets 44px tall, reaching as much of their row as the star", async ({ page }) => {
     const primeListPage = await openNearTwoToThe64(page);
     await primeListPage.primeList.scrollIntoViewIfNeeded();
     // Probe every pixel down the middle of a shortened prime whose row is
-    // fully inside the list, and count how much of its own row reaches it.
-    const tapTarget = await primeListPage.primeList.evaluate((list) => {
+    // fully inside the list, and of that row's star (the reference 44px
+    // target), counting how much of the row reaches each.
+    const tapTargets = await primeListPage.primeList.evaluate((list) => {
       const listBox = list.getBoundingClientRect();
-      for (const button of list.querySelectorAll<HTMLElement>('[data-testid="prime-row"] button[aria-haspopup]')) {
-        const rowBox = button.closest('[data-testid="prime-row"]')!.getBoundingClientRect();
+      for (const primeButton of list.querySelectorAll<HTMLElement>('[data-testid="prime-row"] button[aria-haspopup]')) {
+        const row = primeButton.closest<HTMLElement>('[data-testid="prime-row"]')!;
+        const rowBox = row.getBoundingClientRect();
         if (rowBox.top < listBox.top || rowBox.bottom > listBox.bottom) continue;
-        const buttonBox = button.getBoundingClientRect();
-        const centerX = buttonBox.left + buttonBox.width / 2;
-        let hitHeightPx = 0;
-        for (let y = Math.ceil(rowBox.top); y < rowBox.bottom; y++) {
-          const hit = document.elementFromPoint(centerX, y);
-          if (hit !== null && (hit === button || button.contains(hit))) hitHeightPx++;
-        }
-        return { prime: button.getAttribute("aria-label"), hitHeightPx };
+        const starButton = row.querySelector<HTMLElement>("button[aria-pressed]")!;
+        const rowHeightReaching = (button: HTMLElement) => {
+          const buttonBox = button.getBoundingClientRect();
+          const centerX = buttonBox.left + buttonBox.width / 2;
+          let heightPx = 0;
+          for (let y = Math.ceil(rowBox.top); y < rowBox.bottom; y++) {
+            const hit = document.elementFromPoint(centerX, y);
+            if (hit !== null && (hit === button || button.contains(hit))) heightPx++;
+          }
+          return heightPx;
+        };
+        return {
+          prime: primeButton.getAttribute("aria-label"),
+          primeButtonHeightPx: primeButton.getBoundingClientRect().height,
+          primeReachesPx: rowHeightReaching(primeButton),
+          starReachesPx: rowHeightReaching(starButton),
+        };
       }
       return null;
     });
-    expect(tapTarget, "a shortened prime whose row is inside the list").not.toBeNull();
-    expect(tapTarget!.hitHeightPx, `px of ${tapTarget!.prime}'s row that open it`).toBeGreaterThanOrEqual(44);
+    expect(tapTargets, "a shortened prime whose row is inside the list").not.toBeNull();
+    const { prime, primeButtonHeightPx, primeReachesPx, starReachesPx } = tapTargets!;
+    expect(primeButtonHeightPx, `${prime}'s button height`).toBeGreaterThanOrEqual(44);
+    expect(primeReachesPx, `px of ${prime}'s row that open it (the star reaches ${starReachesPx})`).toBeGreaterThanOrEqual(
+      starReachesPx,
+    );
   });
 
   test("are shown whole once there's room, and shortened again when there isn't", async ({ page }) => {

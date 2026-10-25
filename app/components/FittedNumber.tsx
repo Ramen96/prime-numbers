@@ -7,13 +7,18 @@ import { GlyphRuler, readGlyphWidths } from "./GlyphRuler";
 const numberFormatter = new Intl.NumberFormat("en-US");
 
 /**
- * Classes for a shortened number, which opens the full one when clicked: a
- * dotted underline as the hint, and a 44px-tall tap target (an invisible
- * ::before) whatever the font size. Clipped sideways only, so nothing can
- * overflow but the tap target isn't cut off above and below.
+ * How a shortened number looks: a dotted underline as the hint that it opens
+ * in full. Clipped sideways only, so nothing can overflow but nothing above
+ * or below (such as a tap target) is cut off.
  */
-export const SHORTENED_NUMBER_CLASSES =
-  "relative max-w-full cursor-pointer overflow-x-clip rounded-sm text-left whitespace-nowrap underline decoration-dotted decoration-1 underline-offset-4 focus-visible:outline-2 focus-visible:outline-(--heat-text) before:absolute before:inset-x-0 before:top-1/2 before:h-11 before:-translate-y-1/2 before:content-['']";
+export const SHORTENED_NUMBER_HINT_CLASSES =
+  "max-w-full overflow-x-clip whitespace-nowrap underline decoration-dotted decoration-1 underline-offset-4";
+
+/**
+ * Classes for a shortened number that is itself the button: the hint, and a
+ * 44px-tall tap target (an invisible ::before) whatever the font size.
+ */
+export const SHORTENED_NUMBER_CLASSES = `${SHORTENED_NUMBER_HINT_CLASSES} relative cursor-pointer rounded-sm text-left focus-visible:outline-2 focus-visible:outline-(--heat-text) before:absolute before:inset-x-0 before:top-1/2 before:h-11 before:-translate-y-1/2 before:content-['']`;
 
 /**
  * A number on one line in whatever width its container gives it, shortened

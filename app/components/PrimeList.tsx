@@ -5,7 +5,7 @@ import { bufferLabelsAreEstimated } from "@/lib/primes/rollingBuffer";
 import type { Batch, BufferStatus, ScrollInstruction } from "@/lib/primes/usePrimeBuffer";
 import { MEMORY_LIMIT_LINES } from "@/lib/mentatLines";
 import { fitNumber, textWidth, type GlyphWidths } from "@/lib/shortenNumber";
-import { SHORTENED_NUMBER_CLASSES } from "./FittedNumber";
+import { SHORTENED_NUMBER_HINT_CLASSES } from "./FittedNumber";
 import { GlyphRuler, readGlyphWidths } from "./GlyphRuler";
 import { PI_PRIME, PiMark } from "./PiMark";
 import { useMentatLine } from "./useMentatLine";
@@ -53,7 +53,10 @@ const PRIME_ROW_CLASSES =
   "absolute inset-x-0 top-0 flex items-center gap-1 border-b border-rule pr-4 pl-1 whitespace-nowrap tabular-nums sm:gap-3 sm:pr-5 sm:pl-2";
 const PRIME_AND_LABEL_CLASSES =
   "flex min-w-0 flex-1 flex-col items-end leading-tight sm:flex-row sm:items-baseline sm:justify-between";
-const LABEL_FONT_CLASSES = "text-[0.7rem] sm:text-[0.8rem]";
+/** A shortened prime's row button: the space beside the star, with the prime and label centred in it. */
+const SHORTENED_ROW_BUTTON_CLASSES =
+  "flex h-11 min-w-0 flex-1 cursor-pointer items-center rounded-sm text-left focus-visible:outline-2 focus-visible:outline-(--heat-text)";
+const LABEL_FONT_CLASSES ="text-[0.7rem] sm:text-[0.8rem]";
 const PRIME_FONT_CLASSES = "font-mono text-[clamp(1rem,4.6vw,1.25rem)]";
 const STATUS_ROW_CLASSES =
   "absolute inset-x-0 top-0 flex items-center justify-center border-b border-rule px-4 text-muted italic";
@@ -330,6 +333,16 @@ export function PrimeList({
           : rowSpace.columnPx;
         shownPrime = fitNumber(formattedPrime, availablePx, rowSpace.primeGlyphs);
       }
+      const labelId = `prime-label-${prime}`;
+      const label = (
+        <span
+          id={labelId}
+          data-testid="prime-label"
+          className={`order-2 ${LABEL_FONT_CLASSES} text-muted sm:order-1 ${labelsAreEstimated ? "opacity-70" : ""}`}
+        >
+          {labelsAreEstimated ? `≈ #${ordinal}` : `#${ordinal}`}
+        </span>
+      );
       renderedRows.push(
         <div
           key={String(prime)}
@@ -347,32 +360,35 @@ export function PrimeList({
           >
             <StarIcon filled={isFavorite} />
           </button>
-          <div className={PRIME_AND_LABEL_CLASSES}>
-            <span
-              data-testid="prime-label"
-              className={`order-2 ${LABEL_FONT_CLASSES} text-muted sm:order-1 ${labelsAreEstimated ? "opacity-70" : ""}`}
+          {shownPrime.shortened ? (
+            // The prime and its label together are the button, so the whole
+            // row beside the star (44px tall, like the star) opens it in full,
+            // wherever the label sits. The whole prime is the accessible name.
+            <button
+              type="button"
+              aria-label={formattedPrime}
+              aria-describedby={labelId}
+              aria-haspopup="dialog"
+              onClick={(event) => onShowFullPrime(prime, event.currentTarget)}
+              className={SHORTENED_ROW_BUTTON_CLASSES}
             >
-              {labelsAreEstimated ? `≈ #${ordinal}` : `#${ordinal}`}
-            </span>
-            {shownPrime.shortened ? (
-              // The whole prime stays the accessible name; a tap shows it all.
-              <button
-                type="button"
-                aria-label={formattedPrime}
-                aria-haspopup="dialog"
-                onClick={(event) => onShowFullPrime(prime, event.currentTarget)}
-                className={`order-1 ${PRIME_FONT_CLASSES} sm:order-2 ${SHORTENED_NUMBER_CLASSES}`}
-              >
-                <span aria-hidden>{shownPrime.text}</span>
-              </button>
-            ) : (
+              <span className={PRIME_AND_LABEL_CLASSES}>
+                {label}
+                <span aria-hidden className={`order-1 ${PRIME_FONT_CLASSES} sm:order-2 ${SHORTENED_NUMBER_HINT_CLASSES}`}>
+                  {shownPrime.text}
+                </span>
+              </span>
+            </button>
+          ) : (
+            <div className={PRIME_AND_LABEL_CLASSES}>
+              {label}
               <span className={`order-1 ${PRIME_FONT_CLASSES} sm:order-2`}>
                 {formattedPrime}
                 {prime === PI_PRIME && <PiMark />}
                 {prime === WOLF_359_PRIME && <Wolf359Mark />}
               </span>
-            )}
-          </div>
+            </div>
+          )}
         </div>,
       );
     }
