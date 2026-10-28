@@ -96,10 +96,16 @@ export interface PrimeBuffer {
   /** True once the current calculation has run long enough to offer a Stop button. */
   calculationIsSlow: boolean;
   /**
-   * The sieve reached this device's memory limit going up: the base primes it
-   * needs next don't fit. The list stops at the last proven prime. Cleared by a jump.
+   * The sieve ran out of memory going up before it could settle the next
+   * number. The list stops at the last proven prime. Cleared by a jump.
    */
   reachedMemoryLimit: boolean;
+  /**
+   * The sieve reached the bound where Miller–Rabin is proven (a(13), about
+   * 3.3 × 10^24) going up: the next number it can't cross off stays unchecked
+   * until Phase 5's proofs. The list stops at the last proven prime. Cleared by a jump.
+   */
+  reachedProvenBound: boolean;
   /** The most recent completed jump, or null if the user hasn't jumped. */
   lastJump: JumpResult | null;
   /** Throw the buffer away and restart it at the first prime ≥ `target`. */
@@ -153,6 +159,7 @@ export function usePrimeBuffer(firstBatchFromServer: readonly string[]): PrimeBu
   const [calculationIsSlow, setCalculationIsSlow] = useState(false);
   const [lastJump, setLastJump] = useState<JumpResult | null>(null);
   const [reachedMemoryLimit, setReachedMemoryLimit] = useState(false);
+  const [reachedProvenBound, setReachedProvenBound] = useState(false);
 
   // These refs hold the same values as state, but update instantly. The worker
   // message handler and the scroll handler read them, so they always see the
@@ -188,6 +195,7 @@ export function usePrimeBuffer(firstBatchFromServer: readonly string[]): PrimeBu
    * stops at the last proven prime. Scrolling back down still works.
    */
   const memoryLimitReachedRef = useRef(false);
+  const provenBoundReachedRef = useRef(false);
   /**
    * True from page load until the buffer holds MAX_BATCHES. The server sends
    * the first batch, so nothing has been timed yet; filling the buffer right
@@ -237,7 +245,7 @@ export function usePrimeBuffer(firstBatchFromServer: readonly string[]): PrimeBu
   const requestBatch = useCallback(
     (direction: Direction, from: bigint) => {
       if (pendingRequestRef.current || cannotContinueRef.current) return;
-      if (direction === "next" && memoryLimitReachedRef.current) return;
+      if (direction === "next" && (memoryLimitReachedRef.current || provenBoundReachedRef.current)) return;
       const worker = workerRef.current ?? startWorker();
 
       const id = ++lastRequestIdRef.current;
@@ -281,6 +289,7 @@ export function usePrimeBuffer(firstBatchFromServer: readonly string[]): PrimeBu
       if (pendingRequestRef.current) discardWorker();
       cannotContinueRef.current = false;
       memoryLimitReachedRef.current = false;
+      provenBoundReachedRef.current = false;
 
       heldBatchesRef.current = [];
       // Measure the new region on its own, not averaged with where we were.
@@ -303,6 +312,7 @@ export function usePrimeBuffer(firstBatchFromServer: readonly string[]): PrimeBu
       setLastJump(null);
       setPrimesPerSecond(null);
       setReachedMemoryLimit(false);
+      setReachedProvenBound(false);
       setErrorMessage(null);
       // Wasm memory never shrinks. If the worker grew for somewhere far away
       // and this jump needs much less, start a fresh one to give it back.
@@ -369,7 +379,7 @@ export function usePrimeBuffer(firstBatchFromServer: readonly string[]): PrimeBu
 
       pendingRequestRef.current = null;
       clearSlowCalculation();
-      if (response.type === "batch" || response.type === "memory-limit") {
+      if (response.type === "batch" || response.type === "memory-limit" || response.type === "proven-bound") {
         workerMemoryBytesRef.current = response.memory.moduleBytes;
         setBasePrimeMemoryBytes(response.memory.basePrimeBytes);
       }
@@ -381,6 +391,16 @@ export function usePrimeBuffer(firstBatchFromServer: readonly string[]): PrimeBu
         pendingSeedRef.current = null;
         fillingOnLoadRef.current = false;
         setReachedMemoryLimit(true);
+        setStatus("idle");
+        return;
+      }
+      if (response.type === "proven-bound") {
+        // The same, at the bound where Miller–Rabin stops being a proof: a
+        // jump past it leaves an empty list, with the notice explaining.
+        provenBoundReachedRef.current = true;
+        pendingSeedRef.current = null;
+        fillingOnLoadRef.current = false;
+        setReachedProvenBound(true);
         setStatus("idle");
         return;
       }
@@ -402,6 +422,12 @@ export function usePrimeBuffer(firstBatchFromServer: readonly string[]): PrimeBu
         memoryLimitReachedRef.current = true;
         fillingOnLoadRef.current = false;
         setReachedMemoryLimit(true);
+      }
+      if (response.reachedProvenBound && direction === "next") {
+        // These primes are proven; the next number can't be until Phase 5.
+        provenBoundReachedRef.current = true;
+        fillingOnLoadRef.current = false;
+        setReachedProvenBound(true);
       }
       if (newPrimes.length === 0) return; // asked for primes before 2; there are none
 
@@ -535,6 +561,7 @@ export function usePrimeBuffer(firstBatchFromServer: readonly string[]): PrimeBu
     errorMessage,
     calculationIsSlow,
     reachedMemoryLimit,
+    reachedProvenBound,
     lastJump,
     jumpTo,
     stop,

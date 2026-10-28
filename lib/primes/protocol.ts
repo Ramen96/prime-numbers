@@ -52,12 +52,19 @@ export interface BatchResponse extends RequestTags {
   direction: Direction;
   /**
    * Primes in ascending order regardless of direction. May hold fewer than
-   * `count` primes: for "prev" near 2, or when the sieve reached this device's
-   * memory limit part way through (then `reachedMemoryLimit` is set).
+   * `count` primes: for "prev" near 2, or when the sieve stopped part way
+   * through at a number it couldn't settle (then `reachedProvenBound` or
+   * `reachedMemoryLimit` says why).
    */
   primes: bigint[];
-  /** The sieve stopped because the base primes it needs next don't fit in memory. */
+  /** The sieve stopped because memory ran out before it could settle the next number. */
   reachedMemoryLimit: boolean;
+  /**
+   * The sieve stopped at a number past the bound where Miller–Rabin is proven
+   * (a(13), about 3.3 × 10^24): it and everything after it stay unchecked
+   * until a primality proof can settle them (Phase 5).
+   */
+  reachedProvenBound: boolean;
   /** Time spent sieving this batch, from performance.now(). The speed counter uses only this. */
   sievingDurationMs: number;
   /**
@@ -77,12 +84,23 @@ export interface BatchResponse extends RequestTags {
 }
 
 /**
- * No primes could be proven at all for this request: the base primes the
- * sieve would need don't fit in this device's memory. Nothing is skipped or
- * guessed; everything from `from` on stays unchecked.
+ * No primes could be proven at all for this request: memory ran out before
+ * the sieve could settle the first number. Nothing is skipped or guessed;
+ * everything from `from` on stays unchecked.
  */
 export interface MemoryLimitResponse extends RequestTags {
   type: "memory-limit";
+  memory: WorkerMemory;
+}
+
+/**
+ * No primes could be proven at all for this request: the first number the
+ * sieve couldn't cross off is past the bound where Miller–Rabin is proven
+ * (a(13), about 3.3 × 10^24). Nothing is skipped or guessed; it and everything
+ * after it stay unchecked until a primality proof can settle them (Phase 5).
+ */
+export interface ProvenBoundResponse extends RequestTags {
+  type: "proven-bound";
   memory: WorkerMemory;
 }
 
@@ -95,4 +113,5 @@ export type WorkerResponse =
   | BuildingBasePrimesNotice
   | BatchResponse
   | MemoryLimitResponse
+  | ProvenBoundResponse
   | ErrorResponse;

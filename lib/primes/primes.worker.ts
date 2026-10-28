@@ -45,7 +45,7 @@ self.onmessage = (event: MessageEvent<WorkerRequest>) => {
       await computeBatch(sieve, request, sendToMainThread, {
         memoryBudgetBytes,
         threads,
-        verify: (primes) => verificationPool.verify(primes),
+        verify: (primes, rejected) => verificationPool.verify(primes, rejected),
       });
     } catch (error) {
       sendToMainThread({

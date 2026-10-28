@@ -1,32 +1,42 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { computeBatch, type ComputeBatchOptions, type Sieve } from "./computeBatch.ts";
+import { computeBatch, PARTIAL_SIEVE_PRIME_CAP, type ComputeBatchOptions, type Sieve } from "./computeBatch.ts";
 import { fewestBasePrimeBytes } from "./memoryBudget.ts";
 import type { BatchRequest, WorkerResponse } from "./protocol.ts";
-import { basePrimeLimitNeededFor } from "./wasmSieve.ts";
+import { basePrimeLimitNeededFor, NO_SIEVE_PRIME_CAP, type RejectedComposite } from "./wasmSieve.ts";
 
 const REQUEST: BatchRequest = { type: "batch", id: 1, generation: 1, direction: "next", from: 1n, count: 5 };
 
-type StandInSieve = Sieve & { reservations: number[] };
+type StandInSieve = Sieve & { reservations: number[]; caps: bigint[] };
 
 /** A stand-in sieve that returns whatever it's told to, right or wrong. */
 function standInSieve(
   primes: bigint[],
-  options: { basePrimeLimit?: bigint; extends?: boolean; measuringMs?: number } = {},
+  options: {
+    basePrimeLimit?: bigint;
+    extends?: boolean;
+    measuringMs?: number;
+    rejected?: RejectedComposite[];
+    reachedMemoryLimit?: boolean;
+    reachedProvenBound?: boolean;
+  } = {},
 ): StandInSieve {
   const reservations: number[] = [];
+  const caps: bigint[] = [];
   return {
     reservations,
+    caps,
     basePrimeLimit: () => options.basePrimeLimit ?? 10n ** 12n,
     extendBasePrimes: () => options.extends ?? true,
     reserveBasePrimeStorage: (bytes) => (reservations.push(bytes), true),
     basePrimeMemoryBytes: () => 1234,
     moduleMemoryBytes: () => 5678,
+    setSievePrimeCap: (cap) => void caps.push(cap),
     findPrimes: () => ({
       primes,
-      rejected: [],
-      reachedMemoryLimit: false,
-      reachedProvenBound: false,
+      rejected: options.rejected ?? [],
+      reachedMemoryLimit: options.reachedMemoryLimit ?? false,
+      reachedProvenBound: options.reachedProvenBound ?? false,
       measuringMs: options.measuringMs ?? 0,
     }),
   };
@@ -94,25 +104,79 @@ describe("computeBatch", () => {
     if (sent[0].type === "error") assert.match(sent[0].message, /reported 9 as prime/);
   });
 
-  it("announces base-prime building, then reports the memory limit if it fails", async () => {
-    const sent = await run(standInSieve([], { basePrimeLimit: 0n, extends: false }), { ...REQUEST, from: 2n ** 63n });
-    assert.deepEqual(sent.map((response) => response.type), ["building-base-primes", "memory-limit"]);
+  it("sieves fully, with no cap, when every base prime a batch needs fits", async () => {
+    const sieve = standInSieve([2n, 3n, 5n]);
+    await run(sieve);
+    assert.deepEqual(sieve.caps, [NO_SIEVE_PRIME_CAP]);
   });
 
-  it("reports the memory limit at once when base primes can't possibly fit", async () => {
-    const sieve = standInSieve([]);
-    const sent = await run(sieve, { ...REQUEST, from: 10n ** 30n });
-    assert.deepEqual(sent.map((response) => response.type), ["memory-limit"]);
-    assert.deepEqual(sieve.reservations, [], "nothing reserved for a jump that can't fit");
+  it("announces base-prime building, and if it runs out of memory, sieves partially instead", async () => {
+    const sieve = standInSieve([9223372036854775837n], { basePrimeLimit: 0n, extends: false });
+    const sent = await run(sieve, { ...REQUEST, from: 2n ** 63n, count: 1 });
+    assert.deepEqual(sent.map((response) => response.type), ["building-base-primes", "batch"]);
+    assert.deepEqual(sieve.caps, [PARTIAL_SIEVE_PRIME_CAP]);
+  });
+
+  it("sieves partially at once when base primes can't possibly fit: nothing built, nothing reserved", async () => {
+    const sieve = standInSieve([10n ** 30n + 57n]);
+    // past a(13) nothing could be verified; this test is about building and reserving
+    const sent = await run(sieve, { ...REQUEST, from: 10n ** 30n, count: 1 }, null, {
+      verify: async () => ({ verified: true }),
+    });
+    assert.deepEqual(sent.map((response) => response.type), ["batch"]);
+    assert.deepEqual(sieve.caps, [PARTIAL_SIEVE_PRIME_CAP]);
+    assert.deepEqual(sieve.reservations, []);
   });
 
   it("checks against the device's budget, not just the module's address space", async () => {
     // near 10^21 the base primes take about 1.4 GB
-    const request = { ...REQUEST, from: 10n ** 21n };
-    const withRoom = await run(standInSieve([], { basePrimeLimit: 0n, extends: false }), request, 2 * 2 ** 30);
-    assert.deepEqual(withRoom.map((response) => response.type), ["building-base-primes", "memory-limit"]);
-    const withoutRoom = await run(standInSieve([], { basePrimeLimit: 0n }), request, 2 ** 30);
-    assert.deepEqual(withoutRoom.map((response) => response.type), ["memory-limit"]);
+    const request = { ...REQUEST, from: 10n ** 21n, count: 1 };
+    const prime = [10n ** 21n + 117n];
+    const withRoom = standInSieve(prime, { basePrimeLimit: 0n });
+    assert.deepEqual((await run(withRoom, request, 2 * 2 ** 30)).map((response) => response.type), [
+      "building-base-primes",
+      "batch",
+    ]);
+    assert.deepEqual(withRoom.caps, [NO_SIEVE_PRIME_CAP]);
+    const withoutRoom = standInSieve(prime, { basePrimeLimit: 0n });
+    assert.deepEqual((await run(withoutRoom, request, 2 ** 30)).map((response) => response.type), ["batch"]);
+    assert.deepEqual(withoutRoom.caps, [PARTIAL_SIEVE_PRIME_CAP]);
+  });
+
+  it("passes the rejected composites to the verifier with the primes", async () => {
+    const rejected = [{ candidate: 2047n, evidence: 3 }];
+    const checked: unknown[] = [];
+    await run(standInSieve([2053n], { rejected }), REQUEST, null, {
+      verify: async (primes, rejectedComposites) => (checked.push([primes, rejectedComposites]), { verified: true }),
+    });
+    assert.deepEqual(checked, [[[2053n], rejected]]);
+  });
+
+  it("never sends a batch with a rejected composite whose evidence doesn't hold", async () => {
+    const sent = await run(standInSieve([2053n], { rejected: [{ candidate: 2039n, evidence: 3 }] })); // 2039 is prime
+    assert.deepEqual(sent.map((response) => response.type), ["error"]);
+    if (sent[0].type === "error") assert.match(sent[0].message, /rejected 2039 as composite/);
+  });
+
+  it("says the proven bound was reached when no prime could be proven", async () => {
+    const sent = await run(standInSieve([], { reachedProvenBound: true, rejected: [{ candidate: 15n, evidence: 3 }] }));
+    assert.deepEqual(sent.map((response) => response.type), ["proven-bound"]);
+  });
+
+  it("sends the primes proven before the bound, flagged", async () => {
+    const [response] = await run(standInSieve([2n, 3n], { reachedProvenBound: true }));
+    assert.equal(response.type, "batch");
+    if (response.type === "batch") assert.equal(response.reachedProvenBound, true);
+  });
+
+  it("checks the rejected composites even when it stops at the bound with no primes", async () => {
+    const sent = await run(standInSieve([], { reachedProvenBound: true, rejected: [{ candidate: 2039n, evidence: 3 }] }));
+    assert.deepEqual(sent.map((response) => response.type), ["error"]);
+  });
+
+  it("reports the memory limit only when the sieve ran out with no prime proven", async () => {
+    const sent = await run(standInSieve([], { reachedMemoryLimit: true }));
+    assert.deepEqual(sent.map((response) => response.type), ["memory-limit"]);
   });
 
   it("reserves base-prime storage from an estimate before building, within the budget", async () => {
