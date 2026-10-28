@@ -1,7 +1,15 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { isPrime as referenceIsPrime } from "../../tests/support/primality.ts";
-import { DETERMINISTIC_VERIFICATION_LIMIT, millerRabinVerdict, verifyPrimes } from "./verifyPrimes.ts";
+import {
+  compositeEvidenceHolds,
+  DETERMINISTIC_VERIFICATION_LIMIT,
+  millerRabinVerdict,
+  verifyBatch,
+  verifyPrimes,
+} from "./verifyPrimes.ts";
+
+const EVIDENCE_BASES = [2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41];
 
 describe("millerRabinVerdict", () => {
   it("catches every strong pseudoprime from OEIS A014233", () => {
@@ -40,6 +48,67 @@ describe("verifyPrimes", () => {
 
   it("names the first number that isn't proven prime", () => {
     assert.deepEqual(verifyPrimes([7n, 11n, 2047n, 13n, 15n]), {
+      verified: false,
+      disputedPrime: 2047n,
+      verdict: "composite",
+    });
+  });
+});
+
+describe("compositeEvidenceHolds (re-checking the sieve's rejected composites)", () => {
+  it("accepts a small prime that divides the candidate", () => {
+    assert.equal(compositeEvidenceHolds(15n, 3), true);
+    assert.equal(compositeEvidenceHolds(15n, 5), true);
+    assert.equal(compositeEvidenceHolds(3n * (2n ** 64n + 13n), 3), true); // at any size
+  });
+
+  it("accepts a Miller–Rabin witness, and not a base the composite fools", () => {
+    // 2047 = 23 × 89 is a strong pseudoprime to base 2, but base 3 is a witness
+    assert.equal(compositeEvidenceHolds(2047n, 2), false);
+    assert.equal(compositeEvidenceHolds(2047n, 3), true);
+    // a product of two primes near 2^40: no small factor, so only a witness can prove it
+    const semiprime = 1_000_000_000_039n * 1_000_000_000_061n;
+    const witnesses = EVIDENCE_BASES.filter((base) => compositeEvidenceHolds(semiprime, base));
+    assert.ok(witnesses.length > 0);
+  });
+
+  it("never holds for a prime, whatever the evidence: a prime rejected by mistake is always caught", () => {
+    const primes = [
+      43n, 1_000_003n, 4_294_967_311n, 2n ** 61n - 1n, 2n ** 64n - 59n, 2n ** 64n + 13n,
+      100_000_000_000_000_000_039n, 1_000_000_000_000_000_000_000_007n,
+    ];
+    for (const prime of primes) {
+      for (const evidence of [0, 1, ...EVIDENCE_BASES, 43, 2 ** 32 - 1]) {
+        assert.equal(compositeEvidenceHolds(prime, evidence), false, `${prime} with evidence ${evidence}`);
+      }
+    }
+  });
+
+  it("doesn't accept 1, 0 or the candidate itself as a factor", () => {
+    assert.equal(compositeEvidenceHolds(9n, 1), false);
+    assert.equal(compositeEvidenceHolds(9n, 0), false);
+    assert.equal(compositeEvidenceHolds(41n, 41), false);
+  });
+});
+
+describe("verifyBatch", () => {
+  it("accepts proven primes and proven composites", () => {
+    assert.deepEqual(
+      verifyBatch([1_000_003n], [{ candidate: 2047n, evidence: 3 }, { candidate: 1_000_005n, evidence: 5 }]),
+      { verified: true },
+    );
+  });
+
+  it("names the first rejected composite whose evidence doesn't hold", () => {
+    assert.deepEqual(verifyBatch([1_000_003n], [{ candidate: 2047n, evidence: 3 }, { candidate: 1_000_033n, evidence: 7 }]), {
+      verified: false,
+      disputedComposite: 1_000_033n,
+      evidence: 7,
+    });
+  });
+
+  it("checks the primes first", () => {
+    assert.deepEqual(verifyBatch([2047n], [{ candidate: 1_000_033n, evidence: 7 }]), {
       verified: false,
       disputedPrime: 2047n,
       verdict: "composite",

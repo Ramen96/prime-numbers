@@ -7,19 +7,21 @@ import {
   VerificationPool,
   type VerificationRequest,
 } from "./verificationPool.ts";
-import { verifyPrimes } from "./verifyPrimes.ts";
+import { verifyBatch } from "./verifyPrimes.ts";
+import type { RejectedComposite } from "./wasmSieve.ts";
 
 /** A stand-in worker that verifies for real, or fails, and records what it was sent. */
-function standInWorker(sent: bigint[][], options: { fails?: boolean } = {}): Worker {
+function standInWorker(sent: bigint[][], options: { fails?: boolean; sentRejected?: RejectedComposite[][] } = {}): Worker {
   const worker = {
     onmessage: null as ((event: { data: unknown }) => void) | null,
     onerror: null as ((event: { message: string; preventDefault(): void }) => void) | null,
     terminated: false,
-    postMessage({ primes }: VerificationRequest) {
+    postMessage({ primes, rejected }: VerificationRequest) {
       sent.push(primes);
+      options.sentRejected?.push(rejected);
       queueMicrotask(() => {
         if (options.fails) worker.onerror?.({ message: "failed to load", preventDefault() {} });
-        else worker.onmessage?.({ data: { verification: verifyPrimes(primes) } });
+        else worker.onmessage?.({ data: { verification: verifyBatch(primes, rejected) } });
       });
     },
     terminate() {
@@ -98,6 +100,48 @@ describe("VerificationPool", () => {
     let started = 0;
     const pool = new VerificationPool(1, () => (started++, standInWorker([])));
     assert.deepEqual(await pool.verify(BIG_PRIMES), { verified: true });
+    assert.equal(started, 0);
+  });
+});
+
+describe("VerificationPool and rejected composites (Phase 4)", () => {
+  // composites just past 2^32 with no factor up to 41 for most, and evidence that proves each
+  const REJECTED: RejectedComposite[] = [
+    { candidate: BIG + 17n, evidence: 3 }, // 3 × 1431655771
+    { candidate: BIG * 3n, evidence: 2 }, // even
+    { candidate: 4_294_967_297n, evidence: 3 }, // 2^32 + 1 = 641 × 6700417; 3 is a witness
+  ];
+
+  it("shares rejected composites between its workers too, and checks every one once", async () => {
+    const sent: bigint[][] = [];
+    const sentRejected: RejectedComposite[][] = [];
+    const pool = new VerificationPool(3, () => standInWorker(sent, { sentRejected }));
+    assert.deepEqual(await pool.verify(BIG_PRIMES, REJECTED), { verified: true });
+    assert.deepEqual(sent.flat(), BIG_PRIMES);
+    assert.deepEqual(sentRejected.flat(), REJECTED);
+  });
+
+  it("finds a rejected composite whose evidence doesn't hold, whichever share it's in", async () => {
+    const wronglyRejected = { candidate: BIG_PRIMES[2], evidence: 7 }; // a prime
+    const pool = new VerificationPool(3, () => standInWorker([]));
+    assert.deepEqual(await pool.verify(BIG_PRIMES.slice(0, 2), [...REJECTED, wronglyRejected]), {
+      verified: false,
+      disputedComposite: wronglyRejected.candidate,
+      evidence: 7,
+    });
+  });
+
+  it("checks rejected composites even in a batch with no primes", async () => {
+    const pool = new VerificationPool(3, () => standInWorker([]));
+    assert.deepEqual(await pool.verify([], REJECTED), { verified: true });
+    assert.equal((await pool.verify([], [{ candidate: BIG_PRIMES[0], evidence: 2 }])).verified, false);
+  });
+
+  it("checks small ones inline", async () => {
+    let started = 0;
+    const pool = new VerificationPool(4, () => (started++, standInWorker([])));
+    assert.deepEqual(await pool.verify([7n], [{ candidate: 9n, evidence: 3 }]), { verified: true });
+    assert.equal((await pool.verify([7n], [{ candidate: 11n, evidence: 3 }])).verified, false);
     assert.equal(started, 0);
   });
 });

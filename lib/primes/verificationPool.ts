@@ -4,14 +4,18 @@
 // batch near 2^63 on a laptop, 56 ms on a slow phone core), and it runs after
 // sieving, when the sieving threads are idle. So the batch is split into
 // shares, checked in parallel, and the answers joined in order: the first
-// prime that isn't proven, in batch order, is the one reported. Small primes
-// are checked inline, where messaging would cost more than checking.
-// If the workers can't be used, verification is inline: slower, never skipped.
+// share with a dispute decides (within a share, primes are checked before
+// rejected composites). Small batches are checked inline, where messaging
+// would cost more than checking. If the workers can't be used, verification
+// is inline: slower, never skipped.
 
-import { verifyPrimes, type BatchVerification } from "./verifyPrimes.ts";
+import { verifyBatch, type BatchVerification } from "./verifyPrimes.ts";
+import type { RejectedComposite } from "./wasmSieve.ts";
 
 export interface VerificationRequest {
   primes: bigint[];
+  /** Survivors the sieve's Miller–Rabin rejected, with their evidence (Phase 4). */
+  rejected: RejectedComposite[];
 }
 export interface VerificationResponse {
   verification: BatchVerification;
@@ -45,16 +49,24 @@ export class VerificationPool {
     this.#createWorker = createWorker;
   }
 
-  async verify(primes: readonly bigint[]): Promise<BatchVerification> {
-    const largest = primes.at(-1);
-    if (this.#size < 2 || this.#unusable || largest === undefined || largest < SMALLEST_PRIME_WORTH_SHARING) {
-      return verifyPrimes(primes);
+  async verify(primes: readonly bigint[], rejected: readonly RejectedComposite[] = []): Promise<BatchVerification> {
+    const numbersToCheck = primes.length + rejected.length;
+    const anyBig =
+      (primes.at(-1) ?? 0n) >= SMALLEST_PRIME_WORTH_SHARING ||
+      rejected.some(({ candidate }) => candidate >= SMALLEST_PRIME_WORTH_SHARING);
+    if (this.#size < 2 || this.#unusable || numbersToCheck === 0 || !anyBig) {
+      return verifyBatch(primes, rejected);
     }
     try {
       const workers = (this.#workers ??= Array.from({ length: this.#size }, () => this.#createWorker()));
-      const shares = splitIntoShares(primes, workers.length);
+      // as many shares as workers; the rejected composites are shared out the same way
+      const shareCount = Math.min(workers.length, Math.max(primes.length, rejected.length));
+      const primeShares = splitIntoShares(primes, shareCount);
+      const rejectedShares = splitIntoShares(rejected, shareCount);
       const verifications = await Promise.all(
-        shares.map((share, index) => this.#verifyShare(workers[index], share)),
+        Array.from({ length: shareCount }, (_, index) =>
+          this.#verifyShare(workers[index], primeShares[index] ?? [], rejectedShares[index] ?? []),
+        ),
       );
       return joinVerifications(verifications);
     } catch (error) {
@@ -63,18 +75,18 @@ export class VerificationPool {
       this.#unusable = true;
       this.#workers?.forEach((worker) => worker.terminate());
       this.#workers = null;
-      return verifyPrimes(primes);
+      return verifyBatch(primes, rejected);
     }
   }
 
-  #verifyShare(worker: Worker, primes: bigint[]): Promise<BatchVerification> {
+  #verifyShare(worker: Worker, primes: bigint[], rejected: RejectedComposite[]): Promise<BatchVerification> {
     return new Promise((resolve, reject) => {
       worker.onmessage = (event: MessageEvent<VerificationResponse>) => resolve(event.data.verification);
       worker.onerror = (event) => {
         event.preventDefault();
         reject(new Error(event.message || "verification worker failed"));
       };
-      const request: VerificationRequest = { primes };
+      const request: VerificationRequest = { primes, rejected };
       worker.postMessage(request);
     });
   }

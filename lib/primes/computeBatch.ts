@@ -94,16 +94,7 @@ export async function computeBatch(
   const verification = await verify(primes);
   const verificationDurationMs = now() - verificationStartTime;
   if (!verification.verified) {
-    const problem =
-      verification.verdict === "composite"
-        ? "Miller–Rabin found it composite"
-        : "it is beyond the bound where Miller–Rabin is proven deterministic";
-    send({
-      type: "error",
-      id,
-      generation,
-      message: `The sieve reported ${verification.disputedPrime} as prime, but ${problem}. Stopped rather than show it.`,
-    });
+    send({ type: "error", id, generation, message: disputeMessage(verification) });
     return;
   }
 
@@ -122,4 +113,20 @@ export async function computeBatch(
     memory: memory(),
     threads,
   });
+}
+
+/** What to tell the user when the check disagrees with the sieve. */
+function disputeMessage(verification: Exclude<BatchVerification, { verified: true }>): string {
+  if ("disputedComposite" in verification) {
+    // a prime rejected by mistake would be skipped: the list stops rather than leave a gap
+    return (
+      `The sieve rejected ${verification.disputedComposite} as composite, but its evidence ` +
+      `(${verification.evidence}) doesn’t prove that. Stopped rather than risk skipping a prime.`
+    );
+  }
+  const problem =
+    verification.verdict === "composite"
+      ? "Miller–Rabin found it composite"
+      : "it is beyond the bound where Miller–Rabin is proven deterministic";
+  return `The sieve reported ${verification.disputedPrime} as prime, but ${problem}. Stopped rather than show it.`;
 }
