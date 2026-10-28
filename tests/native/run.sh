@@ -1,5 +1,5 @@
 #!/bin/sh
-# Builds wasm/sieve.c natively and runs its tests.
+# Builds wasm/sieve.c (and bignum.c, primality.c) natively and runs their tests.
 #
 #   sh tests/native/run.sh fast   # npm run test:native
 #   sh tests/native/run.sh slow   # npm run test:native:slow (around 2^64)
@@ -14,7 +14,7 @@
 set -e
 mkdir -p .cache
 warnings="-std=c11 -Wall -Wextra"
-sources="wasm/sieve.c wasm/bignum.c -lm"
+sources="wasm/sieve.c wasm/bignum.c wasm/primality.c -lm"
 threaded="-DSIEVE_THREADS -DBASE_PRIME_CHECKPOINT_INTERVAL=7 -pthread"
 
 case "$1" in
@@ -28,6 +28,8 @@ fast)
   SIEVE_TEST_HELPERS=8 SIEVE_TEST_MEASURE=1 .cache/sieve_test_measured
   cc -O2 $warnings -o .cache/bignum_test tests/native/bignum_test.c wasm/bignum.c -lm
   .cache/bignum_test
+  cc -O2 $warnings -o .cache/primality_test tests/native/primality_test.c wasm/primality.c wasm/bignum.c -lm
+  .cache/primality_test
   ;;
 slow)
   cc -O2 $warnings -DSIEVE_TEST_HOOKS -o .cache/sieve_slow_test tests/native/sieve_slow_test.c $sources

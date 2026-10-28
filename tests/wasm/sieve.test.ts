@@ -6,7 +6,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
-import { WasmSieve, type RawSieveExports } from "../../lib/primes/wasmSieve.ts";
+import { NO_SIEVE_PRIME_CAP, WasmSieve, type RawSieveExports, type RejectedComposite } from "../../lib/primes/wasmSieve.ts";
 import { isPrime, nextPrimeAfter, previousPrimeBefore } from "../support/primality.ts";
 
 const sieveModule = new WebAssembly.Module(readFileSync("public/sieve.wasm"));
@@ -72,5 +72,96 @@ describe("the shipped sieve.wasm", () => {
     const prime = 43_841_547_845_541_059n;
     assert.deepEqual(sieve.findPrimes("next", prime, 1).primes, [prime + 1184n]);
     assert.deepEqual(sieve.findPrimes("prev", prime + 1184n, 1).primes, [prime]);
+  });
+});
+
+// ── partial sieving + Miller–Rabin (Phase 4) ─────────────────────────────
+
+/** a(13) (OEIS A014233): from here up, Miller–Rabin proves nothing. */
+const PROVEN_BOUND = 3_317_044_064_679_887_385_961_981n;
+
+/** Whether `base` is a Miller–Rabin witness that odd `candidate` is composite, in BigInt. */
+function isWitness(candidate: bigint, base: bigint): boolean {
+  let oddPart = candidate - 1n;
+  let powersOfTwo = 0;
+  while ((oddPart & 1n) === 0n) {
+    oddPart >>= 1n;
+    powersOfTwo++;
+  }
+  let value = 1n;
+  for (let power = base % candidate, rest = oddPart; rest > 0n; rest >>= 1n, power = (power * power) % candidate)
+    if (rest & 1n) value = (value * power) % candidate;
+  if (value === 1n || value === candidate - 1n) return false;
+  for (let round = 1; round < powersOfTwo; round++) {
+    value = (value * value) % candidate;
+    if (value === candidate - 1n) return false;
+  }
+  return true;
+}
+
+/** Each rejected number lies in (low, high), isn't prime, and its evidence proves it composite. */
+function assertRejectedProven(rejected: RejectedComposite[], low: bigint, high: bigint) {
+  for (const { candidate, evidence } of rejected) {
+    const context = `${candidate} (evidence ${evidence})`;
+    assert.ok(candidate > low && candidate < high, `${context} is in the range covered`);
+    assert.equal(isPrime(candidate), false, `${context} isn't prime`);
+    const divides = evidence > 1 && candidate % BigInt(evidence) === 0n && candidate !== BigInt(evidence);
+    assert.ok(divides || isWitness(candidate, BigInt(evidence)), `${context}: the evidence holds`);
+  }
+}
+
+describe("partial sieving in the shipped sieve.wasm, cap 65,535", () => {
+  const partialInstance = new WebAssembly.Instance(sieveModule, { env: { emscripten_notify_memory_growth: () => {} } });
+  const partialRaw = partialInstance.exports as unknown as RawSieveExports;
+  partialRaw._initialize?.();
+  const partial = new WasmSieve(partialRaw);
+  partial.setSievePrimeCap(65_535n);
+
+  for (const [label, start] of [
+    ["10^20", 10n ** 20n],
+    ["2^64 − 20,000 (into multi-limb windows)", 2n ** 64n - 20_000n],
+    ["10^24", 10n ** 24n],
+  ] as const) {
+    it(`next, from ${label}: consecutive proven primes, every rejected composite proven`, () => {
+      const batch = partial.findPrimes("next", start, 500);
+      assert.equal(batch.primes.length, 500);
+      assert.equal(batch.reachedMemoryLimit, false);
+      assert.equal(batch.reachedProvenBound, false);
+      assertConsecutivePrimes(batch.primes, start);
+      assert.ok(batch.rejected.length > 0, "Miller–Rabin rejected some survivors");
+      assertRejectedProven(batch.rejected, start, batch.primes[499]);
+    });
+
+    it(`prev, from ${label}: consecutive going down, every rejected composite proven`, () => {
+      const batch = partial.findPrimes("prev", start, 500);
+      assert.equal(batch.primes.length, 500);
+      let expected: bigint | null = start;
+      for (const prime of [...batch.primes].reverse()) {
+        expected = previousPrimeBefore(expected!);
+        assert.equal(prime, expected);
+      }
+      assertRejectedProven(batch.rejected, batch.primes[0], start);
+    });
+  }
+
+  it("stops at the proven bound, a(13): every prime below it, then pending, saying why", () => {
+    const start = PROVEN_BOUND - 3_000n;
+    const batch = partial.findPrimes("next", start, 500);
+    assert.ok(batch.primes.length > 0 && batch.primes.length < 500);
+    assert.ok(batch.primes.every((prime) => prime < PROVEN_BOUND));
+    assertConsecutivePrimes(batch.primes, start);
+    assert.equal(batch.reachedProvenBound, true);
+    assert.equal(batch.reachedMemoryLimit, false);
+
+    const fromAbove = partial.findPrimes("prev", PROVEN_BOUND + 3_000n, 500);
+    assert.deepEqual(fromAbove.primes, []);
+    assert.equal(fromAbove.reachedProvenBound, true);
+  });
+
+  it("with no cap again, sieves fully: nothing left for Miller–Rabin to reject", () => {
+    partial.setSievePrimeCap(NO_SIEVE_PRIME_CAP);
+    const batch = partial.findPrimes("next", 10n ** 12n, 500);
+    assertConsecutivePrimes(batch.primes, 10n ** 12n);
+    assert.deepEqual(batch.rejected, []);
   });
 });

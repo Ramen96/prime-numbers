@@ -6,6 +6,7 @@
 #include <time.h>
 
 #include "bignum.h"
+#include "primality.h"
 
 #ifdef SIEVE_THREADS
 #include <pthread.h>
@@ -22,8 +23,38 @@
 // gap of 2^51, which only happens near 2^(2^51); memory runs out long before.
 static big_number batch_base;
 static uint64_t batch_offsets[MAX_BATCH];
-// set when the last call stopped because base primes couldn't be built
+// set when the last call stopped because memory ran out: the base primes
+// couldn't even be bootstrapped, or a candidate couldn't be settled
 static int batch_hit_memory_limit = 0;
+// set when the last call stopped at a candidate the sieve can't settle and
+// Miller–Rabin can't prove: one past its proven bound, a(13), about 3.3 * 10^24
+// (primality.h). It and everything after it stay pending (A1) until Phase 5
+static int batch_hit_proven_bound = 0;
+
+// The survivors the last call found composite by Miller–Rabin, so JavaScript
+// can check each one again (A3): its distance from the requested number, and
+// its evidence, a small prime factor or a witness base (primality.h).
+// Distances fit 64 bits for the same reason batch offsets do.
+static uint64_t *rejected_distances = NULL;
+static uint32_t *rejected_evidence = NULL;
+static size_t rejected_count = 0;
+static size_t rejected_capacity = 0;
+
+// Partial sieving (Phase 4). A window is sieved with every base prime up to
+// its square root when they fit. When they don't, or when JavaScript caps them
+// here, it's sieved with the base primes up to the cap (or all there are), and
+// the survivors the sieve can't settle are proven by Miller–Rabin.
+// UINT64_MAX: no cap; every window gets all the base primes it needs
+static uint64_t sieve_prime_cap = UINT64_MAX;
+
+// Every unmarked number in the current segment below this is prime, proven
+// by the sieve: a composite one would have its smallest prime factor above
+// every base prime the segment was sieved with (all of them up to some M), so
+// it would be at least (M + 1)^2. From here up, Miller–Rabin decides. M can
+// pass 2^32, so (M + 1)^2 can pass 2^64: a big_number
+static big_number sieve_proves_below;
+// one survivor's value, reused so proving doesn't allocate every time
+static big_number survivor;
 
 // The number a call starts from, written by JavaScript as limbs
 static uint32_t *request_limbs = NULL;
@@ -118,6 +149,12 @@ uint32_t *batch_base_limbs(void) { return batch_base.limbs; }
 size_t batch_base_limb_count(void) { return batch_base.limb_count; }
 uint64_t *batch_offset_buffer(void) { return batch_offsets; }
 int batch_reached_memory_limit(void) { return batch_hit_memory_limit; }
+int batch_reached_proven_bound(void) { return batch_hit_proven_bound; }
+size_t batch_rejected_count(void) { return rejected_count; }
+uint64_t *batch_rejected_distances(void) { return rejected_distances; }
+uint32_t *batch_rejected_evidence(void) { return rejected_evidence; }
+
+void set_sieve_prime_cap(uint64_t cap) { sieve_prime_cap = cap; }
 
 // Square root on a double can be off by 1 near 2^64
 // this can skip a base prime and let a composite through
@@ -788,43 +825,144 @@ int sieve_test_gap_encoding_round_trip(const uint64_t *primes, size_t count) {
 #define force_multi_limb_windows 0
 #endif
 
-// gets the base primes for the window starting at low (odd) and sieves it.
-// returns 0 if the base primes it needs don't fit in memory
+// gets the base primes for the window starting at low (odd) and sieves it:
+// with every base prime up to its square root if they fit (and the cap allows),
+// or else with the base primes up to the cap, or all there are (partial).
+// sets sieve_proves_below to match. returns 0 only if memory runs out before
+// any sieving is possible
 static int prepare_segment(const big_number *low) {
   int fast_path = big_number_compare_u64(low, UINT64_MAX - SEGMENT_SPAN + 1) < 0;
   if (force_multi_limb_windows && big_number_compare_u64(low, 1 << 20) > 0)
     fast_path = 0;
+  uint64_t largest_needed;
   if (fast_path) {
-    uint64_t low_u64 = big_number_to_u64(low);
-    uint64_t largest_needed = integer_sqrt(low_u64 + SEGMENT_SPAN - 1);
-    if (!ensure_base_primes(largest_needed))
-      return 0;
-    mark_window(low_u64, NULL, largest_needed);
-    return 1;
+    largest_needed = integer_sqrt(big_number_to_u64(low) + SEGMENT_SPAN - 1);
+  } else {
+    // multi-limb window: base primes up to (an overestimate of) its square root
+    big_number last, root;
+    big_number_init(&last);
+    big_number_init(&root);
+    int ok = big_number_copy(&last, low) && big_number_add_small(&last, SEGMENT_SPAN - 1) &&
+             big_number_square_root_upper(&last, &root);
+    // past 2^64, base primes couldn't be held anyway: sieve with what there is
+    largest_needed = ok && big_number_fits_u64(&root) ? big_number_to_u64(&root) : UINT64_MAX;
+    big_number_free(&last);
+    big_number_free(&root);
   }
 
-  // multi-limb window: base primes up to (an overestimate of) its square root
-  big_number last, root;
-  big_number_init(&last);
-  big_number_init(&root);
-  int ok = big_number_copy(&last, low) && big_number_add_small(&last, SEGMENT_SPAN - 1) &&
-           big_number_square_root_upper(&last, &root) &&
-           big_number_fits_u64(&root) && // base primes past 2^64 can't be held anyway
-           ensure_base_primes(big_number_to_u64(&root));
-  if (ok)
-    mark_window(0, low, big_number_to_u64(&root));
-  big_number_free(&last);
-  big_number_free(&root);
-  return ok;
+  // build what's needed if it fits; if not, the base primes are as they were
+  // (extend_base_primes_to rolls back), and the window is sieved with those
+  uint64_t largest_used = largest_needed < sieve_prime_cap ? largest_needed : sieve_prime_cap;
+  if (largest_used == UINT64_MAX || !ensure_base_primes(largest_used)) {
+    if (base_limit == 0 && !bootstrap_base_primes())
+      return 0;
+  }
+  if (largest_used >= base_limit)
+    largest_used = base_limit - 1;
+
+  // (largest_used + 1)^2: largest_used < base_limit <= 2^64 - 1, so + 1 fits
+  big_number next_after_used;
+  big_number_init(&next_after_used);
+  int ok = big_number_set_u64(&next_after_used, largest_used + 1) &&
+           big_number_multiply(&sieve_proves_below, &next_after_used, &next_after_used);
+  big_number_free(&next_after_used);
+  if (!ok)
+    return 0;
+  if (fast_path)
+    mark_window(big_number_to_u64(low), NULL, largest_used);
+  else
+    mark_window(0, low, largest_used);
+  return 1;
+}
+
+// the first index in the segment at low whose number needs Miller–Rabin
+// (low + 2 * index >= sieve_proves_below), or SEGMENT_BYTES if none does.
+// if memory runs out working it out, 0: Miller–Rabin then decides every
+// survivor, which is slower but still right
+static uint64_t first_index_needing_proof(const big_number *low) {
+  if (big_number_compare(&sieve_proves_below, low) <= 0)
+    return 0;
+  big_number distance; // sieve_proves_below - low, > 0
+  big_number_init(&distance);
+  uint64_t index = 0;
+  if (big_number_subtract(&distance, &sieve_proves_below, low)) {
+    uint64_t small = big_number_to_u64(&distance);
+    index = big_number_fits_u64(&distance) && small < SEGMENT_SPAN ? (small + 1) / 2 : SEGMENT_BYTES;
+  }
+  big_number_free(&distance);
+  return index;
+}
+
+// keeps a composite's distance and evidence for JavaScript to check again.
+// returns 0 if memory runs out
+static int record_rejected(uint64_t distance, uint32_t evidence) {
+  if (rejected_count == rejected_capacity) {
+    size_t new_capacity = rejected_capacity ? 2 * rejected_capacity : 1024;
+    uint64_t *grown_distances = realloc(rejected_distances, new_capacity * sizeof *grown_distances);
+    if (!grown_distances)
+      return 0;
+    rejected_distances = grown_distances;
+    uint32_t *grown_evidence = realloc(rejected_evidence, new_capacity * sizeof *grown_evidence);
+    if (!grown_evidence)
+      return 0;
+    rejected_evidence = grown_evidence;
+    rejected_capacity = new_capacity;
+  }
+  rejected_distances[rejected_count] = distance;
+  rejected_evidence[rejected_count] = evidence;
+  rejected_count++;
+  return 1;
+}
+
+typedef enum { SURVIVOR_PRIME, SURVIVOR_COMPOSITE, SURVIVOR_UNSETTLED } survivor_state;
+
+// settles the unmarked number at `index` in the segment at low, which is
+// `distance` from the requested number: prime by the sieve below
+// sieve_proves_below (first_needing_proof), otherwise by Miller–Rabin. a
+// composite is recorded with its evidence. one that can't be settled sets the
+// flag saying why, and the caller stops there: nothing after it is reported
+static survivor_state settle_survivor(const big_number *low, uint64_t index, uint64_t first_needing_proof,
+                                      uint64_t distance) {
+  if (index < first_needing_proof)
+    return SURVIVOR_PRIME;
+  uint32_t evidence = 0;
+  primality_verdict verdict;
+  if (big_number_fits_u64(low) && big_number_to_u64(low) <= UINT64_MAX - 2 * index)
+    verdict = miller_rabin_u64(big_number_to_u64(low) + 2 * index, &evidence);
+  else if (big_number_copy(&survivor, low) && big_number_add_small(&survivor, 2 * index))
+    verdict = miller_rabin(&survivor, &evidence);
+  else
+    verdict = PRIMALITY_OUT_OF_MEMORY;
+
+  switch (verdict) {
+  case PRIMALITY_PRIME:
+    return SURVIVOR_PRIME;
+  case PRIMALITY_COMPOSITE_BY_FACTOR:
+  case PRIMALITY_COMPOSITE_BY_WITNESS:
+    if (record_rejected(distance, evidence))
+      return SURVIVOR_COMPOSITE;
+    batch_hit_memory_limit = 1; // proven, but it couldn't be kept for checking
+    return SURVIVOR_UNSETTLED;
+  case PRIMALITY_BEYOND_PROVEN_BOUND:
+    batch_hit_proven_bound = 1;
+    return SURVIVOR_UNSETTLED;
+  default: // out of memory (survivors are odd and at least 3, never below two)
+    batch_hit_memory_limit = 1;
+    return SURVIVOR_UNSETTLED;
+  }
 }
 
 // writes up to count primes strictly greater than the requested number (the
-// limbs in request_buffer) as batch_base + batch_offsets, ascending. returns
-// how many were written: fewer only if base primes ran out of memory
+// limbs in request_buffer) as batch_base + batch_offsets, ascending, and the
+// survivors Miller–Rabin rejected on the way (batch_rejected_*). returns how
+// many were written: fewer only if it reached a candidate it couldn't settle
+// (batch_reached_proven_bound / batch_reached_memory_limit say why)
 int sieve_next(size_t request_limb_count, int count) {
   if (count > MAX_BATCH)
     count = MAX_BATCH;
   batch_hit_memory_limit = 0;
+  batch_hit_proven_bound = 0;
+  rejected_count = 0;
   int written = 0;
 
   // distances from `after` are collected first, then made relative to the
@@ -853,15 +991,26 @@ int sieve_next(size_t request_limb_count, int count) {
   if (!ok)
     batch_hit_memory_limit = 1;
 
-  while (ok && written < count) {
+  int unsettled = 0;
+  while (ok && written < count && !unsettled) {
     if (!prepare_segment(&low)) {
       batch_hit_memory_limit = 1;
       break;
     }
+    uint64_t first_needing_proof = first_index_needing_proof(&low);
     for (uint64_t i = 0; i < SEGMENT_BYTES && written < count; i++) {
-      if (!segment[i])
+      if (segment[i])
+        continue;
+      survivor_state state = settle_survivor(&low, i, first_needing_proof, low_distance + 2 * i);
+      if (state == SURVIVOR_UNSETTLED) {
+        unsettled = 1;
+        break;
+      }
+      if (state == SURVIVOR_PRIME)
         batch_offsets[written++] = low_distance + 2 * i;
     }
+    if (unsettled)
+      break;
     if (!big_number_add_small(&low, SEGMENT_SPAN)) {
       batch_hit_memory_limit = 1;
       break;
@@ -883,12 +1032,16 @@ int sieve_next(size_t request_limb_count, int count) {
 }
 
 // writes up to count primes strictly less than the requested number as
-// batch_base + batch_offsets, ascending. returns how many were written,
-// fewer when the list reaches 2 (or base primes ran out of memory)
+// batch_base + batch_offsets, ascending, and the survivors Miller–Rabin
+// rejected on the way (batch_rejected_*, distances below the requested
+// number). returns how many were written, fewer when the list reaches 2 or a
+// candidate it couldn't settle (batch_reached_proven_bound / _memory_limit)
 int sieve_prev(size_t request_limb_count, int count) {
   if (count > MAX_BATCH)
     count = MAX_BATCH;
   batch_hit_memory_limit = 0;
+  batch_hit_proven_bound = 0;
+  rejected_count = 0;
 
   big_number before, upper, low;
   big_number_init(&before);
@@ -907,8 +1060,9 @@ int sieve_prev(size_t request_limb_count, int count) {
   int written = 0;
   big_number_copy(&upper, &before); // only numbers less than upper are new
   uint64_t upper_distance = 0;      // before - upper
+  int unsettled = 0;
 
-  while (written < count && big_number_compare_u64(&upper, 3) > 0) {
+  while (written < count && !unsettled && big_number_compare_u64(&upper, 3) > 0) {
     uint64_t window_width; // upper - low, at most SEGMENT_SPAN + 1
     if (big_number_compare_u64(&upper, 3 + SEGMENT_SPAN) > 0) {
       big_number_copy(&low, &upper);
@@ -928,17 +1082,27 @@ int sieve_prev(size_t request_limb_count, int count) {
     }
 
     uint64_t low_distance = upper_distance + window_width;
+    uint64_t first_needing_proof = first_index_needing_proof(&low);
     for (int64_t i = SEGMENT_BYTES - 1; i >= 0 && written < count; i--) {
       if (2 * (uint64_t)i >= window_width) // at or past upper
         continue;
-      if (!segment[i])
+      if (segment[i])
+        continue;
+      survivor_state state = settle_survivor(&low, (uint64_t)i, first_needing_proof, low_distance - 2 * (uint64_t)i);
+      if (state == SURVIVOR_UNSETTLED) {
+        unsettled = 1;
+        break;
+      }
+      if (state == SURVIVOR_PRIME)
         batch_offsets[written++] = low_distance - 2 * (uint64_t)i;
     }
+    if (unsettled)
+      break;
     big_number_copy(&upper, &low);
     upper_distance = low_distance;
   }
 
-  if (written < count && !batch_hit_memory_limit && big_number_compare_u64(&upper, 3) <= 0)
+  if (written < count && !unsettled && !batch_hit_memory_limit && big_number_compare_u64(&upper, 3) <= 0)
     batch_offsets[written++] = upper_distance + (big_number_to_u64(&upper) - 2);
 
   // the smallest prime (largest distance) is the batch base

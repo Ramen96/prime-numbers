@@ -22,7 +22,13 @@ function standInSieve(
     reserveBasePrimeStorage: (bytes) => (reservations.push(bytes), true),
     basePrimeMemoryBytes: () => 1234,
     moduleMemoryBytes: () => 5678,
-    findPrimes: () => ({ primes, reachedMemoryLimit: false, measuringMs: options.measuringMs ?? 0 }),
+    findPrimes: () => ({
+      primes,
+      rejected: [],
+      reachedMemoryLimit: false,
+      reachedProvenBound: false,
+      measuringMs: options.measuringMs ?? 0,
+    }),
   };
 }
 

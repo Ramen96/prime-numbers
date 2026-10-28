@@ -50,8 +50,52 @@ static void test_prime_count_up_to_two_to_the_32(void) {
   expect("π(2^32) matches OEIS A007053", "count", 203280221, count);
 }
 
+// π(x) by counting the sieve's primes from 0 (cap or not, as set).
+static u128 count_primes_up_to(u128 limit) {
+  static u128 batch[MAX_PRIMES];
+  u128 count = 0, after = 0;
+  for (;;) {
+    int written = sieve_primes(1, after, MAX_PRIMES, batch);
+    for (int i = 0; i < written; i++) {
+      if (batch[i] > limit)
+        return count;
+      count++;
+    }
+    after = batch[written - 1];
+  }
+}
+
+// Partial sieving (Phase 4) at more caps and in larger batches than the fast
+// suite: 8,192 primes spanning several windows, with the A2 partition check
+// on every number passed over.
+static void test_partial_sieving_thorough(void) {
+  static const u128 centers[] = {1000000, TWO_TO_THE_32, 1000000000000ULL, (u128)1 << 53, (u128)1 << 63, TWO_TO_THE_64};
+  static const char *center_names[] = {"10^6", "2^32", "10^12", "2^53", "2^63", "2^64"};
+  char name[160];
+  for (size_t index = 0; index < sizeof centers / sizeof *centers; index++) {
+    snprintf(name, sizeof name, "partial, cap 50: next after %s", center_names[index]);
+    check_partial_batch(name, 1, centers[index], BATCH_SIZE, 50);
+    snprintf(name, sizeof name, "partial, cap 50: prev before %s", center_names[index]);
+    check_partial_batch(name, 0, centers[index], BATCH_SIZE, 50);
+    snprintf(name, sizeof name, "partial, cap 1000: next after %s, 8192 primes", center_names[index]);
+    check_partial_batch(name, 1, centers[index], 8192, 1000);
+    snprintf(name, sizeof name, "partial, cap 1000: prev before %s, 8192 primes", center_names[index]);
+    check_partial_batch(name, 0, centers[index], 8192, 1000);
+  }
+  sieve_force_multi_limb_windows(1);
+  check_partial_batch("partial, multi-limb windows forced: next after 10^12, 8192 primes", 1, 1000000000000ULL, 8192, 1000);
+  check_partial_batch("partial, multi-limb windows forced: prev before 10^12, 8192 primes", 0, 1000000000000ULL, 8192, 1000);
+  sieve_force_multi_limb_windows(0);
+  set_sieve_prime_cap(50);
+  expect("π(10^7), cap 50", "count", 664579, count_primes_up_to(10000000));
+  set_sieve_prime_cap(1000);
+  check_proven_bound(200000);
+  set_sieve_prime_cap(UINT64_MAX);
+}
+
 int main(void) {
   start_test_threads();
+  test_partial_sieving_thorough(); // first: it needs no large base primes
   test_crossing_two_to_the_64();
   test_record_gaps_near_two_to_the_64();
   test_prime_count_up_to_two_to_the_32();

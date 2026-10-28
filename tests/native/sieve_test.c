@@ -95,12 +95,15 @@ static void test_memory_budget(void) {
   if (base_prime_limit() <= limit_before + 50000)
     fail(name, "limit after the small extension", limit_before + 50001, base_prime_limit());
 
-  // a batch that needs more base primes than the budget allows stops, says
-  // so, and reports nothing it couldn't prove
-  static u128 batch[MAX_PRIMES];
+  // a batch that needs more base primes than the budget allows is sieved
+  // with the ones there are, and Miller–Rabin proves the rest (Phase 4):
+  // every prime right, no memory limit, and the base primes left as they were
   u128 far = (u128)(limit_before * 100) * (limit_before * 100);
-  expect(name, "batch past the budget finds nothing", 0, (u128)sieve_primes(1, far, BATCH_SIZE, batch));
-  expect(name, "and reports the memory limit", 1, (u128)batch_reached_memory_limit());
+  uint64_t limit_after_small_extension = base_prime_limit();
+  check_next("batch past the budget, sieved partially", far, BATCH_SIZE);
+  check_prev("batch past the budget, sieved partially, going down", far, BATCH_SIZE);
+  expect(name, "base primes unchanged by the partial batches", limit_after_small_extension, base_prime_limit());
+  expect(name, "still consistent", 1, (u128)sieve_test_base_primes_consistent());
 
   // with the budget lifted, everything works, including where the failed
   // extension had been
@@ -241,6 +244,56 @@ static void test_record_gaps(void) {
   check_record_gap("record gap 1184 (above 2^53)", 43841547845541059ULL, 1184);
 }
 
+// ── partial sieving + Miller–Rabin (Phase 4) ─────────────────────────────
+// More of these, larger, run in the slow suite (test_partial_sieving_thorough).
+
+static void test_partial_sieving(void) {
+  static const u128 centers[] = {1000000, TWO_TO_THE_32, 1000000000000ULL, TWO_TO_THE_53,
+                                 (u128)1 << 63, TWO_TO_THE_64};
+  static const char *center_names[] = {"10^6", "2^32", "10^12", "2^53", "2^63", "2^64 (into multi-limb windows)"};
+  char name[160];
+  for (size_t index = 0; index < sizeof centers / sizeof *centers; index++) {
+    // a cap of 3 leaves almost everything to Miller–Rabin; 1,000 is closer to real use
+    static const uint64_t caps[] = {3, 1000};
+    for (size_t cap = 0; cap < 2; cap++) {
+      snprintf(name, sizeof name, "partial, cap %llu: next after %s", (unsigned long long)caps[cap], center_names[index]);
+      check_partial_batch(name, 1, centers[index], BATCH_SIZE, caps[cap]);
+      snprintf(name, sizeof name, "partial, cap %llu: prev before %s", (unsigned long long)caps[cap], center_names[index]);
+      check_partial_batch(name, 0, centers[index], BATCH_SIZE, caps[cap]);
+    }
+  }
+
+  // the switch from full to partial sieving inside one batch: with a cap of
+  // 1,000, windows below 1001² = 1,002,001 get every base prime they need
+  check_partial_batch("full to partial, going up across 1001²", 1, 1002001 - 40000, 8192, 1000);
+  check_partial_batch("partial to full, going down across 1001²", 0, 1002001 + 40000, 8192, 1000);
+
+  // exactly at the handoff: with a cap of 1,008 the first composite the sieve
+  // can't cross off is 1009² = 1,018,081 (1,009 is prime), so the sieve's
+  // proof must end just below it and Miller–Rabin must reject it
+  check_partial_batch("the first composite past the sieve's proof, 1009², going up", 1, 1018081 - 1000, BATCH_SIZE, 1008);
+  check_partial_batch("the first composite past the sieve's proof, 1009², going down", 0, 1018081 + 1000, BATCH_SIZE, 1008);
+
+  // the multi-limb window path, partial, against the fast path's answer
+  sieve_force_multi_limb_windows(1);
+  check_partial_batch("partial, multi-limb windows forced: next after 10^12", 1, 1000000000000ULL, BATCH_SIZE, 1000);
+  check_partial_batch("partial, multi-limb windows forced: prev before 10^12", 0, 1000000000000ULL, BATCH_SIZE, 1000);
+  sieve_force_multi_limb_windows(0);
+
+  // counts (A4) and record gaps (OEIS A005250 / A002386, entries 64, 80, 83),
+  // with Miller–Rabin doing most of the work. Partial sieving needs no base
+  // primes near 2^32 for these, so the gaps near and above 2^64 are cheap here
+  set_sieve_prime_cap(50);
+  expect("π(10^6), cap 50", "count", 78498, count_primes_up_to(1000000));
+  set_sieve_prime_cap(1000);
+  check_record_gap("record gap 1132, cap 1000", 1693182318746371ULL, 1132);
+  check_record_gap("record gap 1550 (below 2^64), cap 1000", 18361375334787046697ULL, 1550);
+  check_record_gap("record gap 1676 (above 2^64), cap 1000", TWO_TO_THE_64 + (u128)2287002436851891247ULL, 1676);
+
+  check_proven_bound(5000);
+  set_sieve_prime_cap(UINT64_MAX);
+}
+
 // ── sweeps ────────────────────────────────────────────────────────────────
 
 #define SWEEP_LIMIT 3000000
@@ -312,6 +365,7 @@ int main(void) {
   test_prime_counts();
   test_record_gaps();
   test_sweeps_against_a_plain_sieve();
+  test_partial_sieving();
   // after everything, including the rolled-back extensions
   expect("base prime storage", "ascending, below the limit, checkpoints where they belong", 1, (u128)sieve_test_base_primes_consistent());
 #ifdef SIEVE_THREADS

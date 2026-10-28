@@ -4,7 +4,9 @@
 // primes eventually makes realloc return NULL inside Wasm. That must go
 // through the same rollback as exceeding the budget: the base primes go back
 // to how they were, the space they used is free again, and every prime
-// reported afterwards is still right.
+// reported afterwards is still right. A batch that needs more base primes than
+// fit is sieved with the ones there are, and Miller–Rabin proves the rest
+// (Phase 4, partial sieving).
 
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -50,9 +52,13 @@ describe("a real allocation failure in Wasm", () => {
     assert.equal(sieve.basePrimeMemoryBytes(), bytesHeld);
   });
 
-  it("reports the memory limit for a batch that needs more, with nothing guessed", () => {
+  it("sieves a batch that needs more with the base primes there are, and proves the rest", () => {
+    const limitBefore = sieve.basePrimeLimit();
     const batch = sieve.findPrimes("next", 10n ** 20n, 500); // needs base primes up to 10^10
-    assert.deepEqual(batch, { primes: [], reachedMemoryLimit: true, measuringMs: 0 });
+    assert.equal(batch.reachedMemoryLimit, false);
+    assert.equal(batch.primes.length, 500);
+    assertConsecutivePrimes(batch.primes, 10n ** 20n);
+    assert.equal(sieve.basePrimeLimit(), limitBefore, "no base primes were added");
   });
 
   it("still finds exactly the right primes afterwards", () => {

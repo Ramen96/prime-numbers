@@ -22,6 +22,11 @@ export interface ThreadedSieveModule {
   _set_base_prime_memory_budget(bytes: number): void;
   _reserve_base_prime_storage(bytes: number): number;
   _base_prime_memory_bytes(): number;
+  _batch_reached_proven_bound(): number;
+  _batch_rejected_count(): number;
+  _batch_rejected_distances(): number;
+  _batch_rejected_evidence(): number;
+  _set_sieve_prime_cap(cap: bigint): void;
   _sieve_start_helpers(count: number): number;
   _set_parallel_threshold(checkpoints: number): void;
   _measured_parallel_threshold(): number;
@@ -54,6 +59,11 @@ export function rawExportsOf(sieveModule: ThreadedSieveModule): RawSieveExports 
     set_base_prime_memory_budget: sieveModule._set_base_prime_memory_budget,
     reserve_base_prime_storage: sieveModule._reserve_base_prime_storage,
     base_prime_memory_bytes: sieveModule._base_prime_memory_bytes,
+    batch_reached_proven_bound: sieveModule._batch_reached_proven_bound,
+    batch_rejected_count: sieveModule._batch_rejected_count,
+    batch_rejected_distances: sieveModule._batch_rejected_distances,
+    batch_rejected_evidence: sieveModule._batch_rejected_evidence,
+    set_sieve_prime_cap: sieveModule._set_sieve_prime_cap,
     take_measuring_ms: sieveModule._take_measuring_ms,
   };
 }

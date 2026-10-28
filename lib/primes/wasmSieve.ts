@@ -27,6 +27,11 @@ export interface RawSieveExports {
   set_base_prime_memory_budget(bytes: number): void;
   reserve_base_prime_storage(bytes: number): number;
   base_prime_memory_bytes(): number;
+  batch_reached_proven_bound(): number;
+  batch_rejected_count(): number;
+  batch_rejected_distances(): number;
+  batch_rejected_evidence(): number;
+  set_sieve_prime_cap(cap: bigint): void;
   /** Threaded build only: time spent measuring where splitting pays, since last asked. */
   take_measuring_ms?(): number;
 }
@@ -44,10 +49,31 @@ export function unsigned32(value: number): number {
 /** Numbers covered by one segment in sieve.c (2 × SEGMENT_BYTES: odd numbers only). */
 export const SEGMENT_SPAN = 65_536n;
 
+/** No cap on the base primes a window is sieved with: UINT64_MAX in sieve.c. */
+export const NO_SIEVE_PRIME_CAP = 2n ** 64n - 1n;
+
+/**
+ * A survivor of partial sieving that the sieve's Miller–Rabin found composite
+ * (Phase 4), with the evidence, so it can be checked again (Requirement A3).
+ */
+export interface RejectedComposite {
+  /** The number, exact, any size. */
+  candidate: bigint;
+  /** A small prime (2 to 41) that divides it, or a Miller–Rabin witness base. */
+  evidence: number;
+}
+
 export interface SieveBatch {
   /** Ascending, exact, any size. */
   primes: bigint[];
+  /** Composites rejected on the way, in the order the sieve met them (moving away from `from`). */
+  rejected: RejectedComposite[];
   reachedMemoryLimit: boolean;
+  /**
+   * The sieve stopped at a candidate past Miller–Rabin's proven bound (a(13),
+   * about 3.3 × 10^24): it and everything after it stay unchecked.
+   */
+  reachedProvenBound: boolean;
   /**
    * Part of the call spent measuring where splitting windows across threads
    * pays (threaded build only): setup, not sieving speed.
@@ -112,12 +138,22 @@ export class WasmSieve {
     return this.#raw.memory.buffer.byteLength;
   }
 
+  /**
+   * Caps the base primes each window is sieved with (`NO_SIEVE_PRIME_CAP` for
+   * none); survivors the sieve can't settle are proven by Miller–Rabin. A
+   * uint64_t: Wasm takes the BigInt modulo 2^64, so values from 2^63 arrive intact.
+   */
+  setSievePrimeCap(cap: bigint): void {
+    this.#raw.set_sieve_prime_cap(cap);
+  }
+
   /** Up to `count` primes after (or before) `from`, ascending. */
   findPrimes(direction: Direction, from: bigint, count: number): SieveBatch {
     const raw = this.#raw;
     const requestLimbs = toLimbs(from);
     const requestPointer = unsigned32(raw.request_buffer(requestLimbs.length));
-    if (requestLimbs.length > 0 && requestPointer === 0) return { primes: [], reachedMemoryLimit: true, measuringMs: 0 };
+    if (requestLimbs.length > 0 && requestPointer === 0)
+      return { primes: [], rejected: [], reachedMemoryLimit: true, reachedProvenBound: false, measuringMs: 0 };
     // A fresh view after every call: memory growth detaches old ones.
     new Uint32Array(raw.memory.buffer, requestPointer, requestLimbs.length).set(requestLimbs);
 
@@ -127,8 +163,10 @@ export class WasmSieve {
         : raw.sieve_prev(requestLimbs.length, count),
     );
     const reachedMemoryLimit = raw.batch_reached_memory_limit() !== 0;
+    const reachedProvenBound = raw.batch_reached_proven_bound() !== 0;
     const measuringMs = raw.take_measuring_ms?.() ?? 0;
-    if (primeCount === 0) return { primes: [], reachedMemoryLimit, measuringMs };
+    const rejected = this.#rejectedComposites(direction, from);
+    if (primeCount === 0) return { primes: [], rejected, reachedMemoryLimit, reachedProvenBound, measuringMs };
 
     const base = fromLimbs(
       new Uint32Array(
@@ -138,7 +176,25 @@ export class WasmSieve {
       ),
     );
     const offsets = new BigUint64Array(raw.memory.buffer, unsigned32(raw.batch_offset_buffer()), primeCount);
-    return { primes: Array.from(offsets, (offset) => base + offset), reachedMemoryLimit, measuringMs };
+    const primes = Array.from(offsets, (offset) => base + offset);
+    return { primes, rejected, reachedMemoryLimit, reachedProvenBound, measuringMs };
+  }
+
+  /**
+   * The last call's rejected composites: each is a distance from `from` (up
+   * for "next", down for "prev") and its evidence, rebuilt exactly in BigInt.
+   */
+  #rejectedComposites(direction: Direction, from: bigint): RejectedComposite[] {
+    const raw = this.#raw;
+    const count = unsigned32(raw.batch_rejected_count());
+    if (count === 0) return [];
+    // Fresh views after the call: memory growth detaches old ones.
+    const distances = new BigUint64Array(raw.memory.buffer, unsigned32(raw.batch_rejected_distances()), count);
+    const evidence = new Uint32Array(raw.memory.buffer, unsigned32(raw.batch_rejected_evidence()), count);
+    return Array.from(distances, (distance, index) => ({
+      candidate: direction === "next" ? from + distance : from - distance,
+      evidence: evidence[index],
+    }));
   }
 }
 

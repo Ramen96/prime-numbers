@@ -4,6 +4,7 @@ import {
   basePrimeLimitNeededFor,
   ceilSquareRoot,
   fromLimbs,
+  NO_SIEVE_PRIME_CAP,
   toLimbs,
   unsigned32,
   unsigned64,
@@ -19,19 +20,35 @@ const asWasmReturnsIt64 = (value: bigint) => BigInt.asIntN(64, value);
 /** And for an unsigned 32-bit pointer, count or length. */
 const asWasmReturnsIt32 = (value: number) => value | 0;
 
+/** A batch's rejected composites as sieve.c leaves them: distances from the request, and evidence. */
+interface FakeRejected {
+  distances: bigint[];
+  evidence: number[];
+}
+
 /**
- * Fake sieve exports: a batch of primes `base + offsets`, laid out in a real
- * WebAssembly.Memory the way sieve.c lays it out, with every integer returned
- * signed, exactly as Wasm returns it.
+ * Fake sieve exports: a batch of primes `base + offsets`, and any rejected
+ * composites, laid out in a real WebAssembly.Memory the way sieve.c lays them
+ * out, with every integer returned signed, exactly as Wasm returns it.
  */
-function fakeSieve(base: bigint, offsets: bigint[], basePrimeLimit = 0n): RawSieveExports {
+function fakeSieve(
+  base: bigint,
+  offsets: bigint[],
+  basePrimeLimit = 0n,
+  rejected: FakeRejected = { distances: [], evidence: [] },
+  reachedProvenBound = false,
+): RawSieveExports {
   const memory = new WebAssembly.Memory({ initial: 1 });
   const baseLimbs = toLimbs(base);
   const baseLimbsPointer = 1024;
   const offsetsPointer = 4096;
   const requestPointer = 8192;
+  const rejectedDistancesPointer = 16384;
+  const rejectedEvidencePointer = 32768;
   new Uint32Array(memory.buffer, baseLimbsPointer, baseLimbs.length).set(baseLimbs);
   new BigUint64Array(memory.buffer, offsetsPointer, offsets.length).set(offsets);
+  new BigUint64Array(memory.buffer, rejectedDistancesPointer, rejected.distances.length).set(rejected.distances);
+  new Uint32Array(memory.buffer, rejectedEvidencePointer, rejected.evidence.length).set(rejected.evidence);
   return {
     memory,
     request_buffer: () => asWasmReturnsIt32(requestPointer),
@@ -48,6 +65,11 @@ function fakeSieve(base: bigint, offsets: bigint[], basePrimeLimit = 0n): RawSie
     // 3 GiB of base primes, possible now the module can grow to 4 GiB: Wasm
     // returns it as a negative i32
     base_prime_memory_bytes: () => asWasmReturnsIt32(3 * 2 ** 30),
+    batch_reached_proven_bound: () => (reachedProvenBound ? 1 : 0),
+    batch_rejected_count: () => asWasmReturnsIt32(rejected.distances.length),
+    batch_rejected_distances: () => asWasmReturnsIt32(rejectedDistancesPointer),
+    batch_rejected_evidence: () => asWasmReturnsIt32(rejectedEvidencePointer),
+    set_sieve_prime_cap: () => {},
   };
 }
 
@@ -106,6 +128,53 @@ describe("WasmSieve", () => {
       }
     });
   }
+});
+
+describe("WasmSieve rejected composites (Phase 4)", () => {
+  // distances past 2^63, so a signed read would go wrong
+  const rejected = { distances: [4n, 2n ** 63n + 6n, 2n ** 64n - 2n], evidence: [3, 41, 2] };
+
+  for (const [description, from] of [
+    ["near 2^64", TWO_TO_THE_64 - 59n],
+    ["far past 2^64", 2n ** 200n + 235n],
+  ] as const) {
+    it(`rebuilds them ${description} exactly: above \`from\` going up, below it going down`, () => {
+      const sieve = new WasmSieve(fakeSieve(from, [0n], 0n, rejected));
+      const going = (direction: "next" | "prev") => sieve.findPrimes(direction, from, 1).rejected;
+      assert.deepEqual(
+        going("next"),
+        rejected.distances.map((distance, index) => ({ candidate: from + distance, evidence: rejected.evidence[index] })),
+      );
+      assert.deepEqual(
+        going("prev"),
+        rejected.distances.map((distance, index) => ({ candidate: from - distance, evidence: rejected.evidence[index] })),
+      );
+    });
+  }
+
+  it("reports them, and the proven bound, even when no prime was found", () => {
+    const from = 3_317_044_064_679_887_385_961_981n - 100n;
+    const sieve = new WasmSieve(fakeSieve(from, [], 0n, rejected, true));
+    const batch = sieve.findPrimes("next", from, 500);
+    assert.deepEqual(batch.primes, []);
+    assert.equal(batch.reachedProvenBound, true);
+    assert.equal(batch.reachedMemoryLimit, false);
+    assert.equal(batch.rejected.length, 3);
+  });
+
+  it("reports none, and no bound, for a batch without them", () => {
+    const batch = new WasmSieve(fakeSieve(101n, [0n, 2n])).findPrimes("next", 100n, 2);
+    assert.deepEqual(batch.rejected, []);
+    assert.equal(batch.reachedProvenBound, false);
+  });
+
+  it("passes the sieve-prime cap through as a uint64_t, including no cap", () => {
+    const caps: bigint[] = [];
+    const sieve = new WasmSieve({ ...fakeSieve(3n, [0n]), set_sieve_prime_cap: (cap: bigint) => void caps.push(cap) });
+    sieve.setSievePrimeCap(65_535n);
+    sieve.setSievePrimeCap(NO_SIEVE_PRIME_CAP);
+    assert.deepEqual(caps, [65_535n, 2n ** 64n - 1n]);
+  });
 });
 
 describe("limbs", () => {

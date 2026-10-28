@@ -91,7 +91,12 @@ describe("the threaded sieve's memory", () => {
     assert.equal(sieve.extendBasePrimes(10_000_000_000n), false); // would need about 455 MB
     assert.equal(sieve.basePrimeLimit(), limitBefore);
     assert.ok(sieve.moduleMemoryBytes() <= 64 * MiB);
-    assert.deepEqual(sieve.findPrimes("next", 10n ** 20n, 500), { primes: [], reachedMemoryLimit: true, measuringMs: 0 });
+    // a batch that needs far more is sieved with what there is, Miller–Rabin proving the rest
+    const farBatch = sieve.findPrimes("next", 10n ** 20n, 500);
+    assert.equal(farBatch.reachedMemoryLimit, false);
+    assert.equal(farBatch.primes.length, 500);
+    assertConsecutivePrimes(farBatch.primes, 10n ** 20n);
+    assert.equal(sieve.basePrimeLimit(), limitBefore, "no base primes were added");
     const batch = sieve.findPrimes("next", 10n ** 13n, 500);
     assert.equal(batch.reachedMemoryLimit, false);
     assertConsecutivePrimes(batch.primes, 10n ** 13n);

@@ -1,5 +1,6 @@
-// Test-only harness that exposes wasm/bignum.c to JavaScript, so randomized
-// tests can compare it with BigInt at any size (tests/wasm/bignum.test.ts).
+// Test-only harness that exposes wasm/bignum.c and wasm/primality.c to
+// JavaScript, so randomized tests can compare them with BigInt at any size
+// (tests/wasm/bignum.test.ts, tests/wasm/primality.test.ts).
 // Not part of the site: built into .cache/ by `npm run test:wasm`.
 //
 // JavaScript writes limbs (least significant first) into the input buffers,
@@ -9,6 +10,7 @@
 #include <stdlib.h>
 
 #include "../../wasm/bignum.h"
+#include "../../wasm/primality.h"
 
 #define MAX_TEST_LIMBS 4096
 #define FAILED ((size_t)-1)
@@ -174,4 +176,37 @@ size_t harness_power_mod(size_t base_count, size_t exponent_count, size_t modulu
   if (!set_up)
     return FAILED;
   return store(&result);
+}
+
+// ── primality ─────────────────────────────────────────────────────────────
+
+static uint32_t last_evidence;
+
+// The evidence from the last composite verdict (a factor or a witness base).
+uint32_t harness_last_evidence(void) { return last_evidence; }
+
+// The verdict (a primality_verdict value) for the first input.
+int harness_miller_rabin(size_t count) {
+  big_number candidate = load(first_input, count);
+  last_evidence = 0;
+  primality_verdict verdict = miller_rabin(&candidate, &last_evidence);
+  big_number_free(&candidate);
+  return (int)verdict;
+}
+
+// The same, always by the multi-limb path.
+int harness_miller_rabin_multi_limb(size_t count) {
+  big_number candidate = load(first_input, count);
+  last_evidence = 0;
+  primality_verdict verdict = miller_rabin_multi_limb(&candidate, &last_evidence);
+  big_number_free(&candidate);
+  return (int)verdict;
+}
+
+// One strong test: 1 passes, 0 witness, -1 out of memory.
+int harness_strong_probable_prime(size_t count, uint32_t base) {
+  big_number candidate = load(first_input, count);
+  int result = strong_probable_prime(&candidate, base);
+  big_number_free(&candidate);
+  return result;
 }
