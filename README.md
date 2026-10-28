@@ -44,15 +44,15 @@ Three, not two, so that after every swap the view sits in the middle batch, far 
 
 Scrolling back up recomputes primes instead of storing them: memory stays flat forever and only compute grows, which is the point of the site. The list is virtualized with a fixed row height, so a prime too long for its row is shortened in the middle at comma groups and opens in full on tap.
 
-### A memory budget, and an honest stop
+### A memory budget, and partial sieving past it
 
-The budget is a quarter of the device's memory where the browser reports it. A proven lower bound on π(x) (Dusart) decides up front whether a jump's base primes could possibly fit; if not, the list shows the memory-limit notice at once instead of building for minutes. Otherwise their storage is reserved from an li(x) estimate, in one allocation.
+The budget is a quarter of the device's memory where the browser reports it. A proven lower bound on π(x) (Dusart) decides up front whether a jump's base primes could possibly fit; if so, their storage is reserved from an li(x) estimate, in one allocation. If an allocation still fails part way, the base primes roll back to exactly how they were.
 
-If an allocation still fails part way, the base primes roll back to exactly how they were, and the list stops at the last proven prime and says so. Nothing is skipped or guessed. WebAssembly memory never shrinks, so a jump back from far away starts a fresh worker to give the memory back.
+When the base primes don't fit, the sieve doesn't stop: it sieves each window with the primes below 65,536 (a cap that will be measured on the device), and every survivor it can't settle, those from (M + 1)² up for base primes up to M, is proven by a deterministic Miller–Rabin test in C (`wasm/primality.c`, on hand-written Montgomery arithmetic). That's a proof only below a(13) ≈ 3.3 × 10^24 (OEIS A014233), so the list stops at the first number past it the sieve can't cross off, and says so. Nothing is skipped or guessed. WebAssembly memory never shrinks, so a jump back from far away starts a fresh worker to give the memory back.
 
 ### Verification: an independent second opinion
 
-Every prime is checked again before it's shown, by a deterministic Miller–Rabin test written in TypeScript. It shares no code with the C sieve, so a bug in one is caught by the other. With the first 13 primes as bases, it's proven to have no false positives below about 3.3 × 10^24 (OEIS A014233), far beyond what fits in a browser's memory.
+Every prime is checked again before it's shown, by a deterministic Miller–Rabin test written in TypeScript. It shares no code with the C sieve, so a bug in one is caught by the other. With the first 13 primes as bases, it's proven to have no false positives below about 3.3 × 10^24 (OEIS A014233), which is as far as the list goes. Every composite the C side's Miller–Rabin throws out comes with its evidence (a small factor or a witness base), checked again too, so a prime thrown out by mistake can't go missing silently.
 
 If the two ever disagree, the worker stops with an error and the disputed batch is never shown. Big batches are checked in parallel in plain workers, and the time is reported separately from sieving.
 
@@ -77,11 +77,11 @@ Browsers round `performance.now()` (0.1 ms or coarser) to blunt timing attacks, 
 - **A window of batches.** The rate is total primes over total time across recent batches: at least 50 ms of them, at most 32.
 - **Cross-origin isolation.** Already needed for threads, it also gives a finer timer: about 5 µs in Chrome.
 
-The counter measures sieving time only. Building base primes, timing thread splits and verification are measured separately and left out, so the counter shows steady sieving speed and holds its value while you aren't scrolling. The CPU's heat follows the rate on a log scale, since the rate falls across orders of magnitude.
+The counter measures the time spent finding primes, which includes Miller–Rabin proving past the full sieve. Building base primes, timing thread splits and verification are measured separately and left out, so the counter shows steady speed and holds its value while you aren't scrolling. The CPU's heat follows the rate on a log scale, since the rate falls across orders of magnitude.
 
 ## Roadmap
 
-- **Partial sieve plus deterministic Miller–Rabin.** When the base primes no longer fit, sieve each window with as many as do, then test the survivors with Miller–Rabin using a proven base set. Survivor tests are planned to run on the GPU (WebGPU, 32-bit limbs), with CPU workers as the fallback.
+- **Partial sieving, measured.** Partial sieving with Miller–Rabin beats the full sieve from about 2^53 (1.7 ms against 161 ms per batch near 2^63, natively, on one thread), so the switch point and the cap are next to be measured on the device, with survivor tests shared across threads. A GPU path (WebGPU, 32-bit limbs) only if those measurements show it pays.
 - **Proofs past 3.3 × 10^24.** Beyond the proven Miller–Rabin bound: BPSW as a fast filter, then a primality proof for every candidate before it's shown (trial division first, ECPP later), with certificates checked by an independent verifier.
 
 ## Setup
@@ -128,8 +128,8 @@ npm run test:native:tsan  # the native tests multi-threaded under ThreadSanitize
 npm run test:e2e:slow     # end-to-end tests tagged @slow, around 2^64 (desktop only)
 ```
 
-The native tests (`tests/native/run.sh`) compile `wasm/sieve.c` and `wasm/bignum.c` with the system C compiler: the sieve is checked against an independent Miller–Rabin primality test, and the multi-limb arithmetic against `unsigned __int128`. The sieve runs single-threaded, then multi-threaded with every window split across 3 and 8 threads and a checkpoint every 7 base primes (so thread slices start and end in thousands of places), then with the split measured as the app does it.
+The native tests (`tests/native/run.sh`) compile `wasm/sieve.c`, `wasm/bignum.c` and `wasm/primality.c` with the system C compiler: the sieve is checked against an independent Miller–Rabin primality test (with partial sieving forced by small caps, every number passed over must be a reported prime, crossed off, or rejected with valid evidence), the multi-limb arithmetic against `unsigned __int128`, and the C Miller–Rabin against a plain sieve, strong pseudoprimes and Carmichael numbers. The sieve runs single-threaded, then multi-threaded with every window split across 3 and 8 threads and a checkpoint every 7 base primes (so thread slices start and end in thousands of places), then with the split measured as the app does it.
 
-`npm run test:wasm` compiles `wasm/bignum.c` to WebAssembly with a small test harness and checks it against JavaScript BigInt at sizes up to 8,192 bits. It also builds `wasm/sieve.c` with a 16 MB memory ceiling, so a real allocation failure inside WebAssembly can be tested: the base primes must roll back and every later prime must still be right. The committed multi-threaded build runs in Node too (Emscripten's threads become `worker_threads`), checked the same way with 8 threads, including a real allocation failure in a small shared memory.
+`npm run test:wasm` compiles `wasm/bignum.c` and `wasm/primality.c` to WebAssembly with a small test harness and checks them against JavaScript BigInt, at up to 1,000 limbs for the arithmetic and against the app's own verifier for Miller–Rabin. It also builds `wasm/sieve.c` with a 16 MB memory ceiling, so a real allocation failure inside WebAssembly can be tested: the base primes must roll back and every later prime must still be right. The committed multi-threaded build runs in Node too (Emscripten's threads become `worker_threads`), checked the same way with 8 threads, including a real allocation failure in a small shared memory.
 
 Prime counts are checked against published values of π(x) (OEIS A006880, A007053), and the sieve against known record prime gaps (OEIS A005250, A002386).

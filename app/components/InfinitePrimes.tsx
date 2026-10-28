@@ -54,6 +54,7 @@ export function InfinitePrimes({ intro, firstBatchFromServer }: Props) {
     errorMessage,
     calculationIsSlow,
     reachedMemoryLimit,
+    reachedProvenBound,
     stop,
     lastJump,
     jumpTo,
@@ -220,6 +221,7 @@ export function InfinitePrimes({ intro, firstBatchFromServer }: Props) {
               batches={batches}
               status={status}
               reachedMemoryLimit={reachedMemoryLimit}
+              reachedProvenBound={reachedProvenBound}
               errorMessage={errorMessage}
               reportView={reportView}
               takeScrollInstruction={takeScrollInstruction}

@@ -1,5 +1,5 @@
 // A Dune easter egg: now and then, a Mentat line instead of the counter's
-// "—" while calculating, or under the memory-limit notice. Purely cosmetic:
+// "—" while calculating, or under the proven-bound notice. Purely cosmetic:
 // nothing here affects calculating, timing or stopping.
 //
 // The lines and the odds are all here, so they're easy to edit.
@@ -21,13 +21,13 @@ export const CALCULATING_LINES = [
   "A Mentat is judging your CPU.",
 ] as const;
 
-/** A second line under the memory-limit notice. */
-export const MEMORY_LIMIT_LINES = [
-  "A Mentat wouldn’t have this problem.",
-  "A Mentat’s memory has no limit. Yours does.",
-  "Out of memory. A Mentat never is.",
-  "Even a thinking machine has limits.",
-  "A Mentat would remember every base prime.",
+/** A second line under the proven-bound notice, where the proofs run out. */
+export const PROVEN_BOUND_LINES = [
+  "A Mentat wouldn’t need a proof.",
+  "A Mentat would simply know.",
+  "Past here, even a Mentat would check his work.",
+  "Even a thinking machine knows where its proofs end.",
+  "A Mentat would remember every witness.",
 ] as const;
 
 /** A random number in [0, 1), like Math.random. */

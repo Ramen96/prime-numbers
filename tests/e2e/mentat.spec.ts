@@ -1,9 +1,11 @@
 import { expect, test, type Page } from "@playwright/test";
-import { CALCULATING_LINES, MEMORY_LIMIT_LINES } from "../../lib/mentatLines";
+import { CALCULATING_LINES, PROVEN_BOUND_LINES } from "../../lib/mentatLines";
 import { PrimeListPage } from "./primeListPage";
 
-const MEMORY_NOTICE =
-  "This device’s memory limit. Going further needs more base primes than fit in its memory, so the list stops at the last prime it could prove. Nothing after it has been skipped or guessed; it just hasn’t been checked.";
+const PROVEN_BOUND_NOTICE =
+  "The edge of what’s proven. From 3,317,044,064,679,887,385,961,981 on, the Miller–Rabin test this site uses no longer proves anything, so the list stops at the last prime it could prove. Nothing after it has been skipped or guessed; it just hasn’t been checked.";
+/** Past a(13), where nothing can be proven yet: the notice shows at once. */
+const PAST_THE_PROVEN_BOUND = "1" + "0".repeat(25);
 
 /**
  * Replaces the easter egg's random source (lib/mentatLines.ts) before the
@@ -61,15 +63,15 @@ test.describe("Mentat easter egg", () => {
     await expect(page.getByTestId("mentat-line")).toHaveCount(0);
   });
 
-  test("at the memory limit, forced on: each line can appear below the notice, which is unchanged", async ({ page }) => {
-    for (const [index, line] of MEMORY_LIMIT_LINES.entries()) {
-      await forceRandom(page, forcedOnPicking(index, MEMORY_LIMIT_LINES.length));
+  test("at the proven bound, forced on: each line can appear below the notice, which is unchanged", async ({ page }) => {
+    for (const [index, line] of PROVEN_BOUND_LINES.entries()) {
+      await forceRandom(page, forcedOnPicking(index, PROVEN_BOUND_LINES.length));
       const primeListPage = new PrimeListPage(page);
       await primeListPage.open();
-      await primeListPage.jumpTo("1" + "0".repeat(30), { waitForLanding: false });
+      await primeListPage.jumpTo(PAST_THE_PROVEN_BOUND, { waitForLanding: false });
 
-      const notice = page.getByRole("status").filter({ hasText: "This device’s memory limit." });
-      await expect(notice).toHaveText(MEMORY_NOTICE);
+      const notice = page.getByRole("status").filter({ hasText: "The edge of what’s proven." });
+      await expect(notice).toHaveText(PROVEN_BOUND_NOTICE);
       const mentatLine = page.getByTestId("mentat-line").filter({ hasText: line });
       await expect(mentatLine).toBeVisible();
       // never announced: not inside any live region
@@ -78,12 +80,14 @@ test.describe("Mentat easter egg", () => {
     }
   });
 
-  test("at the memory limit, forced off: the notice alone, unchanged", async ({ page }) => {
+  test("at the proven bound, forced off: the notice alone, unchanged", async ({ page }) => {
     await forceRandom(page, FORCED_OFF);
     const primeListPage = new PrimeListPage(page);
     await primeListPage.open();
-    await primeListPage.jumpTo("1" + "0".repeat(30), { waitForLanding: false });
-    await expect(page.getByRole("status").filter({ hasText: "This device’s memory limit." })).toHaveText(MEMORY_NOTICE);
+    await primeListPage.jumpTo(PAST_THE_PROVEN_BOUND, { waitForLanding: false });
+    await expect(page.getByRole("status").filter({ hasText: "The edge of what’s proven." })).toHaveText(
+      PROVEN_BOUND_NOTICE,
+    );
     await expect(page.getByTestId("mentat-line")).toHaveCount(0);
   });
 });

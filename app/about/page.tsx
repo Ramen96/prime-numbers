@@ -74,10 +74,12 @@ const FREQUENTLY_ASKED_QUESTIONS = [
     answer: (
       <>
         No: the jump box takes a number of any size. How far the list can actually go depends
-        on your device’s memory. To find primes near a number <em>x</em>, the sieve first needs
+        on what can be proven. To sieve near a number <em>x</em> completely, the site needs
         every prime up to √<em>x</em>; near 2⁶⁴ (about 18 quintillion) that’s 203,280,221 of
-        them. Past what fits, the list stops at the last prime it could prove and says so.
-        Nothing is skipped or guessed.
+        them. Past what fits in your device’s memory, it sieves with fewer and proves each
+        remaining number with a Miller–Rabin test, which is a proof only below about 3.3 × 10²⁴.
+        Past that, the list stops at the last prime it could prove and says so. Nothing is
+        skipped or guessed.
       </>
     ),
   },

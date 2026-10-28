@@ -3,7 +3,8 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { bufferLabelsAreEstimated } from "@/lib/primes/rollingBuffer";
 import type { Batch, BufferStatus, ScrollInstruction } from "@/lib/primes/usePrimeBuffer";
-import { MEMORY_LIMIT_LINES } from "@/lib/mentatLines";
+import { PROVEN_BOUND_LINES } from "@/lib/mentatLines";
+import { DETERMINISTIC_VERIFICATION_LIMIT } from "@/lib/primes/verifyPrimes";
 import { fitNumber, textWidth, type GlyphWidths } from "@/lib/shortenNumber";
 import { SHORTENED_NUMBER_HINT_CLASSES } from "./FittedNumber";
 import { GlyphRuler, readGlyphWidths } from "./GlyphRuler";
@@ -12,6 +13,7 @@ import { useMentatLine } from "./useMentatLine";
 import { WOLF_359_PRIME, Wolf359Mark } from "./Wolf359Mark";
 import { StarIcon } from "./StarIcon";
 import scrollbar from "./ThemedScrollbar.module.scss";
+import { WrappableNumber } from "./WrappableNumber";
 
 const ROW_HEIGHT_PX = 44;
 /** Extra rows rendered above and below the viewport so fast scrolling doesn't flash blank space. */
@@ -30,8 +32,10 @@ const FOOTER_ROWS = 1;
 interface Props {
   batches: Batch[];
   status: BufferStatus;
-  /** The sieve can't go further up: the base primes it needs don't fit in memory. */
+  /** The sieve can't go further up: memory ran out before it could settle the next number. */
   reachedMemoryLimit: boolean;
+  /** The sieve can't go further up: the next number is past where Miller–Rabin is a proof. */
+  reachedProvenBound: boolean;
   /** Why calculation stopped with an error, shown above the list. */
   errorMessage: string | null;
   reportView: (firstVisiblePrime: number, lastVisiblePrime: number) => void;
@@ -97,6 +101,7 @@ export function PrimeList({
   batches,
   status,
   reachedMemoryLimit,
+  reachedProvenBound,
   errorMessage,
   reportView,
   takeScrollInstruction,
@@ -134,8 +139,8 @@ export function PrimeList({
   }, [batches]);
 
   const bufferStartsAtTwo = allPrimes[0] === 2n;
-  // Dune easter egg: sometimes a second line under the memory-limit notice (lib/mentatLines.ts).
-  const memoryLimitMentatLine = useMentatLine(MEMORY_LIMIT_LINES, reachedMemoryLimit);
+  // Dune easter egg: sometimes a second line under the proven-bound notice (lib/mentatLines.ts).
+  const provenBoundMentatLine = useMentatLine(PROVEN_BOUND_LINES, reachedProvenBound);
 
 
   /** Tells the buffer which primes are on screen so it can decide whether to fetch more. */
@@ -220,6 +225,7 @@ export function PrimeList({
     batches,
     labelsAreEstimated,
     reachedMemoryLimit,
+    reachedProvenBound,
     errorMessage,
     takeScrollInstruction,
     reportVisiblePrimes,
@@ -303,8 +309,9 @@ export function PrimeList({
         </div>,
       );
     } else if (screenRow === footerScreenRow) {
-      const footerText =
-        reachedMemoryLimit
+      const footerText = reachedProvenBound
+        ? "past what’s proven: not checked yet"
+        : reachedMemoryLimit
           ? "memory limit: not checked yet"
           : status === "error"
             ? "the worker gave up"
@@ -405,15 +412,23 @@ export function PrimeList({
         )}
         {reachedMemoryLimit && (
           <p role="status" className="bg-(--hot-surface) px-5 py-3 text-white">
-            <strong>This device’s memory limit.</strong> Going further needs more base primes than
-            fit in its memory, so the list stops at the last prime it could prove. Nothing after
-            it has been skipped or guessed; it just hasn’t been checked.
+            <strong>This device’s memory limit.</strong> It ran out of memory before it could check
+            the next number, so the list stops at the last prime it could prove. Nothing after it
+            has been skipped or guessed; it just hasn’t been checked.
+          </p>
+        )}
+        {reachedProvenBound && (
+          <p role="status" className="bg-(--hot-surface) px-5 py-3 text-white">
+            <strong>The edge of what’s proven.</strong> From{" "}
+            <WrappableNumber value={DETERMINISTIC_VERIFICATION_LIMIT} /> on, the Miller–Rabin test
+            this site uses no longer proves anything, so the list stops at the last prime it could
+            prove. Nothing after it has been skipped or guessed; it just hasn’t been checked.
           </p>
         )}
         {/* Outside the status region above, so it's never announced, only read in passing. */}
-        {reachedMemoryLimit && memoryLimitMentatLine && (
+        {reachedProvenBound && provenBoundMentatLine && (
           <p data-testid="mentat-line" className="-mt-2 bg-(--hot-surface) px-5 pb-3 text-white italic">
-            {memoryLimitMentatLine}
+            {provenBoundMentatLine}
           </p>
         )}
         {labelsAreEstimated && (
