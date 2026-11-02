@@ -442,7 +442,65 @@ static void check_divide_add_back(void) {
   check_divide(dividend, divisor);
 }
 
+// Small numbers' limbs come from a per-thread cache of blocks (bignum.c). Many
+// numbers held at once must each have their own block, however many blocks are
+// taken and given back, and growing past the block size must keep every limb.
+// Run under AddressSanitizer too (tests/native/run.sh asan): that's what sees a
+// write past a block's end.
+#define NUMBERS_HELD 200
+#define LIMBS_FILLING_A_BLOCK 32
+static void check_block_cache(void) {
+  static big_number numbers[NUMBERS_HELD];
+  for (int round = 0; round < 3; round++) {
+    for (int index = 0; index < NUMBERS_HELD; index++) {
+      big_number_init(&numbers[index]);
+      big_number_set_u64(&numbers[index], (uint64_t)index * 1000003 + (uint64_t)round);
+    }
+    for (int index = 0; index < NUMBERS_HELD; index++)
+      expect_equal("each number has its own block", (u128)index, (uint64_t)index * 1000003 + (uint64_t)round,
+                   big_number_to_u64(&numbers[index]));
+    for (int index = 0; index < NUMBERS_HELD; index++)
+      big_number_free(&numbers[index]);
+  }
+
+  // all ones in exactly a block's worth of limbs, then + 1: one more limb, 2^1024
+  uint32_t all_ones[LIMBS_FILLING_A_BLOCK + 1];
+  for (int index = 0; index < LIMBS_FILLING_A_BLOCK + 1; index++)
+    all_ones[index] = UINT32_MAX;
+  big_number grown;
+  big_number_init(&grown);
+  big_number_set_limbs(&grown, all_ones, LIMBS_FILLING_A_BLOCK);
+  big_number_add_small(&grown, 1);
+  expect_equal("growing past a block: limb count", 0, LIMBS_FILLING_A_BLOCK + 1, grown.limb_count);
+  expect_equal("growing past a block: top limb", 0, 1, grown.limbs[LIMBS_FILLING_A_BLOCK]);
+  big_number_shift_left(&grown, &grown, 32 * LIMBS_FILLING_A_BLOCK);
+  expect_equal("shifting further: limb count", 0, 2 * LIMBS_FILLING_A_BLOCK + 1, grown.limb_count);
+  big_number_free(&grown);
+  for (size_t limbs = LIMBS_FILLING_A_BLOCK - 3; limbs <= LIMBS_FILLING_A_BLOCK + 1; limbs++) {
+    // Montgomery's working space is limbs + 2: this crosses the block size
+    big_number modulus, base, exponent, result;
+    big_number_init(&modulus);
+    big_number_init(&base);
+    big_number_init(&exponent);
+    big_number_init(&result);
+    big_number_set_limbs(&modulus, all_ones, limbs); // 2^(32 · limbs) − 1 is odd
+    big_number_set_u64(&base, 2);
+    big_number_set_u64(&exponent, 32 * (uint64_t)limbs);
+    montgomery_context context;
+    expect_equal("montgomery at the block size: set up", limbs, 1, (u128)montgomery_init(&context, &modulus));
+    montgomery_power(&context, &result, &base, &exponent); // 2^(32 · limbs) ≡ 1
+    expect_equal("montgomery at the block size: result", limbs, 1, big_number_to_u64(&result));
+    expect_equal("montgomery at the block size: one limb", limbs, 1, result.limb_count);
+    montgomery_free(&context);
+    big_number_free(&modulus);
+    big_number_free(&base);
+    big_number_free(&exponent);
+    big_number_free(&result);
+  }
+}
+
 int main(void) {
+  check_block_cache();
   for (size_t first = 0; first < EDGE_VALUE_COUNT; first++) {
     u128 value = EDGE_VALUES[first];
     check_conversions(value);
@@ -481,7 +539,8 @@ int main(void) {
     u128 other = random_value(128);
     check_add(value, other);
     check_subtract(value, other);
-    check_subtract(value, value - (other % (value + 1))); // second <= first, so it succeeds
+    if (value != ~(u128)0) // value + 1 would wrap to 0
+      check_subtract(value, value - (other % (value + 1))); // second <= first, so it succeeds
     check_multiply(value, random_value(128 - reference_bit_length(value)));
     check_divide(value, other);
     check_divide(value, random_value(64)); // single-limb and two-limb divisors

@@ -207,7 +207,7 @@ function sieveSegment(low, high, basePrimes, isComposite) {
         as numbers grow, so each batch covers a wider stretch of numbers, and every segment has
         more base primes to cross off with. On a recent laptop, sieving on 9 threads, a batch
         near a million takes about 0.03 ms; near a trillion, 0.3 ms; near 2⁵³, about 2 ms; near
-        2⁶³, about 3 ms; past 2⁶⁴, about 30 ms. That’s the slowdown the counter shows.
+        2⁶³, about 3 ms; past 2⁶⁴, about 5 ms. That’s the slowdown the counter shows.
       </p>
       <p>
         On a device with several cores, the sieve runs on several threads at once: one fewer

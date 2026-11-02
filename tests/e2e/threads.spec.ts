@@ -129,7 +129,7 @@ test.describe("sieve threads", () => {
     });
 
     // Scroll down hard for a few seconds: fast enough that a batch near 10^24
-    // (tens of ms on all threads) is needed every fraction of a second.
+    // (several ms on all threads) is needed every fraction of a second.
     // Real scroll gestures (touch on the phone, wheel on desktop), through the
     // browser's compositor as a user's would be, from the middle of the part
     // of the list that's on screen
@@ -145,7 +145,7 @@ test.describe("sieve threads", () => {
         x: Math.round(box.x + box.width / 2),
         y: Math.round((visibleTop + visibleBottom) / 2),
         yDistance: -40_000, // negative: scroll down
-        speed: 60_000, // px/s: a batch of 500 rows is 22,000 px
+        speed: 120_000, // px/s: a batch of 500 rows is 22,000 px
         gestureSourceType: "default",
       });
     }

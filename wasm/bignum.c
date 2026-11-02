@@ -10,11 +10,44 @@
 
 // ── internal helpers ──────────────────────────────────────────────────────
 
+// Miller–Rabin on a multi-limb candidate allocates dozens of small numbers, on
+// every thread at once, and the allocator takes a lock each time: in Wasm, past
+// 3 threads, they spent longer queuing than working. So small blocks are kept
+// per thread and reused. All blocks of SMALL_BLOCK_LIMBS limbs are ordinary
+// malloc blocks, so any of them can still be realloc'd or freed. Fixed sizes,
+// which are no limit: larger numbers just go to malloc, and a full cache frees.
+#define SMALL_BLOCK_LIMBS 32
+#define CACHED_BLOCKS_PER_THREAD 64
+static _Thread_local uint32_t *cached_blocks[CACHED_BLOCKS_PER_THREAD];
+static _Thread_local size_t cached_block_count = 0;
+
+// A block of SMALL_BLOCK_LIMBS limbs, or NULL if memory runs out.
+static uint32_t *take_small_block(void) {
+  if (cached_block_count > 0)
+    return cached_blocks[--cached_block_count];
+  return malloc(SMALL_BLOCK_LIMBS * sizeof(uint32_t));
+}
+
+// Gives back a block of `capacity` limbs: kept if it's small and there's room.
+static void release_limbs(uint32_t *limbs, size_t capacity) {
+  if (limbs && capacity == SMALL_BLOCK_LIMBS && cached_block_count < CACHED_BLOCKS_PER_THREAD)
+    cached_blocks[cached_block_count++] = limbs;
+  else
+    free(limbs);
+}
+
 // Makes room for at least `needed` limbs, growing by doubling so repeated
 // small growth stays cheap. Existing limbs are kept.
 static int reserve_limbs(big_number *number, size_t needed) {
   if (needed <= number->limb_capacity)
     return 1;
+  if (number->limbs == NULL && needed <= SMALL_BLOCK_LIMBS) {
+    number->limbs = take_small_block();
+    if (!number->limbs)
+      return 0;
+    number->limb_capacity = SMALL_BLOCK_LIMBS;
+    return 1;
+  }
   size_t new_capacity = number->limb_capacity ? number->limb_capacity : 4;
   while (new_capacity < needed) {
     if (new_capacity > SIZE_MAX / 2 / sizeof(uint32_t))
@@ -72,7 +105,7 @@ static uint32_t limb_at(const big_number *number, size_t index) {
 // at the end, so an output can be the same number as an input, and a failed
 // allocation leaves the output unchanged.
 static void move_into(big_number *destination, big_number *source) {
-  free(destination->limbs);
+  release_limbs(destination->limbs, destination->limb_capacity);
   *destination = *source;
   big_number_init(source);
 }
@@ -103,7 +136,7 @@ void big_number_init(big_number *number) {
 }
 
 void big_number_free(big_number *number) {
-  free(number->limbs);
+  release_limbs(number->limbs, number->limb_capacity);
   big_number_init(number);
 }
 
@@ -623,7 +656,9 @@ int montgomery_init(montgomery_context *context, const big_number *modulus) {
            modulus_limbs <= SIZE_MAX / (2 * LIMB_BITS) &&
            big_number_shift_left(&r_squared_unreduced, &r_squared_unreduced, 2 * LIMB_BITS * modulus_limbs) &&
            big_number_divide(NULL, &context->r_squared, &r_squared_unreduced, modulus) &&
-           (context->scratch = malloc((modulus_limbs + 2) * sizeof(uint32_t))) != NULL;
+           (context->scratch = modulus_limbs + 2 <= SMALL_BLOCK_LIMBS
+                                   ? take_small_block()
+                                   : malloc((modulus_limbs + 2) * sizeof(uint32_t))) != NULL;
   big_number_free(&r_squared_unreduced);
   if (!ok) {
     montgomery_free(context);
@@ -634,9 +669,12 @@ int montgomery_init(montgomery_context *context, const big_number *modulus) {
 }
 
 void montgomery_free(montgomery_context *context) {
+  if (context->scratch && context->modulus.limb_count + 2 <= SMALL_BLOCK_LIMBS)
+    release_limbs(context->scratch, SMALL_BLOCK_LIMBS);
+  else
+    free(context->scratch);
   big_number_free(&context->modulus);
   big_number_free(&context->r_squared);
-  free(context->scratch);
   context->scratch = NULL;
 }
 

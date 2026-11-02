@@ -4,6 +4,7 @@
 #   sh tests/native/run.sh fast   # npm run test:native
 #   sh tests/native/run.sh slow   # npm run test:native:slow (around 2^64)
 #   sh tests/native/run.sh tsan   # npm run test:native:tsan (ThreadSanitizer, ~25 min)
+#   sh tests/native/run.sh asan   # npm run test:native:asan (AddressSanitizer, about a minute)
 #
 # Every suite runs single-threaded (as public/sieve.wasm does) and threaded
 # (as public/sieve-threads/ does). Threaded runs use a checkpoint every 7
@@ -43,8 +44,17 @@ tsan)
   SIEVE_TEST_HELPERS=8 .cache/sieve_test_tsan
   SIEVE_TEST_HELPERS=8 SIEVE_TEST_MEASURE=1 .cache/sieve_test_tsan
   ;;
+asan)
+  sanitizers="-O1 -g -fsanitize=address"
+  cc $sanitizers $warnings -o .cache/bignum_test_asan tests/native/bignum_test.c wasm/bignum.c -lm
+  .cache/bignum_test_asan
+  cc $sanitizers $warnings -o .cache/primality_test_asan tests/native/primality_test.c wasm/primality.c wasm/bignum.c -lm
+  .cache/primality_test_asan
+  cc $sanitizers $warnings -DSIEVE_TEST_HOOKS $threaded -o .cache/sieve_test_asan tests/native/sieve_test.c $sources
+  SIEVE_TEST_HELPERS=8 .cache/sieve_test_asan
+  ;;
 *)
-  echo "usage: sh tests/native/run.sh fast|slow|tsan" >&2
+  echo "usage: sh tests/native/run.sh fast|slow|tsan|asan" >&2
   exit 2
   ;;
 esac
