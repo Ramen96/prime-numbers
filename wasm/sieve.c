@@ -53,7 +53,8 @@ static uint64_t sieve_prime_cap = UINT64_MAX;
 // it would be at least (M + 1)^2. From here up, Miller–Rabin decides. M can
 // pass 2^32, so (M + 1)^2 can pass 2^64: a big_number
 static big_number sieve_proves_below;
-// one survivor's value, reused so proving doesn't allocate every time
+// one survivor's value, reused so proving doesn't allocate every time (the
+// calling thread's; each helper thread has its own)
 static big_number survivor;
 
 // The number a call starts from, written by JavaScript as limbs
@@ -429,12 +430,21 @@ typedef struct {
   uint64_t largest_needed;    // shared window: its largest base prime needed
   size_t checkpoints;         // shared window: checkpoints at or below that
   uint64_t collect_below;     // whole windows: collect the primes below this
+  // proving survivors (Phase 4): each thread proves its share of these
+  // indices into the segment at proof_low, writing the verdicts and evidence
+  // at the same positions. NULL proof_indices: not a proving job
+  const big_number *proof_low;
+  const uint64_t *proof_indices;
+  size_t proof_count;
+  primality_verdict *proof_verdicts;
+  uint32_t *proof_evidence;
 } sieve_job;
 
 #ifdef SIEVE_THREADS
 typedef struct {
   uint8_t segment[SEGMENT_BYTES]; // this thread's marks
   window_primes found;            // and, building base primes, what it found
+  big_number survivor;            // and, proving survivors, one survivor's value
   pthread_t thread;
 } sieve_helper;
 static sieve_helper *helpers = NULL;
@@ -462,6 +472,40 @@ static window_primes *thread_found(int thread_index) {
 #endif
   (void)thread_index;
   return &calling_thread_found;
+}
+
+static big_number *thread_survivor(int thread_index) {
+#ifdef SIEVE_THREADS
+  if (thread_index > 0)
+    return &helpers[thread_index - 1].survivor;
+#endif
+  (void)thread_index;
+  return &survivor;
+}
+
+// the Miller–Rabin verdict for the number at `index` in the segment at low,
+// with `scratch` for its value. safe on several threads at once: each brings
+// its own scratch, and primality.c keeps no state between calls
+static primality_verdict prove_number(const big_number *low, uint64_t index, big_number *scratch, uint32_t *evidence) {
+  if (big_number_fits_u64(low) && big_number_to_u64(low) <= UINT64_MAX - 2 * index)
+    return miller_rabin_u64(big_number_to_u64(low) + 2 * index, evidence);
+  if (big_number_copy(scratch, low) && big_number_add_small(scratch, 2 * index))
+    return miller_rabin(scratch, evidence);
+  return PRIMALITY_OUT_OF_MEMORY;
+}
+
+// one thread's share of a proving job: positions [count * t / threads,
+// count * (t + 1) / threads), so every survivor is proved exactly once and
+// each thread writes only its own verdicts
+static void prove_share(const sieve_job *job, int thread_index) {
+  size_t first = job->proof_count * (size_t)thread_index / (size_t)job->threads;
+  size_t end = job->proof_count * (size_t)(thread_index + 1) / (size_t)job->threads;
+  big_number *scratch = thread_survivor(thread_index);
+  for (size_t position = first; position < end; position++) {
+    job->proof_evidence[position] = 0;
+    job->proof_verdicts[position] =
+        prove_number(job->proof_low, job->proof_indices[position], scratch, &job->proof_evidence[position]);
+  }
 }
 
 // Splitting a window across threads only pays once it needs enough base
@@ -495,6 +539,10 @@ size_t measured_parallel_threshold(void) {
 
 // one thread's share of a job, in its own segment
 static void run_slice(const sieve_job *job, int thread_index) {
+  if (job->proof_indices) {
+    prove_share(job, thread_index);
+    return;
+  }
   uint8_t *target = thread_segment(thread_index);
   memset(target, 0, SEGMENT_BYTES);
   if (job->whole_windows) {
@@ -559,6 +607,7 @@ int sieve_start_helpers(int count) {
   if (!helpers)
     return 0;
   for (int i = 0; i < count; i++) {
+    big_number_init(&helpers[i].survivor);
     if (pthread_create(&helpers[i].thread, NULL, helper_main, (void *)(intptr_t)(i + 1)) != 0)
       break;
     helper_count++;
@@ -635,7 +684,12 @@ static double fastest_marking_ms(sieve_job *job, int threads) {
 // the bounds that aren't measured stay on one thread. the result is the same
 // either way; only the time differs
 static void mark_window(uint64_t low, const big_number *big_low, uint64_t largest_needed) {
-  sieve_job job = {0, 1, low, big_low, largest_needed, checkpoints_needed(largest_needed), 0};
+  sieve_job job = {.whole_windows = 0,
+                   .threads = 1,
+                   .low = low,
+                   .big_low = big_low,
+                   .largest_needed = largest_needed,
+                   .checkpoints = checkpoints_needed(largest_needed)};
   size_t size = job.checkpoints;
   int all_threads = helper_count + 1;
   int worth_measuring = size / 2 >= largest_size_split_lost &&
@@ -701,7 +755,7 @@ static int extend_base_primes_to(uint64_t new_limit) {
       windows--;
     // each thread sieves its window and encodes the primes it found; they're
     // appended here in window order
-    sieve_job job = {1, windows, low, NULL, 0, 0, new_limit};
+    sieve_job job = {.whole_windows = 1, .threads = windows, .low = low, .collect_below = new_limit};
     run_job(&job);
 
     for (int window = 0; window < windows; window++) {
@@ -914,25 +968,100 @@ static int record_rejected(uint64_t distance, uint32_t evidence) {
   return 1;
 }
 
+// Survivors are proven ahead of the scan, several at a time, so every thread
+// can share the work: the next run of survivors that need Miller–Rabin, in
+// the order the scan will meet them, and their verdicts. The scan then takes
+// the verdicts in that same order. Calling thread only. A proving job never
+// outlives its segment: forget_proofs_ahead runs whenever a new one starts.
+// Fixed size: prove_survivors_ahead never proves more than PROOF_RUN_LIMIT
+// at once, and the scan just proves another run when it needs one
+#define PROOF_RUN_LIMIT 1024
+static uint64_t proof_indices[PROOF_RUN_LIMIT];
+static primality_verdict proof_verdicts[PROOF_RUN_LIMIT];
+static uint32_t proof_evidence[PROOF_RUN_LIMIT];
+static size_t proofs_ahead = 0;   // how many are proven
+static size_t proofs_taken = 0;   // how many of those the scan has used
+
+static void forget_proofs_ahead(void) { proofs_ahead = proofs_taken = 0; }
+
+#ifdef SIEVE_TEST_HOOKS
+// tests only: how many times a proven run had to be thrown away because the
+// scan met a survivor other than the next one proven. never, unless proving
+// ahead and scanning disagree about the order: settle_survivor still gets the
+// right verdict by proving again, so without this count such a bug would only
+// show as slowness
+static size_t proofs_redone = 0;
+size_t sieve_test_proofs_redone(void) { return proofs_redone; }
+#endif
+
+// how many survivors to prove ahead, per prime the batch still wants, when
+// there are threads to share them: about 2 survivors need proving per prime
+// past 2^64, and proving more ahead means fewer rounds of waking the threads.
+// Measured natively with 9 threads, ms per batch near 10^24: 1 ahead per
+// prime 6.6, 2 5.7, 4 5.3 (near 2^53: 0.58, 0.46, 0.37)
+#define PROOFS_AHEAD_PER_PRIME_WANTED 4
+
+// proves, on every thread, the survivors needing Miller–Rabin from `index`
+// on, in scan order (down the segment if `descending`), only among indices
+// below `valid_below`: PROOFS_AHEAD_PER_PRIME_WANTED for each of the
+// `primes_wanted` the batch still needs (at most PROOF_RUN_LIMIT), so little
+// is proven past its end. On one thread, one at a time: proving ahead saves
+// nothing there, and anything proven past the batch's end would be wasted
+static void prove_survivors_ahead(const big_number *low, uint64_t index, uint64_t first_needing_proof,
+                                  int descending, uint64_t valid_below, size_t primes_wanted) {
+  forget_proofs_ahead();
+  size_t wanted = helper_count == 0 ? 1 : PROOFS_AHEAD_PER_PRIME_WANTED * primes_wanted;
+  if (wanted > PROOF_RUN_LIMIT)
+    wanted = PROOF_RUN_LIMIT;
+  for (uint64_t i = index; proofs_ahead < wanted;) {
+    if (!segment[i] && i >= first_needing_proof && i < valid_below)
+      proof_indices[proofs_ahead++] = i;
+    if (descending) {
+      if (i == 0)
+        break;
+      i--;
+    } else if (++i >= valid_below) {
+      break;
+    }
+  }
+  int threads = helper_count + 1;
+  if ((size_t)threads > proofs_ahead)
+    threads = (int)proofs_ahead;
+  sieve_job job = {0};
+  job.threads = threads;
+  job.proof_low = low;
+  job.proof_indices = proof_indices;
+  job.proof_count = proofs_ahead;
+  job.proof_verdicts = proof_verdicts;
+  job.proof_evidence = proof_evidence;
+  run_job(&job);
+}
+
 typedef enum { SURVIVOR_PRIME, SURVIVOR_COMPOSITE, SURVIVOR_UNSETTLED } survivor_state;
 
 // settles the unmarked number at `index` in the segment at low, which is
 // `distance` from the requested number: prime by the sieve below
-// sieve_proves_below (first_needing_proof), otherwise by Miller–Rabin. a
-// composite is recorded with its evidence. one that can't be settled sets the
-// flag saying why, and the caller stops there: nothing after it is reported
+// sieve_proves_below (first_needing_proof), otherwise by Miller–Rabin, proven
+// ahead on every thread (prove_survivors_ahead, with `descending`,
+// `valid_below` and `primes_wanted` describing the scan). a composite is
+// recorded with its evidence. one that can't be settled sets the flag saying
+// why, and the caller stops there: nothing after it is reported
 static survivor_state settle_survivor(const big_number *low, uint64_t index, uint64_t first_needing_proof,
-                                      uint64_t distance) {
+                                      uint64_t distance, int descending, uint64_t valid_below, size_t primes_wanted) {
   if (index < first_needing_proof)
     return SURVIVOR_PRIME;
-  uint32_t evidence = 0;
-  primality_verdict verdict;
-  if (big_number_fits_u64(low) && big_number_to_u64(low) <= UINT64_MAX - 2 * index)
-    verdict = miller_rabin_u64(big_number_to_u64(low) + 2 * index, &evidence);
-  else if (big_number_copy(&survivor, low) && big_number_add_small(&survivor, 2 * index))
-    verdict = miller_rabin(&survivor, &evidence);
-  else
-    verdict = PRIMALITY_OUT_OF_MEMORY;
+  // the scan meets survivors in the order they were proven; if this isn't
+  // the next one proven (or none are left), prove a new run from here
+  if (proofs_taken == proofs_ahead || proof_indices[proofs_taken] != index) {
+#ifdef SIEVE_TEST_HOOKS
+    if (proofs_taken < proofs_ahead)
+      proofs_redone++;
+#endif
+    prove_survivors_ahead(low, index, first_needing_proof, descending, valid_below, primes_wanted);
+  }
+  uint32_t evidence = proof_evidence[proofs_taken];
+  primality_verdict verdict = proof_verdicts[proofs_taken];
+  proofs_taken++;
 
   switch (verdict) {
   case PRIMALITY_PRIME:
@@ -998,10 +1127,12 @@ int sieve_next(size_t request_limb_count, int count) {
       break;
     }
     uint64_t first_needing_proof = first_index_needing_proof(&low);
+    forget_proofs_ahead(); // a new segment: earlier proofs were for the last one
     for (uint64_t i = 0; i < SEGMENT_BYTES && written < count; i++) {
       if (segment[i])
         continue;
-      survivor_state state = settle_survivor(&low, i, first_needing_proof, low_distance + 2 * i);
+      survivor_state state =
+          settle_survivor(&low, i, first_needing_proof, low_distance + 2 * i, 0, SEGMENT_BYTES, (size_t)(count - written));
       if (state == SURVIVOR_UNSETTLED) {
         unsettled = 1;
         break;
@@ -1083,12 +1214,15 @@ int sieve_prev(size_t request_limb_count, int count) {
 
     uint64_t low_distance = upper_distance + window_width;
     uint64_t first_needing_proof = first_index_needing_proof(&low);
+    forget_proofs_ahead(); // a new segment: earlier proofs were for the last one
+    uint64_t valid_below = (window_width + 1) / 2; // indices whose numbers are below upper
     for (int64_t i = SEGMENT_BYTES - 1; i >= 0 && written < count; i--) {
       if (2 * (uint64_t)i >= window_width) // at or past upper
         continue;
       if (segment[i])
         continue;
-      survivor_state state = settle_survivor(&low, (uint64_t)i, first_needing_proof, low_distance - 2 * (uint64_t)i);
+      survivor_state state = settle_survivor(&low, (uint64_t)i, first_needing_proof, low_distance - 2 * (uint64_t)i, 1,
+                                             valid_below, (size_t)(count - written));
       if (state == SURVIVOR_UNSETTLED) {
         unsettled = 1;
         break;

@@ -292,6 +292,8 @@ static void test_partial_sieving(void) {
 
   check_proven_bound(5000);
   set_sieve_prime_cap(UINT64_MAX);
+  // proving ahead and scanning always agreed on the order: nothing proven twice
+  expect("partial sieving", "proofs never redone", 0, (u128)sieve_test_proofs_redone());
 }
 
 // ── sweeps ────────────────────────────────────────────────────────────────

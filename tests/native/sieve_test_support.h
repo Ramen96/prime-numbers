@@ -43,6 +43,7 @@ int sieve_start_helpers(int count); // SIEVE_THREADS builds only
 void sieve_force_multi_limb_windows(int force);
 int sieve_test_gap_encoding_round_trip(const uint64_t *primes, size_t count);
 int sieve_test_base_primes_consistent(void);
+size_t sieve_test_proofs_redone(void);
 size_t measured_parallel_threshold(void);
 
 #define BATCH_SIZE 500
