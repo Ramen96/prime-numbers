@@ -10,6 +10,7 @@
 import { computeBatch } from "./computeBatch";
 import { loadSieve, sievingThreadsFor } from "./loadSieve";
 import type { WorkerRequest, WorkerResponse } from "./protocol";
+import { SieveCalibrator } from "./sieveCalibrator";
 import { VerificationPool } from "./verificationPool";
 import { VERIFICATION_WORKER_NAME } from "./workerNames";
 
@@ -36,14 +37,17 @@ function sendToMainThread(response: WorkerResponse) {
 // One request at a time, in the order they arrived (computing is async while
 // verification runs in other workers).
 let previousRequest: Promise<void> = Promise.resolve();
+let calibrator: SieveCalibrator | null = null;
 
 self.onmessage = (event: MessageEvent<WorkerRequest>) => {
   const request = event.data;
   previousRequest = previousRequest.then(async () => {
     try {
       const { sieve, threads, memoryBudgetBytes } = await sieveReady;
+      calibrator ??= new SieveCalibrator(sieve, memoryBudgetBytes);
       await computeBatch(sieve, request, sendToMainThread, {
         memoryBudgetBytes,
+        calibrator,
         threads,
         verify: (primes, rejected) => verificationPool.verify(primes, rejected),
       });

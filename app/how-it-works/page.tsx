@@ -199,14 +199,15 @@ function sieveSegment(low, high, basePrimes, isComposite) {
         the list of base primes grows, with the square root of the numbers: covering everything
         up to 2⁶⁴ takes every prime below 2³², about 203 million of them. To fit, they’re stored
         as the gaps between them, halved (every gap after 2 is even), one byte each. The worker
-        keeps that list and extends it only when the numbers get big enough to need more.
+        keeps that list and extends it only when the numbers get big enough to need more, up
+        to a point it measures on your device (see below).
       </p>
       <p>
         A batch on the site is always 500 primes, not a fixed range of numbers. Primes thin out
         as numbers grow, so each batch covers a wider stretch of numbers, and every segment has
         more base primes to cross off with. On a recent laptop, sieving on 9 threads, a batch
-        near a million takes about 0.03 ms; near a trillion, 0.2 ms; near 2⁵³, about 2 ms; near
-        2⁶⁴, about an eighth of a second. That’s the slowdown the counter shows.
+        near a million takes about 0.03 ms; near a trillion, 0.3 ms; near 2⁵³, about 2 ms; near
+        2⁶³, about 3 ms; past 2⁶⁴, about 30 ms. That’s the slowdown the counter shows.
       </p>
       <p>
         On a device with several cores, the sieve runs on several threads at once: one fewer
@@ -218,21 +219,21 @@ function sieveSegment(low, high, basePrimes, isComposite) {
         the other way: each thread sieves a whole segment of its own. Threads need shared
         memory, which browsers allow only on cross-origin isolated pages; where they can’t
         start, the worker sieves on one thread instead. The primes are the same either way,
-        just slower, and the “threads” line under the counter shows which you have.
+        just slower, and the “threads” line under the counter shows which you have. The
+        Miller–Rabin tests described below are shared between the threads too.
       </p>
       <p>
         Before a batch is shown, every prime in it is checked again by a completely separate
         method: a Miller–Rabin test, written in TypeScript and sharing no code with the C sieve.
         With the first 13 primes as its test bases, it’s proven never to call a composite prime
         below about 3.3 × 10²⁴, which is as far as the list goes. If the two ever disagreed, the
-        site would stop with an error rather than show the disputed number. Past what the sieve
-        can hold, the C side runs its own Miller–Rabin test too (see below), and every number it
+        site would stop with an error rather than show the disputed number. Once it sieves
+        partially, the C side runs its own Miller–Rabin test too (see below), and every number it
         throws out comes with evidence: a small factor, or a “witness” base. The TypeScript side
         checks that evidence again, with one division or one modular exponentiation, so a prime
         thrown out by mistake would stop the list with an error instead of quietly going
         missing. The check takes about 1 ms per batch near a million. For big primes it’s split
-        between several background workers, about 2 ms near 2⁶³ on a laptop instead of 9 ms on
-        one core. It appears separately under “checked” and doesn’t count toward the speed.
+        between several background workers, about 4 ms near 2⁶³ on a laptop. It appears separately under “checked” and doesn’t count toward the speed.
       </p>
 
       {/* 5 */}
@@ -579,11 +580,21 @@ return EULER_MASCHERONI + Math.log(lnX) + Math.sqrt(x) * sum;`}
         <a href="#numbers-bigger-than-64-bits">its own section below</a>.
       </p>
       <p>
-        Memory sets a limit too, but not on how far the list goes. To sieve near <em>x</em>{" "}
-        completely, the worker needs every prime up to √<em>x</em>. When those don’t fit on your
-        device, it sieves with the primes below 65,536 that it always has, which crosses off
-        most composites, and proves each number that survives with a Miller–Rabin test: the same
-        deterministic test as the check above, written again in C. That proof only holds below
+        To sieve near <em>x</em> completely, the worker needs every prime up to √<em>x</em>,
+        which gets slower and takes more memory as <em>x</em> grows. So past a point, it stops
+        doing that. It sieves with only a small set of base primes, which crosses off most
+        composites, and proves each number that survives with a Miller–Rabin test: the same
+        deterministic test as the check above, written again in C. Proving a prime costs about
+        the same however large the sieve was, so this soon wins by a long way: near 2⁶³ on a laptop, about
+        3 ms a batch instead of 39 ms, and 4 MB of base primes instead of 150 MB.
+      </p>
+      <p>
+        Where that point is depends on your device, so the worker measures it. The first time
+        you go past 2³², it times real batches both ways at 2³⁶, 2⁴⁰, 2⁴⁴ and so on, stopping
+        where the partial sieve is clearly faster, then tries a few sizes for the small set of
+        base primes and keeps the fastest. Past 2⁶⁴, where the arithmetic changes, it times
+        those sizes again. Both ways must find exactly the same primes, or the site stops with
+        an error, so every measurement is also a check. That proof only holds below
         3,317,044,064,679,887,385,961,981 (about 3.3 × 10²⁴), so there the list stops at the last
         prime it could prove and says so, rather than guessing or skipping ahead. Going further
         needs a real primality proof for each number, which isn’t built yet.
@@ -600,7 +611,7 @@ return EULER_MASCHERONI + Math.log(lnX) + Math.sqrt(x) * sum;`}
         it works out the least
         memory the base primes could possibly need; if even that won’t fit, it skips building
         them and sieves partially straight away. A WebAssembly module’s memory never shrinks,
-        so after a far jump, jumping back somewhere smaller starts a fresh worker to give the
+        so if a worker has grown large, jumping somewhere smaller starts a fresh one to give the
         memory back.
       </p>
 
@@ -776,8 +787,8 @@ for (size_t index = limb_count; index-- > 0;)
         scrolling, the worker rests and the counter keeps its last value instead of sinking to
         zero. Setting up after a big jump is timed separately and left out, so the counter shows
         steady speed: building base primes, which can take a noticeable moment, and the brief
-        timing runs that decide when to split a segment across threads. Past what the full sieve
-        can hold, finding a prime includes proving it with Miller–Rabin, so that time counts;
+        timing runs that decide when to split a segment across threads or sieve partially. Once
+        it sieves partially, finding a prime includes proving it with Miller–Rabin, so that time counts;
         the separate check before anything is shown never does.
       </p>
 

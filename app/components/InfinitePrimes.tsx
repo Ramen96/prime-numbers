@@ -47,7 +47,7 @@ export function InfinitePrimes({ intro, firstBatchFromServer }: Props) {
     primesPerSecond,
     heat,
     lastBatchDurationMs,
-    lastBasePrimeSetupMs,
+    lastSetupMs,
     lastVerificationMs,
     basePrimeMemoryBytes,
     sievingThreads,
@@ -162,11 +162,9 @@ export function InfinitePrimes({ intro, firstBatchFromServer }: Props) {
               </dd>
               <dt>last batch</dt>
               <dd className="text-foreground">{formatBatchDuration(lastBatchDurationMs)}</dd>
-              <dt>base primes</dt>
+              <dt>setup</dt>
               <dd className="text-foreground">
-                {lastBasePrimeSetupMs === null
-                  ? "—"
-                  : `set up in ${formatBatchDuration(lastBasePrimeSetupMs)}`}
+                {lastSetupMs === null ? "—" : `in ${formatBatchDuration(lastSetupMs)}`}
               </dd>
               <dt>memory</dt>
               <dd className="text-foreground">

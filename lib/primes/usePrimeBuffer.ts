@@ -84,7 +84,7 @@ export interface PrimeBuffer {
   /** Sieving time of the last batch; null until the worker has computed one. */
   lastBatchDurationMs: number | null;
   /** How long building base primes took the last time it was needed; null before then. */
-  lastBasePrimeSetupMs: number | null;
+  lastSetupMs: number | null;
   /** Threads sieving each window (1 on the single-threaded fallback); null until the first batch. */
   sievingThreads: number | null;
   /** Bytes the worker holds for base primes; null until it has reported. */
@@ -151,7 +151,7 @@ export function usePrimeBuffer(firstBatchFromServer: readonly string[]): PrimeBu
   const [primesPerSecond, setPrimesPerSecond] = useState<number | null>(null);
   const [heat, setHeat] = useState(0);
   const [lastBatchDurationMs, setLastBatchDurationMs] = useState<number | null>(null);
-  const [lastBasePrimeSetupMs, setLastBasePrimeSetupMs] = useState<number | null>(null);
+  const [lastSetupMs, setLastSetupMs] = useState<number | null>(null);
   const [lastVerificationMs, setLastVerificationMs] = useState<number | null>(null);
   const [basePrimeMemoryBytes, setBasePrimeMemoryBytes] = useState<number | null>(null);
   const [sievingThreads, setSievingThreads] = useState<number | null>(null);
@@ -414,7 +414,7 @@ export function usePrimeBuffer(firstBatchFromServer: readonly string[]): PrimeBu
 
       setStatus("idle");
       const { primes: newPrimes, sievingDurationMs, setupDurationMs, direction } = response;
-      if (setupDurationMs > 0) setLastBasePrimeSetupMs(setupDurationMs);
+      if (setupDurationMs > 0) setLastSetupMs(setupDurationMs);
       setLastVerificationMs(response.verificationDurationMs);
       setSievingThreads(response.threads);
       if (response.reachedMemoryLimit && direction === "next") {
@@ -554,7 +554,7 @@ export function usePrimeBuffer(firstBatchFromServer: readonly string[]): PrimeBu
     primesPerSecond,
     heat,
     lastBatchDurationMs,
-    lastBasePrimeSetupMs,
+    lastSetupMs,
     lastVerificationMs,
     basePrimeMemoryBytes,
     sievingThreads,

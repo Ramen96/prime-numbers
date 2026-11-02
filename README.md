@@ -48,7 +48,9 @@ Scrolling back up recomputes primes instead of storing them: memory stays flat f
 
 The budget is a quarter of the device's memory where the browser reports it. A proven lower bound on π(x) (Dusart) decides up front whether a jump's base primes could possibly fit; if so, their storage is reserved from an li(x) estimate, in one allocation. If an allocation still fails part way, the base primes roll back to exactly how they were.
 
-When the base primes don't fit, the sieve doesn't stop: it sieves each window with the primes below 65,536 (a cap that will be measured on the device), and every survivor it can't settle, those from (M + 1)² up for base primes up to M, is proven by a deterministic Miller–Rabin test in C (`wasm/primality.c`, on hand-written Montgomery arithmetic). That's a proof only below a(13) ≈ 3.3 × 10^24 (OEIS A014233), so the list stops at the first number past it the sieve can't cross off, and says so. Nothing is skipped or guessed. WebAssembly memory never shrinks, so a jump back from far away starts a fresh worker to give the memory back.
+Past a point measured on the device, or sooner if the base primes don't fit, the sieve stops building them: it sieves each window with a small set, and every survivor it can't settle, those from (M + 1)² up for base primes up to M, is proven by a deterministic Miller–Rabin test in C (`wasm/primality.c`, on hand-written Montgomery arithmetic), shared across the threads. Proving a prime costs the same however large the sieve was, so this wins by a long way: near 2^63, about 3 ms a batch instead of 39 ms, and 4 MB of base primes instead of 150 MB.
+
+The worker measures rather than assumes: on the first batch past 2^32 it times real batches both ways up a ladder of sizes (`lib/primes/methodCalibration.ts`), stopping where partial sieving is clearly faster, then times a few caps and keeps the fastest; past 2^64 it times the caps again for the multi-limb path. Batches from the same place must hold identical primes, or the worker stops with an error, so calibrating also cross-checks the methods. That's a proof only below a(13) ≈ 3.3 × 10^24 (OEIS A014233), so the list stops at the first number past it the sieve can't cross off, and says so. Nothing is skipped or guessed. WebAssembly memory never shrinks, so a jump back from far away starts a fresh worker to give the memory back.
 
 ### Verification: an independent second opinion
 
@@ -62,7 +64,7 @@ A batch of 500 primes almost always fits in one window, so giving each thread it
 
 Splitting only pays once a window needs many base primes, so the worker measures where that starts on the device, from both directions, at most a dozen times. Building base primes is split the other way: one whole window per thread, each thread encoding its own gaps.
 
-The sieve uses one thread fewer than the cores, so the page keeps one for scrolling. Near 2^63 on a 10-core laptop, a batch drops from 158 ms to 39 ms. The threaded build is checked with ThreadSanitizer.
+The sieve uses one thread fewer than the cores, so the page keeps one for scrolling. Sieving fully near 2^63 on a 10-core laptop, a batch drops from 158 ms to 39 ms. The threaded build is checked with ThreadSanitizer.
 
 ### The single-threaded fallback
 
@@ -77,11 +79,11 @@ Browsers round `performance.now()` (0.1 ms or coarser) to blunt timing attacks, 
 - **A window of batches.** The rate is total primes over total time across recent batches: at least 50 ms of them, at most 32.
 - **Cross-origin isolation.** Already needed for threads, it also gives a finer timer: about 5 µs in Chrome.
 
-The counter measures the time spent finding primes, which includes Miller–Rabin proving past the full sieve. Building base primes, timing thread splits and verification are measured separately and left out, so the counter shows steady speed and holds its value while you aren't scrolling. The CPU's heat follows the rate on a log scale, since the rate falls across orders of magnitude.
+The counter measures the time spent finding primes, which includes Miller–Rabin proving past the full sieve. Building base primes, calibrating, timing thread splits and verification are measured separately and left out, so the counter shows steady speed and holds its value while you aren't scrolling. The CPU's heat follows the rate on a log scale, since the rate falls across orders of magnitude.
 
 ## Roadmap
 
-- **Partial sieving, measured.** Partial sieving with Miller–Rabin beats the full sieve from about 2^53 (1.7 ms against 161 ms per batch near 2^63, natively, on one thread), so the switch point and the cap are next to be measured on the device, with survivor tests shared across threads. A GPU path (WebGPU, 32-bit limbs) only if those measurements show it pays.
+- **Faster multi-limb proving.** Past 2^64, a batch takes about 30 ms in WebAssembly on 9 threads against 6 ms natively; allocation inside the threads is the suspect. A GPU path (WebGPU, 32-bit limbs) only if the measurements show it pays.
 - **Proofs past 3.3 × 10^24.** Beyond the proven Miller–Rabin bound: BPSW as a fast filter, then a primality proof for every candidate before it's shown (trial division first, ECPP later), with certificates checked by an independent verifier.
 
 ## Setup

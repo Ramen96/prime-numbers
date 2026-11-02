@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { computeBatch, PARTIAL_SIEVE_PRIME_CAP, type ComputeBatchOptions, type Sieve } from "./computeBatch.ts";
+import { computeBatch, type ComputeBatchOptions, type Sieve } from "./computeBatch.ts";
+import { PARTIAL_SIEVE_PRIME_CAP } from "./sieveCalibrator.ts";
 import { fewestBasePrimeBytes } from "./memoryBudget.ts";
 import type { BatchRequest, WorkerResponse } from "./protocol.ts";
 import { basePrimeLimitNeededFor, NO_SIEVE_PRIME_CAP, type RejectedComposite } from "./wasmSieve.ts";
@@ -177,6 +178,41 @@ describe("computeBatch", () => {
   it("reports the memory limit only when the sieve ran out with no prime proven", async () => {
     const sent = await run(standInSieve([], { reachedMemoryLimit: true }));
     assert.deepEqual(sent.map((response) => response.type), ["memory-limit"]);
+  });
+
+  it("uses the measured cap past the switch point: nothing built, measuring counted as setup", async () => {
+    const sieve = standInSieve([9223372036854775837n], { basePrimeLimit: 0n });
+    const [response, ...rest] = await run(sieve, { ...REQUEST, from: 2n ** 63n, count: 1 }, null, {
+      calibrator: { capFor: () => ({ agreed: true, cap: 2n ** 18n, setupMs: 25 }) },
+    });
+    assert.deepEqual(rest, []);
+    assert.equal(response.type, "batch");
+    if (response.type === "batch") assert.equal(response.setupDurationMs, 25);
+    assert.deepEqual(sieve.caps, [2n ** 18n]);
+    assert.deepEqual(sieve.reservations, []);
+  });
+
+  it("builds and sieves fully below the switch point, adding building to the measuring", async () => {
+    let clock = 0;
+    const sieve = standInSieve([9007199254741033n], { basePrimeLimit: 0n });
+    sieve.extendBasePrimes = () => ((clock += 7), true);
+    const sent: WorkerResponse[] = [];
+    await computeBatch(sieve, { ...REQUEST, from: 2n ** 53n, count: 1 }, (response) => sent.push(response), {
+      memoryBudgetBytes: null,
+      now: () => clock,
+      calibrator: { capFor: () => ({ agreed: true, cap: null, setupMs: 25 }) },
+    });
+    assert.deepEqual(sent.map((response) => response.type), ["building-base-primes", "batch"]);
+    assert.deepEqual(sieve.caps, [NO_SIEVE_PRIME_CAP]);
+    if (sent[1].type === "batch") assert.equal(sent[1].setupDurationMs, 32);
+  });
+
+  it("stops with an error when the two methods disagree, sending no primes", async () => {
+    const sent = await run(standInSieve([2n]), REQUEST, null, {
+      calibrator: { capFor: () => ({ agreed: false, from: 2n ** 40n }) },
+    });
+    assert.deepEqual(sent.map((response) => response.type), ["error"]);
+    if (sent[0].type === "error") assert.match(sent[0].message, /different answers near 1099511627776/);
   });
 
   it("reserves base-prime storage from an estimate before building, within the budget", async () => {

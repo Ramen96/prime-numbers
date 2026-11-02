@@ -2,14 +2,17 @@
 // be tested with a stand-in sieve (the worker itself is a thin shell around it).
 //
 // Three steps, each timed on its own:
-//   1. build the base primes the batch needs (setup: not sieving speed), or
-//      if they can't fit, cap them and sieve partially (Phase 4),
+//   1. choose how to sieve: past the point measured on this device
+//      (sieveCalibrator.ts), or if base primes can't fit, cap them and sieve
+//      partially (Phase 4); otherwise build the ones the batch needs (setup,
+//      like the measuring: not sieving speed),
 //   2. sieve, with Miller–Rabin proving what partial sieving can't,
 //   3. verify every prime and every rejected composite independently
 //      (Requirement A3), never sending a batch the check disagrees with.
 
-import { basePrimesCouldFit, estimatedBasePrimeBytes } from "./memoryBudget.ts";
+import { basePrimesCouldFit } from "./memoryBudget.ts";
 import type { BatchRequest, WorkerMemory, WorkerResponse } from "./protocol.ts";
+import { buildBasePrimes, PARTIAL_SIEVE_PRIME_CAP, type SieveCalibrator } from "./sieveCalibrator.ts";
 import { verifyBatch, type BatchVerification } from "./verifyPrimes.ts";
 import {
   basePrimeLimitNeededFor,
@@ -17,15 +20,6 @@ import {
   type RejectedComposite,
   type SieveBatch,
 } from "./wasmSieve.ts";
-
-/**
- * The largest base prime a window is sieved with when every base prime up to
- * its square root won't fit (Phase 4, partial sieving): the primes below
- * 65,536 that the sieve always builds first, so nothing more is built.
- * Measured within about 10% of the best cap from 2^53 to 10^24 (native, one
- * thread). Provisional: stage 4 measures the cap on the device instead.
- */
-export const PARTIAL_SIEVE_PRIME_CAP = 65_535n;
 
 /** The parts of WasmSieve a batch uses (so tests can stand in for it). */
 export interface Sieve {
@@ -45,6 +39,8 @@ export interface ComputeBatchOptions {
   threads?: number;
   /** How to verify a batch: inline by default, or spread over workers (verificationPool.ts). */
   verify?: (primes: bigint[], rejected: RejectedComposite[]) => BatchVerification | Promise<BatchVerification>;
+  /** What's measured on this device. Without one, only memory decides how to sieve. */
+  calibrator?: Pick<SieveCalibrator, "capFor">;
   now?: () => number;
 }
 
@@ -52,7 +48,7 @@ export async function computeBatch(
   sieve: Sieve,
   { id, generation, direction, from, count }: BatchRequest,
   send: (response: WorkerResponse) => void,
-  { memoryBudgetBytes, threads = 1, verify = verifyBatch, now = () => performance.now() }: ComputeBatchOptions,
+  { memoryBudgetBytes, threads = 1, verify = verifyBatch, calibrator, now = () => performance.now() }: ComputeBatchOptions,
 ): Promise<void> {
   const memory = (): WorkerMemory => ({
     basePrimeBytes: sieve.basePrimeMemoryBytes(),
@@ -64,28 +60,38 @@ export async function computeBatch(
   // or coarser when not. Fast batches can still measure 0 ms; the rate meter
   // averages over many batches to handle that.
 
-  // Step 1: base primes. If every one the batch needs could fit in the
-  // budget, build them and sieve fully: reserve their storage in one
-  // allocation from an estimate (if that fails, the sieve still grows it step
-  // by step until an allocation fails); the C call can't report progress, so
-  // announce it first. If they certainly can't fit, or building them runs out
-  // of memory, sieve partially instead, with the base primes up to
-  // PARTIAL_SIEVE_PRIME_CAP. The cap also keeps the sieve from trying (and
-  // failing) to build them again for every window.
+  // Step 1: how to sieve. Past the point measured on this device, partially,
+  // with the measured cap, and nothing is built. Below it, if every base prime
+  // the batch needs could fit in the budget, build them and sieve fully:
+  // reserve their storage in one allocation from an estimate (if that fails,
+  // the sieve still grows it step by step until an allocation fails); the C
+  // call can't report progress, so announce it first. If they certainly can't
+  // fit, or building them runs out of memory, sieve partially instead, with the
+  // base primes up to PARTIAL_SIEVE_PRIME_CAP. The cap also keeps the sieve from
+  // trying (and failing) to build them again for every window.
   const basePrimeLimitNeeded = basePrimeLimitNeededFor(direction, from, count);
   let sievePrimeCap = NO_SIEVE_PRIME_CAP;
   let setupDurationMs = 0;
-  if (!basePrimesCouldFit(basePrimeLimitNeeded, memoryBudgetBytes)) {
+  const decision = calibrator?.capFor(from);
+  if (decision && !decision.agreed) {
+    send({
+      type: "error",
+      id,
+      generation,
+      message: `Two ways of finding primes gave different answers near ${decision.from}. Stopped rather than show either.`,
+    });
+    return;
+  }
+  if (decision) setupDurationMs = decision.setupMs;
+  if (decision?.cap != null) {
+    sievePrimeCap = decision.cap;
+  } else if (!basePrimesCouldFit(basePrimeLimitNeeded, memoryBudgetBytes)) {
     sievePrimeCap = PARTIAL_SIEVE_PRIME_CAP;
   } else if (basePrimeLimitNeeded >= sieve.basePrimeLimit()) {
     send({ type: "building-base-primes", id, generation });
     const setupStartTime = now();
-    const estimatedBytes = estimatedBasePrimeBytes(basePrimeLimitNeeded);
-    sieve.reserveBasePrimeStorage(
-      memoryBudgetBytes === null ? estimatedBytes : Math.min(estimatedBytes, memoryBudgetBytes),
-    );
-    const extended = sieve.extendBasePrimes(basePrimeLimitNeeded);
-    setupDurationMs = now() - setupStartTime;
+    const extended = buildBasePrimes(sieve, basePrimeLimitNeeded, memoryBudgetBytes);
+    setupDurationMs += now() - setupStartTime;
     if (!extended) sievePrimeCap = PARTIAL_SIEVE_PRIME_CAP;
   }
   sieve.setSievePrimeCap(sievePrimeCap);

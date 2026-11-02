@@ -41,6 +41,15 @@ async function expectSingleThreadedListToWork(page: Page) {
   await expect(primeListPage.primeList).not.toHaveAttribute("data-status", "error");
 }
 
+/**
+ * Keeps a calculation running as long as a test needs: a big batch waits for
+ * its check by the verification workers, whose script never arrives. (By
+ * name, so on the dev server: production chunk names are hashes.)
+ */
+async function holdVerificationBack(page: Page) {
+  await page.route("**/*verification_worker*", () => {}); // never answered
+}
+
 test.describe("sieve threads", () => {
   test("sieve on one fewer thread than the device has cores", async ({ page }) => {
     const threads = collectSieveThreads(page);
@@ -63,6 +72,7 @@ test.describe("sieve threads", () => {
   });
 
   test("all end when Stop is pressed, and the next calculation starts new ones", async ({ page }) => {
+    await holdVerificationBack(page);
     const primeWorkers = collectPrimeWorkers(page);
     const threads = collectSieveThreads(page);
     const primeListPage = new PrimeListPage(page);
@@ -70,7 +80,6 @@ test.describe("sieve threads", () => {
     const threadsBefore = threads.length;
     expect(threadsBefore).toBeGreaterThan(0);
 
-    // near 2^63, building base primes keeps every thread busy for a while
     await primeListPage.jumpTo("9,223,372,036,854,775,808", { waitForLanding: false });
     const stopButton = page.getByRole("button", { name: "Stop calculating" });
     await expect(stopButton).toBeVisible();
@@ -84,6 +93,7 @@ test.describe("sieve threads", () => {
   });
 
   test("all end when a jump arrives mid-calculation", async ({ page }) => {
+    await holdVerificationBack(page);
     const threads = collectSieveThreads(page);
     const primeListPage = new PrimeListPage(page);
     await primeListPage.open();
@@ -97,10 +107,10 @@ test.describe("sieve threads", () => {
     await expect(primeListPage.primeList.getByTestId("prime-row").first()).toBeVisible();
   });
 
-  test("leave scrolling smooth while every thread is busy near 2^63", async ({ page }) => {
+  test("leave scrolling smooth while every thread is busy near 10^24", async ({ page }) => {
     const primeListPage = new PrimeListPage(page);
     await primeListPage.open();
-    await primeListPage.jumpTo("9,223,372,036,854,775,808");
+    await primeListPage.jumpTo("1" + "0".repeat(24));
 
     // Record every frame, and when the worker is computing.
     await page.evaluate(() => {
@@ -118,7 +128,7 @@ test.describe("sieve threads", () => {
       });
     });
 
-    // Scroll down hard for a few seconds: fast enough that a batch near 2^63
+    // Scroll down hard for a few seconds: fast enough that a batch near 10^24
     // (tens of ms on all threads) is needed every fraction of a second.
     // Real scroll gestures (touch on the phone, wheel on desktop), through the
     // browser's compositor as a user's would be, from the middle of the part

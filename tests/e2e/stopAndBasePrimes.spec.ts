@@ -9,35 +9,15 @@ async function statValue(page: Page, label: string): Promise<string> {
   return page.locator("dt", { hasText: label }).locator("xpath=following-sibling::dd[1]").innerText();
 }
 
-test.describe("building base primes", () => {
-  test("a big jump shows “Building base primes…”, then a counter of sieving speed only", async ({
-    page,
-  }) => {
+test.describe("measuring this device", () => {
+  test("a far jump's measuring counts as setup, and the counter shows sieving speed only", async ({ page }) => {
     const primeListPage = new PrimeListPage(page);
     await primeListPage.open();
-
-    // Building takes tens of milliseconds, too brief to catch by polling, so
-    // record whether the message was ever rendered.
-    await page.evaluate(() => {
-      const observer = new MutationObserver(() => {
-        // textContent, not innerText: the label is uppercased with CSS.
-        if (document.body.textContent?.includes("Building base primes…")) {
-          (window as unknown as { sawBuildingBasePrimes: boolean }).sawBuildingBasePrimes = true;
-        }
-      });
-      observer.observe(document.body, { childList: true, subtree: true, characterData: true });
-    });
-
     await primeListPage.jumpTo("9,000,000,000,000,000");
-    expect(
-      await page.evaluate(
-        () => (window as unknown as { sawBuildingBasePrimes?: boolean }).sawBuildingBasePrimes,
-      ),
-    ).toBe(true);
-    await expect(page.getByText("Building base primes…")).toBeHidden();
 
-    // The jump timed one batch of base-prime building and two batches of sieving.
-    const setupMs = parseNumber(await statValue(page, "base primes")); // "set up in 64.10 ms"
+    // The jump measured where partial sieving starts (real batches, both ways)
+    // and then sieved two batches.
+    const setupMs = parseNumber(await statValue(page, "setup")); // "in 64.10 ms"
     const lastSievingMs = parseNumber(await statValue(page, "last batch"));
     const counterRate = parseNumber(await page.locator("header .font-mono").first().innerText());
     expect(setupMs).toBeGreaterThan(lastSievingMs);
@@ -49,7 +29,7 @@ test.describe("building base primes", () => {
 });
 
 test.describe("base-prime memory", () => {
-  test("is shown, and grows with a jump that needs more base primes", async ({ page }) => {
+  test("is shown, grows while measuring, and doesn't grow with a far jump", async ({ page }) => {
     const primeListPage = new PrimeListPage(page);
     await primeListPage.open();
     const memoryFormat = /^[\d,.]+ (KB|MB|GB) of base primes$/;
@@ -58,34 +38,14 @@ test.describe("base-prime memory", () => {
     const beforeJump = bytes(await statValue(page, "memory"));
     expect(beforeJump).toBeLessThan(1e6); // the first few thousand primes need very few
 
-    // near 9 × 10^15, base primes go up to about 9.5 × 10^7: about 5.5 million, a byte each
     await primeListPage.jumpTo("9,000,000,000,000,000");
-    const afterJump = bytes(await statValue(page, "memory"));
-    expect(afterJump).toBeGreaterThan(5e6);
-    expect(afterJump).toBeLessThan(7e6); // reserved from an estimate, not doubled
-  });
+    const afterMeasuring = bytes(await statValue(page, "memory"));
+    expect(afterMeasuring).toBeGreaterThan(beforeJump);
 
-  test("a jump back from far away starts a fresh worker, giving the memory back", async ({ page }) => {
-    const workers = collectPrimeWorkers(page);
-    const primeListPage = new PrimeListPage(page);
-    await primeListPage.open();
-
-    // near 2^63, base primes go up to about 3 × 10^9: about 150 MB
+    // Sieving fully near 2^63 would take about 150 MB; past the switch nothing more is built.
     await primeListPage.jumpTo("9,223,372,036,854,775,808");
-    expect(parseNumber(await statValue(page, "memory"))).toBeGreaterThan(140);
-    expect(workers).toHaveLength(1);
-
-    // a small jump needs far less: the big worker is replaced, not reused
-    const bigWorkerClosed = new Promise<void>((resolve) => workers[0].once("close", () => resolve()));
-    await primeListPage.jumpTo("1,000,000");
-    await bigWorkerClosed;
-    expect(workers).toHaveLength(2);
-    expect(await statValue(page, "memory")).toMatch(/ KB of base primes$/);
-    await expect(primeListPage.primeList.getByTestId("prime-row").first()).toBeVisible();
-
-    // a jump that needs as much as the worker holds doesn't restart it
-    await primeListPage.jumpTo("2,000,000");
-    expect(workers).toHaveLength(2);
+    expect(bytes(await statValue(page, "memory"))).toBe(afterMeasuring);
+    expect(afterMeasuring).toBeLessThan(64e6);
   });
 });
 
