@@ -206,8 +206,8 @@ function sieveSegment(low, high, basePrimes, isComposite) {
         A batch on the site is always 500 primes, not a fixed range of numbers. Primes thin out
         as numbers grow, so each batch covers a wider stretch of numbers, and every segment has
         more base primes to cross off with. On a recent laptop, sieving on 9 threads, a batch
-        near a million takes about 0.03 ms; near a trillion, 0.3 ms; near 2⁵³, about 2 ms; near
-        2⁶³, about 3 ms; past 2⁶⁴, about 5 ms. That’s the slowdown the counter shows.
+        near a million takes about 0.1 ms; near a trillion, 0.3 ms; near 2⁵³, about 1.5 ms; near
+        2⁶³, about 2 ms; past 2⁶⁴, about 6 ms. That’s the slowdown the counter shows.
       </p>
       <p>
         On a device with several cores, the sieve runs on several threads at once: one fewer
@@ -233,7 +233,7 @@ function sieveSegment(low, high, basePrimes, isComposite) {
         checks that evidence again, with one division or one modular exponentiation, so a prime
         thrown out by mistake would stop the list with an error instead of quietly going
         missing. The check takes about 1 ms per batch near a million. For big primes it’s split
-        between several background workers, about 4 ms near 2⁶³ on a laptop. It appears separately under “checked” and doesn’t count toward the speed.
+        between several background workers, about 3 ms near 2⁶³ on a laptop. It appears separately under “checked” and doesn’t count toward the speed.
       </p>
 
       {/* 5 */}
@@ -586,7 +586,7 @@ return EULER_MASCHERONI + Math.log(lnX) + Math.sqrt(x) * sum;`}
         composites, and proves each number that survives with a Miller–Rabin test: the same
         deterministic test as the check above, written again in C. Proving a prime costs about
         the same however large the sieve was, so this soon wins by a long way: near 2⁶³ on a laptop, about
-        3 ms a batch instead of 39 ms, and 4 MB of base primes instead of 150 MB.
+        2 ms a batch instead of 39 ms, and 4 MB of base primes instead of 150 MB.
       </p>
       <p>
         Where that point is depends on your device, so the worker measures it. The first time
