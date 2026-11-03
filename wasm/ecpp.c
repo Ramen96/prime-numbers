@@ -217,3 +217,312 @@ done:
   big_number_free(&root);
   return status;
 }
+
+// ── curves with a known order ─────────────────────────────────────────────
+
+const int ecpp_discriminants[ECPP_DISCRIMINANT_COUNT] = {-3, -4, -7, -8, -11, -19, -43, -67, -163};
+
+// The j-invariant for D. They're integers (a famous fact about class number 1),
+// and all fit in 64 bits: the largest in size is 640320³.
+static int64_t j_invariant(int discriminant) {
+  switch (discriminant) {
+  case -7:
+    return -3375;
+  case -8:
+    return 8000;
+  case -11:
+    return -32768;
+  case -19:
+    return -884736;
+  case -43:
+    return -884736000;
+  case -67:
+    return -147197952000;
+  case -163:
+    return -262537412640768000;
+  default:
+    return 0; // D = −3 and −4 have their own families of curves
+  }
+}
+
+// result = value mod n, for a small value of either sign.
+static int signed_to_mod(big_number *result, int64_t value, const big_number *n) {
+  big_number magnitude;
+  big_number_init(&magnitude);
+  int ok = big_number_set_u64(&magnitude, value < 0 ? (uint64_t)-value : (uint64_t)value) &&
+           big_number_divide(NULL, &magnitude, &magnitude, n);
+  if (ok && value < 0 && magnitude.limb_count > 0)
+    ok = big_number_subtract(result, n, &magnitude);
+  else if (ok)
+    ok = big_number_copy(result, &magnitude);
+  big_number_free(&magnitude);
+  return ok;
+}
+
+// t and v with t² + |D|v² = 4n, by Cornacchia's algorithm as adapted for 4n
+// (Cohen, A Course in Computational Algebraic Number Theory, 1.5.3): start from a
+// square root of D with the same parity as D, and run Euclid's algorithm on
+// (2n, root) until the remainder is at most √(4n). That remainder is t.
+static ecpp_status solve_for_t_and_v(const big_number *n, int discriminant, big_number *t, big_number *v) {
+  big_number d_mod, root, a, b, remainder, four_n, limit, rest, divisor, quotient, leftover, check;
+  big_number *numbers[] = {&d_mod, &root, &a, &b, &remainder, &four_n, &limit, &rest, &divisor, &quotient, &leftover, &check};
+  for (size_t index = 0; index < sizeof numbers / sizeof *numbers; index++)
+    big_number_init(numbers[index]);
+  ecpp_status status = ECPP_OUT_OF_MEMORY;
+
+  if (!signed_to_mod(&d_mod, discriminant, n))
+    goto done;
+  int symbol = big_number_jacobi(&d_mod, n);
+  if (symbol == -2)
+    goto done;
+  if (symbol != 1) {
+    status = ECPP_NOT_FOUND;
+    goto done;
+  }
+  int found = big_number_square_root_mod(&root, &d_mod, n);
+  if (found == 0)
+    goto done;
+  if (found < 0) {
+    status = ECPP_NOT_FOUND;
+    goto done;
+  }
+  // the root's parity must match D's: n − root has the other parity, n being odd
+  int d_is_odd = discriminant & 1;
+  if (big_number_is_odd(&root) != d_is_odd && !big_number_subtract(&root, n, &root))
+    goto done;
+
+  if (!big_number_shift_left(&a, n, 1) || !big_number_copy(&b, &root) || !big_number_shift_left(&four_n, n, 2) ||
+      !big_number_floor_square_root(&limit, &four_n))
+    goto done;
+  while (big_number_compare(&b, &limit) > 0) {
+    if (!big_number_divide(NULL, &remainder, &a, &b) || !big_number_copy(&a, &b) || !big_number_copy(&b, &remainder))
+      goto done;
+  }
+
+  // v² = (4n − t²) / |D|, which must be an exact division giving a perfect square
+  if (!big_number_multiply(&rest, &b, &b) || !big_number_set_u64(&divisor, (uint64_t)-(int64_t)discriminant))
+    goto done;
+  if (big_number_compare(&rest, &four_n) > 0) {
+    status = ECPP_NOT_FOUND;
+    goto done;
+  }
+  if (!big_number_subtract(&rest, &four_n, &rest) || !big_number_divide(&quotient, &leftover, &rest, &divisor) ||
+      !big_number_floor_square_root(v, &quotient) || !big_number_multiply(&check, v, v))
+    goto done;
+  if (leftover.limb_count > 0 || big_number_compare(&check, &quotient) != 0) {
+    status = ECPP_NOT_FOUND;
+    goto done;
+  }
+  status = big_number_copy(t, &b) ? ECPP_FOUND : ECPP_OUT_OF_MEMORY;
+done:
+  for (size_t index = 0; index < sizeof numbers / sizeof *numbers; index++)
+    big_number_free(numbers[index]);
+  return status;
+}
+
+// orders[*count] = n + 1 + trace, and orders[*count + 1] = n + 1 − trace, for a
+// trace no larger than n + 1, as every trace here is (Hasse: at most 2√n).
+static int add_order_pair(const big_number *n_plus_one, const big_number *trace, big_number orders[], size_t *count) {
+  if (!big_number_add(&orders[*count], n_plus_one, trace) || !big_number_subtract(&orders[*count + 1], n_plus_one, trace))
+    return 0;
+  *count += 2;
+  return 1;
+}
+
+ecpp_status ecpp_find_orders(const big_number *n, int discriminant, big_number orders[ECPP_MOST_ORDERS], size_t *count) {
+  big_number t, v, n_plus_one, three_v, trace;
+  big_number_init(&t);
+  big_number_init(&v);
+  big_number_init(&n_plus_one);
+  big_number_init(&three_v);
+  big_number_init(&trace);
+  *count = 0;
+  ecpp_status status = solve_for_t_and_v(n, discriminant, &t, &v);
+  if (status != ECPP_FOUND)
+    goto done;
+  status = ECPP_OUT_OF_MEMORY;
+  if (!big_number_copy(&n_plus_one, n) || !big_number_add_small(&n_plus_one, 1) || !add_order_pair(&n_plus_one, &t, orders, count))
+    goto done;
+  if (discriminant == -4) {
+    // 4n = t² + 4v², so n = (t/2)² + v²: the other traces are ±2v
+    if (!big_number_shift_left(&trace, &v, 1) || !add_order_pair(&n_plus_one, &trace, orders, count))
+      goto done;
+  } else if (discriminant == -3) {
+    // the other traces are ±(t + 3v)/2 and ±(t − 3v)/2 (t and v have the same parity)
+    if (!big_number_copy(&three_v, &v) || !big_number_shift_left(&three_v, &v, 1) || !big_number_add(&three_v, &three_v, &v) ||
+        !big_number_add(&trace, &t, &three_v) || !big_number_shift_right(&trace, &trace, 1) ||
+        !add_order_pair(&n_plus_one, &trace, orders, count))
+      goto done;
+    int t_larger = big_number_compare(&t, &three_v) >= 0;
+    if (!big_number_subtract(&trace, t_larger ? &t : &three_v, t_larger ? &three_v : &t) ||
+        !big_number_shift_right(&trace, &trace, 1) || !add_order_pair(&n_plus_one, &trace, orders, count))
+      goto done;
+  }
+  status = ECPP_FOUND;
+done:
+  big_number_free(&t);
+  big_number_free(&v);
+  big_number_free(&n_plus_one);
+  big_number_free(&three_v);
+  big_number_free(&trace);
+  return status;
+}
+
+// Points to try on one curve, for when (order / q)·P is the identity: that happens
+// with chance about 1/q, so essentially never at these sizes.
+#define POINTS_PER_CURVE 8
+
+// Whether this curve has a point of order q: ECPP_FOUND with it in (out_x, out_y),
+// or ECPP_NOT_FOUND if q·Q isn't the identity, which means it's the wrong twist.
+static ecpp_status point_of_order(const big_number *n, const big_number *a, const big_number *b, const big_number *cofactor,
+                                  const big_number *q, big_number *out_x, big_number *out_y) {
+  ecpp_curve curve;
+  if (!ecpp_curve_init(&curve, n, a, b))
+    return ECPP_OUT_OF_MEMORY;
+  big_number start, x, y, qx, qy;
+  big_number_init(&start);
+  big_number_init(&x);
+  big_number_init(&y);
+  big_number_init(&qx);
+  big_number_init(&qy);
+  ecpp_status status = ECPP_NOT_FOUND;
+  uint64_t next_x = 1;
+  for (int attempt = 0; attempt < POINTS_PER_CURVE; attempt++) {
+    if (!big_number_set_u64(&start, next_x)) {
+      status = ECPP_OUT_OF_MEMORY;
+      break;
+    }
+    status = ecpp_find_point(&curve, &x, &y, &start);
+    if (status != ECPP_FOUND)
+      break;
+    next_x = big_number_to_u64(&x) + 1; // x stays small: about half of all x work
+    status = ecpp_multiply(&curve, &qx, &qy, &x, &y, cofactor);
+    if (status == ECPP_IDENTITY) {
+      status = ECPP_NOT_FOUND;
+      continue; // an unlucky point: try another
+    }
+    if (status != ECPP_FOUND)
+      break;
+    big_number unused_x, unused_y;
+    big_number_init(&unused_x);
+    big_number_init(&unused_y);
+    ecpp_status order_status = ecpp_multiply(&curve, &unused_x, &unused_y, &qx, &qy, q);
+    big_number_free(&unused_x);
+    big_number_free(&unused_y);
+    if (order_status == ECPP_IDENTITY) {
+      status = big_number_copy(out_x, &qx) && big_number_copy(out_y, &qy) ? ECPP_FOUND : ECPP_OUT_OF_MEMORY;
+    } else {
+      status = order_status == ECPP_FOUND ? ECPP_NOT_FOUND : order_status;
+    }
+    break;
+  }
+  big_number_free(&start);
+  big_number_free(&x);
+  big_number_free(&y);
+  big_number_free(&qx);
+  big_number_free(&qy);
+  ecpp_curve_free(&curve);
+  return status;
+}
+
+// Small values of a (or b) to try for D = −4 (or −3). The curves split evenly into
+// 4 (or 6) twists, and each value lands on a random one, so a prime N finds its
+// twist well before this.
+#define FAMILY_TRIES 64
+
+// The curve y² = x³ + 3kc²x + 2kc³, where k = j / (1728 − j) gives the j-invariant,
+// and a non-residue c gives the quadratic twist. ECPP_NOT_FOUND if 1728 − j shares a
+// factor with n, which no prime n that D is a square of can do.
+static ecpp_status curve_from_j(const big_number *n, int64_t j, const big_number *c, big_number *a, big_number *b) {
+  big_number j_mod, denominator, k, c_squared, three, two;
+  big_number *numbers[] = {&j_mod, &denominator, &k, &c_squared, &three, &two};
+  for (size_t index = 0; index < 6; index++)
+    big_number_init(numbers[index]);
+  ecpp_status status = ECPP_OUT_OF_MEMORY;
+  if (signed_to_mod(&j_mod, j, n) && signed_to_mod(&denominator, 1728 - j, n)) {
+    int inverse = big_number_inverse_mod(&denominator, &denominator, n);
+    if (inverse < 0)
+      status = ECPP_NOT_FOUND;
+    else if (inverse == 1 && big_number_multiply(&k, &j_mod, &denominator) && big_number_divide(NULL, &k, &k, n) &&
+             big_number_multiply(&c_squared, c, c) && big_number_set_u64(&three, 3) && big_number_set_u64(&two, 2) &&
+             big_number_multiply(a, &three, &k) && big_number_multiply(a, a, &c_squared) &&
+             big_number_divide(NULL, a, a, n) && big_number_multiply(b, &two, &k) &&
+             big_number_multiply(b, b, &c_squared) && big_number_multiply(b, b, c) && big_number_divide(NULL, b, b, n))
+      status = ECPP_FOUND;
+  }
+  for (size_t index = 0; index < 6; index++)
+    big_number_free(numbers[index]);
+  return status;
+}
+
+// Non-residues to look through for a twist. Half of all numbers are, so a prime n
+// finds one almost at once; running out just means this D isn't used.
+#define NON_RESIDUE_TRIES 1000
+
+// c = the first non-residue of n from 2 up: ECPP_NOT_FOUND if none turned up.
+static ecpp_status first_non_residue(const big_number *n, big_number *c) {
+  for (uint64_t value = 2; value < NON_RESIDUE_TRIES; value++) {
+    if (!big_number_set_u64(c, value))
+      return ECPP_OUT_OF_MEMORY;
+    int symbol = big_number_jacobi(c, n);
+    if (symbol == -2)
+      return ECPP_OUT_OF_MEMORY;
+    if (symbol == -1)
+      return ECPP_FOUND;
+  }
+  return ECPP_NOT_FOUND;
+}
+
+ecpp_status ecpp_curve_with_order(const big_number *n, int discriminant, const big_number *order, const big_number *q,
+                                  big_number *out_a, big_number *out_b, big_number *out_x, big_number *out_y) {
+  big_number cofactor, leftover, a, b, c;
+  big_number_init(&cofactor);
+  big_number_init(&leftover);
+  big_number_init(&a);
+  big_number_init(&b);
+  big_number_init(&c);
+  ecpp_status status = ECPP_OUT_OF_MEMORY;
+  if (!big_number_divide(&cofactor, &leftover, order, q))
+    goto done;
+  if (leftover.limb_count > 0) {
+    status = ECPP_NOT_FOUND; // q doesn't divide the order
+    goto done;
+  }
+
+  int64_t j = j_invariant(discriminant);
+  // the twists to try: small a or b for the two special families; otherwise c = 1,
+  // and then the first non-residue c
+  int tries = j == 0 ? FAMILY_TRIES : 2;
+  status = ECPP_NOT_FOUND;
+  for (int attempt = 1; attempt <= tries && status == ECPP_NOT_FOUND; attempt++) {
+    ecpp_status curve_status = ECPP_FOUND;
+    if (discriminant == -3) {
+      if (!big_number_set_u64(&a, 0) || !big_number_set_u64(&b, (uint64_t)attempt))
+        curve_status = ECPP_OUT_OF_MEMORY;
+    } else if (discriminant == -4) {
+      if (!big_number_set_u64(&a, (uint64_t)attempt) || !big_number_set_u64(&b, 0))
+        curve_status = ECPP_OUT_OF_MEMORY;
+    } else {
+      if (attempt == 1)
+        curve_status = big_number_set_u64(&c, 1) ? ECPP_FOUND : ECPP_OUT_OF_MEMORY;
+      else
+        curve_status = first_non_residue(n, &c);
+      if (curve_status == ECPP_FOUND)
+        curve_status = curve_from_j(n, j, &c, &a, &b);
+    }
+    if (curve_status != ECPP_FOUND) {
+      status = curve_status;
+      break;
+    }
+    status = point_of_order(n, &a, &b, &cofactor, q, out_x, out_y);
+  }
+  if (status == ECPP_FOUND && (!big_number_copy(out_a, &a) || !big_number_copy(out_b, &b)))
+    status = ECPP_OUT_OF_MEMORY;
+done:
+  big_number_free(&cofactor);
+  big_number_free(&leftover);
+  big_number_free(&a);
+  big_number_free(&b);
+  big_number_free(&c);
+  return status;
+}

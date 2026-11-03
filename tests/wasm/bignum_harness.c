@@ -331,3 +331,56 @@ int harness_curve_find_point(size_t modulus_count, size_t a_count, size_t start_
   big_number_free(&start);
   return (int)status;
 }
+
+// ── curves with a known order ─────────────────────────────────────────────
+
+static big_number found_orders[ECPP_MOST_ORDERS];
+static big_number found_curve[4];
+static int found_ready = 0;
+
+static void prepare_found(void) {
+  if (found_ready)
+    return;
+  for (size_t index = 0; index < ECPP_MOST_ORDERS; index++)
+    big_number_init(&found_orders[index]);
+  for (size_t index = 0; index < 4; index++)
+    big_number_init(&found_curve[index]);
+  found_ready = 1;
+}
+
+// The orders for n (first input) and D. Returns how many, or FAILED if none.
+size_t harness_ecpp_orders(size_t n_count, int discriminant) {
+  prepare_found();
+  big_number n = load(first_input, n_count);
+  size_t count = 0;
+  ecpp_status status = ecpp_find_orders(&n, discriminant, found_orders, &count);
+  big_number_free(&n);
+  return status == ECPP_FOUND ? count : FAILED;
+}
+
+// One of those orders, into the output. Returns its limb count.
+size_t harness_ecpp_order(size_t index) {
+  big_number copy;
+  big_number_init(&copy);
+  big_number_copy(&copy, &found_orders[index]);
+  return store(&copy);
+}
+
+// A curve for n (first), D, order (second), q (third). Returns the ecpp_status.
+int harness_ecpp_curve(size_t n_count, int discriminant, size_t order_count, size_t q_count) {
+  prepare_found();
+  big_number n = load(first_input, n_count), order = load(second_input, order_count), q = load(third_input, q_count);
+  ecpp_status status = ecpp_curve_with_order(&n, discriminant, &order, &q, &found_curve[0], &found_curve[1], &found_curve[2], &found_curve[3]);
+  big_number_free(&n);
+  big_number_free(&order);
+  big_number_free(&q);
+  return (int)status;
+}
+
+// a, b, x or y (0 to 3) of that curve, into the output. Returns its limb count.
+size_t harness_ecpp_curve_value(size_t index) {
+  big_number copy;
+  big_number_init(&copy);
+  big_number_copy(&copy, &found_curve[index]);
+  return store(&copy);
+}

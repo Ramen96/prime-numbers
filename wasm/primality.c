@@ -374,31 +374,15 @@ static uint64_t greatest_common_divisor(uint64_t first, uint64_t second) {
   return first;
 }
 
-// 1 if number is a perfect square, 0 if not, -1 if memory ran out. Newton's
-// method on integers from above: x = (x + number / x) / 2 until it stops falling.
+// 1 if number is a perfect square, 0 if not, -1 if memory ran out.
 static int is_perfect_square(const big_number *number) {
-  big_number estimate, better, square;
-  big_number_init(&estimate);
-  big_number_init(&better);
+  big_number root, square;
+  big_number_init(&root);
   big_number_init(&square);
   int result = -1;
-  if (!big_number_set_u64(&estimate, 1) ||
-      !big_number_shift_left(&estimate, &estimate, (big_number_bit_length(number) + 1) / 2))
-    goto done;
-  for (;;) {
-    if (!big_number_divide(&better, NULL, number, &estimate) || !big_number_add(&better, &better, &estimate) ||
-        !big_number_shift_right(&better, &better, 1))
-      goto done;
-    if (big_number_compare(&better, &estimate) >= 0)
-      break;
-    if (!big_number_copy(&estimate, &better))
-      goto done;
-  }
-  if (big_number_multiply(&square, &estimate, &estimate))
+  if (big_number_floor_square_root(&root, number) && big_number_multiply(&square, &root, &root))
     result = big_number_compare(&square, number) == 0;
-done:
-  big_number_free(&estimate);
-  big_number_free(&better);
+  big_number_free(&root);
   big_number_free(&square);
   return result;
 }

@@ -122,7 +122,127 @@ static void check_small_curve(int64_t p, int64_t a, int64_t b) {
     big_number_free(numbers[index]);
 }
 
+// ── curves with a known order ─────────────────────────────────────────────
+
+static int is_small_prime(int64_t value) {
+  if (value < 2)
+    return 0;
+  for (int64_t divisor = 2; divisor * divisor <= value; divisor++)
+    if (value % divisor == 0)
+      return 0;
+  return 1;
+}
+
+static int legendre(int64_t value, int64_t p) {
+  int64_t result = 1, power = mod_of(value, p);
+  for (int64_t exponent = (p - 1) / 2; exponent > 0; exponent >>= 1) {
+    if (exponent & 1)
+      result = result * power % p;
+    power = power * power % p;
+  }
+  return result == 0 ? 0 : result == 1 ? 1 : -1;
+}
+
+// #E(F_p), by Legendre symbols: each x gives 1 + (rhs / p) points, plus infinity.
+static int64_t count_points(int64_t a, int64_t b, int64_t p) {
+  int64_t count = 1;
+  for (int64_t x = 0; x < p; x++) {
+    int64_t rhs = mod_of(((x * x % p) * x + a * x + b) % p, p);
+    count += 1 + legendre(rhs, p);
+  }
+  return count;
+}
+
+static int64_t largest_prime_factor(int64_t value) {
+  int64_t largest = 1;
+  for (int64_t divisor = 2; divisor * divisor <= value; divisor++)
+    while (value % divisor == 0) {
+      largest = divisor;
+      value /= divisor;
+    }
+  return value > 1 ? value : largest;
+}
+
+static void check_known_orders(void) {
+  big_number orders[ECPP_MOST_ORDERS], n, q, order, out_a, out_b, out_x, out_y;
+  big_number *numbers[] = {&n, &q, &order, &out_a, &out_b, &out_x, &out_y};
+  for (size_t index = 0; index < ECPP_MOST_ORDERS; index++)
+    big_number_init(&orders[index]);
+  for (size_t index = 0; index < 7; index++)
+    big_number_init(numbers[index]);
+
+  for (int64_t p = 5; p < 6000; p += 2) {
+    if (!is_small_prime(p))
+      continue;
+    set(&n, (uint64_t)p);
+    for (int which = 0; which < ECPP_DISCRIMINANT_COUNT; which++) {
+      int d = ecpp_discriminants[which];
+      size_t count = 0;
+      ecpp_status status = ecpp_find_orders(&n, d, orders, &count);
+      // class number 1: a solution exists exactly when D is a square mod p
+      int d_is_square = legendre(d, p) == 1;
+      expect((status == ECPP_FOUND) == d_is_square, "orders exist exactly when D is a square", (uint64_t)p, (uint64_t)-d, 0, 0);
+      if (status != ECPP_FOUND)
+        continue;
+      size_t expected_count = d == -3 ? 6 : d == -4 ? 4 : 2;
+      expect(count == expected_count, "how many orders", (uint64_t)p, (uint64_t)-d, 0, count);
+      for (size_t index = 0; index < count; index++) {
+        int64_t order_value = (int64_t)big_number_to_u64(&orders[index]);
+        // Hasse: |p + 1 − order| ≤ 2√p
+        int64_t trace = p + 1 - order_value;
+        expect(trace * trace <= 4 * p, "orders are within Hasse's bound", (uint64_t)p, (uint64_t)-d, 0, (uint64_t)order_value);
+        int64_t q_value = largest_prime_factor(order_value);
+        // only when q alone pins the order down, so that the count must match
+        if (q_value * q_value <= 16 * p)
+          continue;
+        set(&q, (uint64_t)q_value);
+        status = ecpp_curve_with_order(&n, d, &orders[index], &q, &out_a, &out_b, &out_x, &out_y);
+        expect(status == ECPP_FOUND, "a curve is found for every order", (uint64_t)p, (uint64_t)-d, 0, (uint64_t)order_value);
+        if (status != ECPP_FOUND)
+          continue;
+        int64_t a = (int64_t)big_number_to_u64(&out_a), b = (int64_t)big_number_to_u64(&out_b);
+        expect(count_points(a, b, p) == order_value, "the curve really has that order, by counting", (uint64_t)p, (uint64_t)a, (uint64_t)b, (uint64_t)order_value);
+        int64_t x = (int64_t)big_number_to_u64(&out_x), y = (int64_t)big_number_to_u64(&out_y);
+        expect(mod_of(y * y - ((x * x % p) * x + a * x + b), p) == 0, "the point is on the curve", (uint64_t)p, (uint64_t)a, (uint64_t)b, (uint64_t)x);
+        plain_point base = {x, y, 0}, running = {0, 0, 1};
+        for (int64_t step = 0; step < q_value; step++) {
+          running = plain_add(running, base, a, p);
+          if (step < q_value - 1 && running.is_identity)
+            break;
+        }
+        expect(running.is_identity, "the point has order q, by adding", (uint64_t)p, (uint64_t)a, (uint64_t)b, (uint64_t)q_value);
+      }
+    }
+  }
+
+  // BPSW's passes are only probably prime, so a composite must end safely too, and
+  // whatever it reports must really solve 4n = t² + |D|v². The first order is n + 1 + t.
+  for (int64_t composite = 9; composite < 6000; composite += 2) {
+    if (is_small_prime(composite))
+      continue;
+    set(&n, (uint64_t)composite);
+    for (int which = 0; which < ECPP_DISCRIMINANT_COUNT; which++) {
+      int d = ecpp_discriminants[which];
+      size_t count = 0;
+      if (ecpp_find_orders(&n, d, orders, &count) != ECPP_FOUND)
+        continue;
+      int64_t t = (int64_t)big_number_to_u64(&orders[0]) - composite - 1;
+      int64_t rest = 4 * composite - t * t;
+      int64_t v_squared = rest / -d, v = 0;
+      while (v * v < v_squared)
+        v++;
+      expect(rest % -d == 0 && v * v == v_squared, "a composite's t and v solve the equation", (uint64_t)composite, (uint64_t)-d, (uint64_t)t, (uint64_t)v_squared);
+    }
+  }
+
+  for (size_t index = 0; index < ECPP_MOST_ORDERS; index++)
+    big_number_free(&orders[index]);
+  for (size_t index = 0; index < 7; index++)
+    big_number_free(numbers[index]);
+}
+
 int main(void) {
+  check_known_orders();
   static const int64_t primes[] = {5, 7, 11, 13, 17, 23, 29, 37, 53};
   for (size_t index = 0; index < sizeof primes / sizeof *primes; index++) {
     int64_t p = primes[index];

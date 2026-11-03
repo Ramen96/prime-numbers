@@ -119,7 +119,7 @@ export function orderIsLargeEnough(orderPrime: bigint, n: bigint): boolean {
 }
 
 /** Why this step doesn't hold, or null if it does (given that its orderPrime is prime). */
-function stepProblem({ number: n, curveA, curveB, pointX, pointY, orderPrime }: CertificateStep): string | null {
+export function stepProblem({ number: n, curveA, curveB, pointX, pointY, orderPrime }: CertificateStep): string | null {
   if (n < 5n || n % 2n === 0n || n % 3n === 0n) return "the number shares a factor with 6";
   for (const value of [curveA, curveB, pointX, pointY]) {
     if (value < 0n || value >= n) return "a curve value is out of range";

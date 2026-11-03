@@ -45,4 +45,28 @@ ecpp_status ecpp_multiply(ecpp_curve *curve, big_number *out_x, big_number *out_
 // big_number_square_root_mod finds, so it's a real point whatever N is.
 ecpp_status ecpp_find_point(ecpp_curve *curve, big_number *out_x, big_number *out_y, const big_number *start_x);
 
+// ── curves with a known order ─────────────────────────────────────────────
+//
+// A curve's order isn't known in general. But for a discriminant D with class
+// number 1, the curves with complex multiplication by D can be written down
+// directly from a known j-invariant, and their orders follow from solving
+// 4N = t² + |D|v². These are all the D with class number 1:
+#define ECPP_DISCRIMINANT_COUNT 9
+extern const int ecpp_discriminants[ECPP_DISCRIMINANT_COUNT];
+
+// The most orders one D gives: 6 for D = −3, 4 for D = −4, 2 for the rest.
+#define ECPP_MOST_ORDERS 6
+
+// Fills orders[0 .. *count) with N's possible curve orders for D. orders must be
+// initialized numbers. ECPP_NOT_FOUND if 4N = t² + |D|v² has no solution, which
+// for a prime N means D isn't a square mod N.
+ecpp_status ecpp_find_orders(const big_number *n, int discriminant, big_number orders[ECPP_MOST_ORDERS], size_t *count);
+
+// A curve for D and a point on it with order q, where q divides `order`. The twist
+// is found by trial, and the point is (order / q)·P for a point P, so it's checked:
+// q·Q is the identity and Q isn't. ECPP_NOT_FOUND if no twist gave it, which for a
+// prime N means `order` isn't this D's, or the attempts ran out.
+ecpp_status ecpp_curve_with_order(const big_number *n, int discriminant, const big_number *order, const big_number *q,
+                                  big_number *out_a, big_number *out_b, big_number *out_x, big_number *out_y);
+
 #endif

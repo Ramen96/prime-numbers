@@ -797,6 +797,34 @@ int montgomery_power(montgomery_context *context, big_number *result, const big_
 
 // ── for ECPP: inverses, Jacobi symbols and square roots mod a number ──────
 
+// result = floor(√number), by Newton's method on integers from above:
+// x = (x + number / x) / 2 until it stops falling.
+int big_number_floor_square_root(big_number *result, const big_number *number) {
+  if (number->limb_count == 0) {
+    result->limb_count = 0;
+    return 1;
+  }
+  big_number estimate, better;
+  big_number_init(&estimate);
+  big_number_init(&better);
+  int ok = big_number_set_u64(&estimate, 1) &&
+           big_number_shift_left(&estimate, &estimate, (big_number_bit_length(number) + 1) / 2);
+  while (ok) {
+    if (!big_number_divide(&better, NULL, number, &estimate) || !big_number_add(&better, &better, &estimate) ||
+        !big_number_shift_right(&better, &better, 1)) {
+      ok = 0;
+      break;
+    }
+    if (big_number_compare(&better, &estimate) >= 0)
+      break;
+    ok = big_number_copy(&estimate, &better);
+  }
+  ok = ok && big_number_copy(result, &estimate);
+  big_number_free(&estimate);
+  big_number_free(&better);
+  return ok;
+}
+
 // result = (first + second) mod N, for both below N. It works on Montgomery form
 // as it is, as does subtract, since that form is just multiplying by R.
 int big_number_add_mod(big_number *result, const big_number *first, const big_number *second, const big_number *modulus) {

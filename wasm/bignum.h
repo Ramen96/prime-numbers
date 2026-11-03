@@ -117,6 +117,9 @@ int montgomery_power(montgomery_context *context, big_number *result, const big_
 // For ECPP (Phase 5). The moduli there are only probably prime, so none of these
 // assumes a prime modulus for its safety: they end, and report what they found.
 
+// result = floor(√number), exactly, at any size.
+int big_number_floor_square_root(big_number *result, const big_number *number);
+
 // (first ± second) mod modulus, for both below it. Works on Montgomery form too.
 int big_number_add_mod(big_number *result, const big_number *first, const big_number *second, const big_number *modulus);
 int big_number_subtract_mod(big_number *result, const big_number *first, const big_number *second,

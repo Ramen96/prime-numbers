@@ -5,7 +5,8 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
-import { addPoints } from "../../lib/primes/primalityCertificate.ts";
+import { addPoints, orderIsLargeEnough, stepProblem } from "../../lib/primes/primalityCertificate.ts";
+import { isPrime, nextPrimeAfter } from "../support/primality.ts";
 import { certifiedPrimeFrom, scalePoint } from "../support/curveCertificates.ts";
 
 interface Harness {
@@ -23,6 +24,10 @@ interface Harness {
   harness_curve_b(b: number): void;
   harness_curve_multiply(modulus: number, a: number, x: number, y: number, scalar: number): number;
   harness_curve_find_point(modulus: number, a: number, start: number): number;
+  harness_ecpp_orders(n: number, discriminant: number): number;
+  harness_ecpp_order(index: number): number;
+  harness_ecpp_curve(n: number, discriminant: number, order: number, q: number): number;
+  harness_ecpp_curve_value(index: number): number;
 }
 
 const { instance } = await WebAssembly.instantiate(readFileSync(".cache/bignum_harness.wasm"), {
@@ -126,5 +131,77 @@ describe("ecpp.c at large sizes", () => {
       assert.equal(multiply(step.number, step.curveA, step.curveB, point, step.orderPrime - 1n).status, FOUND);
       assert.equal(multiply(step.number, step.curveA, step.curveB, point, step.orderPrime + 1n).status, FOUND);
     }
+  });
+});
+
+// ── curves with a known order ─────────────────────────────────────────────
+
+const DISCRIMINANTS = [-3, -4, -7, -8, -11, -19, -43, -67, -163];
+const SMALL_PRIMES = [2n, 3n, 5n, 7n, 11n, 13n, 17n, 19n, 23n, 29n, 31n, 37n, 41n, 43n, 47n, 53n, 59n, 61n, 67n, 71n, 73n, 79n, 83n, 89n, 97n];
+const NOT_FOUND = 0xffffffff;
+
+function ordersFor(n: bigint, discriminant: number): bigint[] {
+  const count = harness.harness_ecpp_orders(write(harness.harness_first_input(), n), discriminant) >>> 0;
+  if (count === NOT_FOUND) return [];
+  return Array.from({ length: count }, (_, index) => read(harness.harness_output(), harness.harness_ecpp_order(index) >>> 0));
+}
+
+function curveFor(n: bigint, discriminant: number, order: bigint, q: bigint) {
+  const status = harness.harness_ecpp_curve(
+    write(harness.harness_first_input(), n),
+    discriminant,
+    write(harness.harness_second_input(), order),
+    write(harness.harness_third_input(), q),
+  );
+  if (status !== FOUND) return null;
+  const value = (index: number) => read(harness.harness_output(), harness.harness_ecpp_curve_value(index) >>> 0);
+  return { number: n, curveA: value(0), curveB: value(1), pointX: value(2), pointY: value(3), orderPrime: q };
+}
+
+describe("ecpp.c curves with a known order", () => {
+  it("gives orders within Hasse's bound for large primes", () => {
+    for (const n of PRIMES) {
+      for (const discriminant of DISCRIMINANTS) {
+        for (const order of ordersFor(n, discriminant)) {
+          const trace = n + 1n - order;
+          assert.ok(trace * trace <= 4n * n, `order ${order} of ${n}, D = ${discriminant}`);
+        }
+      }
+    }
+  });
+
+  it("builds certificate steps the independent checker accepts, for every prime order it can use", () => {
+    let stepsChecked = 0;
+    const seenDiscriminants = new Set<number>();
+    for (const start of [10n ** 30n, 10n ** 60n, 10n ** 100n]) {
+      let n = start;
+      for (let prime = 0; prime < 60; prime++) {
+        n = nextPrimeAfter(n);
+        for (const discriminant of DISCRIMINANTS) {
+          for (const order of ordersFor(n, discriminant)) {
+            let q = order;
+            for (const small of SMALL_PRIMES) while (q % small === 0n) q /= small;
+            if (!orderIsLargeEnough(q, n) || !isPrime(q)) continue;
+            const step = curveFor(n, discriminant, order, q);
+            assert.notEqual(step, null, `a curve for ${n}, D = ${discriminant}, order ${order}`);
+            assert.equal(stepProblem(step!), null, `the step for ${n}, D = ${discriminant}, order ${order}`);
+            stepsChecked++;
+            seenDiscriminants.add(discriminant);
+          }
+        }
+      }
+    }
+    assert.ok(stepsChecked > 20, `only ${stepsChecked} steps`);
+    assert.deepEqual([...seenDiscriminants].sort((a, b) => a - b), [...DISCRIMINANTS].sort((a, b) => a - b), "every D was used");
+  });
+
+  it("finds nothing for a wrong order or a q that doesn't divide it", () => {
+    const n = nextPrimeAfter(10n ** 40n);
+    const discriminant = DISCRIMINANTS.find((d) => ordersFor(n, d).length > 0)!;
+    const [order] = ordersFor(n, discriminant);
+    assert.equal(curveFor(n, discriminant, order, order + 2n), null);
+    // a prime that's no order of any of these curves: no point can have that order
+    const wrongOrder = nextPrimeAfter(order + 1000n);
+    assert.equal(curveFor(n, discriminant, wrongOrder, wrongOrder), null);
   });
 });
