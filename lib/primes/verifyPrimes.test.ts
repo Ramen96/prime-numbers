@@ -4,6 +4,7 @@ import { isPrime as referenceIsPrime } from "../../tests/support/primality.ts";
 import {
   compositeEvidenceHolds,
   DETERMINISTIC_VERIFICATION_LIMIT,
+  failsStrongLucas,
   millerRabinVerdict,
   verifyBatch,
   verifyPrimes,
@@ -113,5 +114,28 @@ describe("verifyBatch", () => {
       disputedPrime: 2047n,
       verdict: "composite",
     });
+  });
+});
+
+describe("failsStrongLucas (re-checking BPSW's Lucas and square verdicts)", () => {
+  it("passes exactly the primes and the 16 published strong Lucas pseudoprimes below 130,140 (OEIS A217255)", () => {
+    const published = [
+      5459n, 5777n, 10877n, 16109n, 18971n, 22499n, 24569n, 25199n, 40309n, 58519n, 75077n, 97439n, 100127n, 113573n,
+      115639n, 130139n,
+    ];
+    const found: bigint[] = [];
+    for (let candidate = 43n; candidate < 130_140n; candidate += 2n) {
+      const isPrime = referenceIsPrime(candidate);
+      if (isPrime) assert.equal(failsStrongLucas(candidate), false, `${candidate} is prime`);
+      else if (!failsStrongLucas(candidate)) found.push(candidate);
+    }
+    assert.deepEqual(found, published);
+  });
+
+  it("never fails a large prime, and catches squares", () => {
+    for (const prime of [2n ** 89n - 1n, 2n ** 521n - 1n, 10n ** 100n + 267n]) {
+      assert.equal(failsStrongLucas(prime), false, `${prime}`);
+      assert.equal(failsStrongLucas(prime * prime), true, `${prime}²`);
+    }
   });
 });

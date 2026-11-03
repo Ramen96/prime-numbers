@@ -82,6 +82,74 @@ export function compositeEvidenceHolds(candidate: bigint, evidence: number): boo
   return candidate % 2n === 1n && base > 1n && candidate > base + 1n && isWitness(candidate, base);
 }
 
+function jacobi(top: bigint, bottom: bigint): number {
+  let result = 1;
+  let [a, n] = [((top % bottom) + bottom) % bottom, bottom];
+  while (a !== 0n) {
+    while ((a & 1n) === 0n) {
+      a >>= 1n;
+      if (n % 8n === 3n || n % 8n === 5n) result = -result;
+    }
+    [a, n] = [n, a];
+    if (a % 4n === 3n && n % 4n === 3n) result = -result;
+    a %= n;
+  }
+  return n === 1n ? result : 0;
+}
+
+function isPerfectSquare(value: bigint): boolean {
+  let estimate = 1n << BigInt(Math.ceil(value.toString(2).length / 2));
+  for (;;) {
+    const better = (estimate + value / estimate) >> 1n;
+    if (better >= estimate) return estimate * estimate === value;
+    estimate = better;
+  }
+}
+
+/**
+ * Whether odd `candidate` (> 41) is proven composite with no number as evidence
+ * (BPSW's other verdicts): it's a perfect square, or it fails the strong Lucas
+ * test with Selfridge's parameters, which no prime can. Never true for a prime.
+ */
+export function failsStrongLucas(candidate: bigint): boolean {
+  if (isPerfectSquare(candidate)) return true;
+  let d = 5n;
+  for (;;) {
+    const symbol = jacobi(d, candidate);
+    if (symbol === -1) break;
+    if (symbol === 0 && (d < 0n ? -d : d) % candidate !== 0n) return true; // shares a factor
+    d = d > 0n ? -(d + 2n) : -d + 2n;
+  }
+  const q = (1n - d) / 4n;
+  const reduce = (value: bigint) => ((value % candidate) + candidate) % candidate;
+  const halve = (value: bigint) => {
+    const reduced = reduce(value);
+    return ((reduced & 1n) === 1n ? reduced + candidate : reduced) >> 1n;
+  };
+  let oddPart = candidate + 1n;
+  let powersOfTwo = 0;
+  while ((oddPart & 1n) === 0n) {
+    oddPart >>= 1n;
+    powersOfTwo++;
+  }
+  let [u, v, qPower] = [1n, 1n, reduce(q)];
+  for (const bit of oddPart.toString(2).slice(1)) {
+    [u, v] = [reduce(u * v), reduce(v * v - 2n * qPower)];
+    qPower = reduce(qPower * qPower);
+    if (bit === "1") {
+      [u, v] = [halve(u + v), halve(d * u + v)];
+      qPower = reduce(qPower * q);
+    }
+  }
+  if (u === 0n || v === 0n) return false;
+  for (let round = 1; round < powersOfTwo; round++) {
+    v = reduce(v * v - 2n * qPower);
+    qPower = reduce(qPower * qPower);
+    if (v === 0n) return false;
+  }
+  return true;
+}
+
 /** Deterministic Miller–Rabin, with only as many bases as `candidate` needs. */
 export function millerRabinVerdict(candidate: bigint): Verdict {
   if (candidate < 2n) return "composite";
