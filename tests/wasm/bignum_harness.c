@@ -10,6 +10,7 @@
 #include <stdlib.h>
 
 #include "../../wasm/bignum.h"
+#include "../../wasm/classpoly.h"
 #include "../../wasm/ecpp.h"
 #include "../../wasm/primality.h"
 
@@ -384,3 +385,26 @@ size_t harness_ecpp_curve_value(size_t index) {
   big_number_copy(&copy, &found_curve[index]);
   return store(&copy);
 }
+
+// ── class polynomials ─────────────────────────────────────────────────────
+
+static class_polynomial built_polynomial;
+static int polynomial_built = 0;
+
+// Builds H_D. Returns its degree, or FAILED.
+size_t harness_class_polynomial(int discriminant) {
+  if (polynomial_built)
+    class_polynomial_free(&built_polynomial);
+  polynomial_built = class_polynomial_build(&built_polynomial, discriminant) == 1;
+  return polynomial_built ? built_polynomial.degree : FAILED;
+}
+
+// One coefficient's size, into the output. Returns its limb count.
+size_t harness_class_coefficient(size_t index) {
+  big_number copy;
+  big_number_init(&copy);
+  big_number_copy(&copy, &built_polynomial.magnitudes[index]);
+  return store(&copy);
+}
+
+int harness_class_coefficient_is_negative(size_t index) { return built_polynomial.negative[index]; }
