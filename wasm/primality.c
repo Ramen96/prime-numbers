@@ -320,3 +320,285 @@ primality_verdict miller_rabin(const big_number *candidate, uint32_t *evidence) 
     return miller_rabin_u64(big_number_to_u64(candidate), evidence);
   return miller_rabin_multi_limb(candidate, evidence);
 }
+
+// ── Baillie–PSW (Phase 5) ──────────────────────────────────────────────────
+//
+// Past a(13) no fixed set of Miller–Rabin bases is a proof, so candidates need
+// a real proof, which is slow. This filter removes composites first. A base-2
+// strong test and a strong Lucas test tend to fail on different numbers, so
+// together they let no composite through that anyone has ever found.
+
+// The Jacobi symbol (top / bottom) for odd bottom, by reciprocity: each step
+// flips the fraction, and reduces it like Euclid's algorithm.
+static int jacobi_small(uint64_t top, uint64_t bottom) {
+  int sign = 1;
+  top %= bottom;
+  while (top != 0) {
+    while ((top & 1) == 0) {
+      top >>= 1;
+      if ((bottom & 7) == 3 || (bottom & 7) == 5)
+        sign = -sign; // (2 / bottom) is −1 for these
+    }
+    uint64_t swap = top;
+    top = bottom;
+    bottom = swap;
+    if ((top & 3) == 3 && (bottom & 3) == 3)
+      sign = -sign; // reciprocity: both are 3 mod 4
+    top %= bottom;
+  }
+  return bottom == 1 ? sign : 0;
+}
+
+// The Jacobi symbol (d / candidate) for odd candidate and small odd d of either
+// sign. Reciprocity turns it into (candidate mod |d| / |d|), so the only
+// multi-limb step is one "big mod small".
+static int jacobi_of_small(int64_t d, const big_number *candidate) {
+  uint64_t magnitude = d < 0 ? (uint64_t)-d : (uint64_t)d;
+  uint32_t low_limb = candidate->limbs[0];
+  int sign = 1;
+  if (d < 0 && (low_limb & 3) == 3)
+    sign = -sign; // (−1 / candidate) is −1 when candidate is 3 mod 4
+  if ((magnitude & 3) == 3 && (low_limb & 3) == 3)
+    sign = -sign; // reciprocity
+  if (magnitude == 1)
+    return sign;
+  return sign * jacobi_small(big_number_mod_small(candidate, magnitude), magnitude);
+}
+
+static uint64_t greatest_common_divisor(uint64_t first, uint64_t second) {
+  while (second != 0) {
+    uint64_t remainder = first % second;
+    first = second;
+    second = remainder;
+  }
+  return first;
+}
+
+// 1 if number is a perfect square, 0 if not, -1 if memory ran out. Newton's
+// method on integers from above: x = (x + number / x) / 2 until it stops falling.
+static int is_perfect_square(const big_number *number) {
+  big_number estimate, better, square;
+  big_number_init(&estimate);
+  big_number_init(&better);
+  big_number_init(&square);
+  int result = -1;
+  if (!big_number_set_u64(&estimate, 1) ||
+      !big_number_shift_left(&estimate, &estimate, (big_number_bit_length(number) + 1) / 2))
+    goto done;
+  for (;;) {
+    if (!big_number_divide(&better, NULL, number, &estimate) || !big_number_add(&better, &better, &estimate) ||
+        !big_number_shift_right(&better, &better, 1))
+      goto done;
+    if (big_number_compare(&better, &estimate) >= 0)
+      break;
+    if (!big_number_copy(&estimate, &better))
+      goto done;
+  }
+  if (big_number_multiply(&square, &estimate, &estimate))
+    result = big_number_compare(&square, number) == 0;
+done:
+  big_number_free(&estimate);
+  big_number_free(&better);
+  big_number_free(&square);
+  return result;
+}
+
+// Selfridge's D tries before checking for a perfect square, which has no D at
+// all. A non-square reaches this about once in a million, so the check is rare.
+#define SELFRIDGE_TRIES_BEFORE_SQUARE_CHECK 20
+// Far more than any non-square needs: about half of all D work, so needing a
+// billion tries has odds of about 2^-(10^9). Squares are caught long before. If
+// this fixed width were ever reached, the candidate would just stay pending.
+#define SELFRIDGE_LARGEST_D 2147483647
+
+typedef enum { LUCAS_FOUND_D, LUCAS_FOUND_FACTOR, LUCAS_IS_SQUARE, LUCAS_UNSETTLED } lucas_parameter_result;
+
+// Selfridge's method A: the first D in 5, −7, 9, −11, … with (D / candidate) = −1.
+// A symbol of 0 means D shares a factor with the candidate, which is a proof.
+static lucas_parameter_result find_lucas_d(const big_number *candidate, int64_t *d, uint32_t *factor) {
+  int tries = 0;
+  for (int64_t magnitude = 5, sign = 1; magnitude <= SELFRIDGE_LARGEST_D; magnitude += 2, sign = -sign) {
+    int64_t candidate_d = sign * magnitude;
+    int symbol = jacobi_of_small(candidate_d, candidate);
+    if (symbol == -1) {
+      *d = candidate_d;
+      return LUCAS_FOUND_D;
+    }
+    if (symbol == 0) {
+      uint64_t common = greatest_common_divisor((uint64_t)magnitude, big_number_mod_small(candidate, (uint64_t)magnitude));
+      if (big_number_compare_u64(candidate, common) != 0) {
+        *factor = (uint32_t)common; // below 2^31, since magnitude is
+        return LUCAS_FOUND_FACTOR;
+      }
+    }
+    if (++tries == SELFRIDGE_TRIES_BEFORE_SQUARE_CHECK) {
+      int square = is_perfect_square(candidate);
+      if (square < 0)
+        return LUCAS_UNSETTLED;
+      if (square)
+        return LUCAS_IS_SQUARE;
+    }
+  }
+  return LUCAS_UNSETTLED;
+}
+
+// result = (first + second) mod N. Both below N. Works on Montgomery form as is,
+// as do the two below, since form is just multiplying by R.
+static int add_mod(big_number *result, const big_number *first, const big_number *second, const big_number *modulus) {
+  if (!big_number_add(result, first, second))
+    return 0;
+  return big_number_compare(result, modulus) < 0 || big_number_subtract(result, result, modulus);
+}
+
+// result = (first − second) mod N. Both below N.
+static int subtract_mod(big_number *result, const big_number *first, const big_number *second,
+                        const big_number *modulus) {
+  if (big_number_compare(first, second) >= 0)
+    return big_number_subtract(result, first, second);
+  big_number sum;
+  big_number_init(&sum);
+  int ok = big_number_add(&sum, first, modulus) && big_number_subtract(result, &sum, second);
+  big_number_free(&sum);
+  return ok;
+}
+
+// number = number / 2 mod N, for odd N: an odd number becomes even by adding N.
+static int halve_mod(big_number *number, const big_number *modulus) {
+  if (big_number_is_odd(number) && !big_number_add(number, number, modulus))
+    return 0;
+  return big_number_shift_right(number, number, 1);
+}
+
+// result = value mod N in Montgomery form, for a small value of either sign.
+static int small_to_form(montgomery_context *context, big_number *result, int64_t value) {
+  big_number magnitude, form;
+  big_number_init(&magnitude);
+  big_number_init(&form);
+  int ok = big_number_set_u64(&magnitude, value < 0 ? (uint64_t)-value : (uint64_t)value) &&
+           montgomery_to_form(context, &form, &magnitude);
+  if (ok && value < 0 && form.limb_count > 0)
+    ok = big_number_subtract(result, &context->modulus, &form);
+  else if (ok)
+    ok = big_number_copy(result, &form);
+  big_number_free(&magnitude);
+  big_number_free(&form);
+  return ok;
+}
+
+// The strong Lucas test with P = 1, Q = (1 − D) / 4. Write n + 1 = d · 2^s with d
+// odd. A prime n must have U_d ≡ 0, or V_(d·2^r) ≡ 0 for some r < s. U and V are
+// computed mod n by walking d's bits from the top, as in binary exponentiation:
+//   doubling:  U_2k = U_k V_k          V_2k = V_k² − 2 Q^k
+//   adding 1:  U_k+1 = (U_k + V_k) / 2    V_k+1 = (D U_k + V_k) / 2
+// Returns 1 passes, 0 proven composite, -1 out of memory.
+static int passes_strong_lucas(const big_number *candidate, int64_t d) {
+  montgomery_context context;
+  big_number odd_part, u, v, q_power, q_form, d_form, product, old_u;
+  big_number *numbers[] = {&odd_part, &u, &v, &q_power, &q_form, &d_form, &product, &old_u};
+  for (size_t index = 0; index < sizeof numbers / sizeof *numbers; index++)
+    big_number_init(numbers[index]);
+  int result = -1;
+  int context_ready = montgomery_init(&context, candidate);
+  if (!context_ready)
+    goto done;
+  const big_number *modulus = &context.modulus;
+
+  if (!big_number_copy(&odd_part, candidate) || !big_number_add_small(&odd_part, 1))
+    goto done;
+  size_t powers_of_two = 0;
+  while (!(odd_part.limbs[powers_of_two / 32] >> (powers_of_two % 32) & 1))
+    powers_of_two++;
+  if (!big_number_shift_right(&odd_part, &odd_part, powers_of_two))
+    goto done;
+
+  if (!small_to_form(&context, &d_form, d) || !small_to_form(&context, &q_form, (1 - d) / 4) ||
+      !small_to_form(&context, &u, 1) || !small_to_form(&context, &v, 1) || !big_number_copy(&q_power, &q_form))
+    goto done;
+
+// V = V² − 2 · Q^k, and Q^k = (Q^k)²: the step every doubling needs
+#define DOUBLE_V_AND_Q_POWER()                                                                                         \
+  (montgomery_multiply(&context, &v, &v, &v) && add_mod(&product, &q_power, &q_power, modulus) &&                      \
+   subtract_mod(&v, &v, &product, modulus) && montgomery_multiply(&context, &q_power, &q_power, &q_power))
+
+  for (size_t bit = big_number_bit_length(&odd_part) - 1; bit-- > 0;) {
+    if (!montgomery_multiply(&context, &u, &u, &v) || !DOUBLE_V_AND_Q_POWER())
+      goto done;
+    if ((odd_part.limbs[bit / 32] >> (bit % 32)) & 1) {
+      if (!big_number_copy(&old_u, &u) || !add_mod(&u, &u, &v, modulus) || !halve_mod(&u, modulus) ||
+          !montgomery_multiply(&context, &product, &d_form, &old_u) || !add_mod(&v, &v, &product, modulus) ||
+          !halve_mod(&v, modulus) || !montgomery_multiply(&context, &q_power, &q_power, &q_form))
+        goto done;
+    }
+  }
+
+  result = u.limb_count == 0 || v.limb_count == 0;
+  for (size_t round = 1; !result && round < powers_of_two; round++) {
+    if (!DOUBLE_V_AND_Q_POWER()) {
+      result = -1;
+      goto done;
+    }
+    result = v.limb_count == 0;
+  }
+#undef DOUBLE_V_AND_Q_POWER
+done:
+  if (context_ready)
+    montgomery_free(&context);
+  for (size_t index = 0; index < sizeof numbers / sizeof *numbers; index++)
+    big_number_free(numbers[index]);
+  return result;
+}
+
+int strong_lucas_probable_prime(const big_number *candidate) {
+  int64_t d = 0;
+  uint32_t factor = 0;
+  switch (find_lucas_d(candidate, &d, &factor)) {
+  case LUCAS_FOUND_D:
+    return passes_strong_lucas(candidate, d);
+  case LUCAS_UNSETTLED:
+    return -1;
+  default:
+    return 0; // a factor, or a square
+  }
+}
+
+primality_verdict bpsw(const big_number *candidate, uint32_t *evidence) {
+  if (big_number_compare_u64(candidate, 2) < 0)
+    return PRIMALITY_BELOW_TWO;
+  for (int index = 0; index < BASE_COUNT; index++) {
+    uint32_t base = PRIME_BASES[index];
+    if (big_number_compare_u64(candidate, base) == 0)
+      return PRIMALITY_PROBABLE_PRIME;
+    if (big_number_mod_small(candidate, base) == 0) {
+      if (evidence)
+        *evidence = base;
+      return PRIMALITY_COMPOSITE_BY_FACTOR;
+    }
+  }
+  int passed_base_2 = strong_probable_prime(candidate, 2);
+  if (passed_base_2 < 0)
+    return PRIMALITY_OUT_OF_MEMORY;
+  if (!passed_base_2) {
+    if (evidence)
+      *evidence = 2;
+    return PRIMALITY_COMPOSITE_BY_WITNESS;
+  }
+
+  int64_t d = 0;
+  uint32_t factor = 0;
+  switch (find_lucas_d(candidate, &d, &factor)) {
+  case LUCAS_FOUND_FACTOR:
+    if (evidence)
+      *evidence = factor;
+    return PRIMALITY_COMPOSITE_BY_FACTOR;
+  case LUCAS_IS_SQUARE:
+    return PRIMALITY_COMPOSITE_BY_SQUARE;
+  case LUCAS_UNSETTLED:
+    return PRIMALITY_OUT_OF_MEMORY; // stays pending
+  case LUCAS_FOUND_D:
+    break;
+  }
+  int passed_lucas = passes_strong_lucas(candidate, d);
+  if (passed_lucas < 0)
+    return PRIMALITY_OUT_OF_MEMORY;
+  return passed_lucas ? PRIMALITY_PROBABLE_PRIME : PRIMALITY_COMPOSITE_BY_LUCAS;
+}

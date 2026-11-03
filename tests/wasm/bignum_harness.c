@@ -210,3 +210,20 @@ int harness_strong_probable_prime(size_t count, uint32_t base) {
   big_number_free(&candidate);
   return result;
 }
+
+// The BPSW verdict (a primality_verdict value) for the first input.
+int harness_bpsw(size_t count) {
+  big_number candidate = load(first_input, count);
+  last_evidence = 0;
+  primality_verdict verdict = bpsw(&candidate, &last_evidence);
+  big_number_free(&candidate);
+  return (int)verdict;
+}
+
+// The strong Lucas test alone: 1 passes, 0 composite, -1 out of memory.
+int harness_strong_lucas(size_t count) {
+  big_number candidate = load(first_input, count);
+  int result = strong_lucas_probable_prime(&candidate);
+  big_number_free(&candidate);
+  return result;
+}

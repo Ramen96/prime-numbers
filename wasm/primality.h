@@ -38,6 +38,13 @@ typedef enum {
   PRIMALITY_BEYOND_PROVEN_BOUND,
   // Memory ran out part way: not settled. Stays pending, never "composite".
   PRIMALITY_OUT_OF_MEMORY,
+  // The rest come only from bpsw().
+  // Passed BPSW. Not a proof: it still needs one before it can be shown.
+  PRIMALITY_PROBABLE_PRIME,
+  // Proven composite: it's a perfect square.
+  PRIMALITY_COMPOSITE_BY_SQUARE,
+  // Proven composite: it fails the strong Lucas test, which no prime can.
+  PRIMALITY_COMPOSITE_BY_LUCAS,
 } primality_verdict;
 
 // The verdict for a candidate below 2^64, using uint64_t arithmetic.
@@ -57,5 +64,17 @@ primality_verdict miller_rabin(const big_number *candidate, uint32_t *evidence);
 // of the verdicts above (and of BPSW's base-2 test in Phase 5).
 int strong_probable_prime_u64(uint64_t candidate, uint32_t base);
 int strong_probable_prime(const big_number *candidate, uint32_t base);
+
+// The filter for candidates past a(13) (Phase 5). Baillie–PSW: trial division
+// by the 13 bases, a strong test to base 2, then a strong Lucas test. It never
+// calls a prime composite, so every composite verdict is a proof. No composite
+// is known to pass, but none is proven not to, so PRIMALITY_PROBABLE_PRIME is
+// not a proof. Any size. `evidence` (may be NULL) receives the factor, or 2 for
+// the base-2 witness.
+primality_verdict bpsw(const big_number *candidate, uint32_t *evidence);
+
+// The strong Lucas test alone, with Selfridge's parameters, for an odd candidate
+// above 41: 1 if it passes, 0 if it's proven composite, -1 if memory ran out.
+int strong_lucas_probable_prime(const big_number *candidate);
 
 #endif

@@ -265,6 +265,108 @@ static void check_large_values(void) {
   }
 }
 
+// ── Baillie–PSW ───────────────────────────────────────────────────────────
+
+static primality_verdict bpsw_of(u128 value, uint32_t *evidence) {
+  big_number number;
+  big_number_init(&number);
+  set_u128(&number, value);
+  primality_verdict verdict = bpsw(&number, evidence);
+  big_number_free(&number);
+  return verdict;
+}
+
+static int lucas_of(u128 value) {
+  big_number number;
+  big_number_init(&number);
+  set_u128(&number, value);
+  int passes = strong_lucas_probable_prime(&number);
+  big_number_free(&number);
+  return passes;
+}
+
+static void check_bpsw(void) {
+  // Every number below 2,000,000 against a sieve: never calls a prime
+  // composite, and lets no composite through.
+  enum { LIMIT = 2000000 };
+  uint8_t *is_composite = calloc(LIMIT, 1);
+  for (uint64_t value = 2; value * value < LIMIT; value++)
+    if (!is_composite[value])
+      for (uint64_t multiple = value * value; multiple < LIMIT; multiple += value)
+        is_composite[multiple] = 1;
+  for (uint32_t candidate = 2; candidate < LIMIT; candidate++) {
+    primality_verdict verdict = bpsw_of(candidate, NULL);
+    expect((verdict == PRIMALITY_PROBABLE_PRIME) == !is_composite[candidate], "BPSW against a sieve", candidate);
+  }
+  free(is_composite);
+  expect(bpsw_of(0, NULL) == PRIMALITY_BELOW_TWO && bpsw_of(1, NULL) == PRIMALITY_BELOW_TWO, "BPSW below two", 0);
+
+  // Strong Lucas pseudoprimes (OEIS A217255): composites that pass Lucas alone,
+  // so this is the proof the Lucas test matches the published one. Base 2 catches them.
+  static const uint32_t lucas_pseudoprimes[] = {5459,  5777,   10877,  16109,  18971,  22499,  24569,  25199,
+                                                40309, 58519,  75077,  97439,  100127, 113573, 115639, 130139};
+  for (size_t index = 0; index < sizeof lucas_pseudoprimes / sizeof *lucas_pseudoprimes; index++) {
+    expect(lucas_of(lucas_pseudoprimes[index]) == 1, "a strong Lucas pseudoprime passes Lucas", lucas_pseudoprimes[index]);
+    expect(bpsw_of(lucas_pseudoprimes[index], NULL) == PRIMALITY_COMPOSITE_BY_WITNESS, "and fails base 2", lucas_pseudoprimes[index]);
+  }
+  // And no other odd number below the list's end passes without being prime.
+  int lucas_pseudoprimes_found = 0;
+  for (uint32_t candidate = 43; candidate < 130140; candidate += 2) {
+    int is_prime = miller_rabin_u64(candidate, NULL) == PRIMALITY_PRIME;
+    if (lucas_of(candidate) == 1 && !is_prime)
+      lucas_pseudoprimes_found++;
+    if (is_prime)
+      expect(lucas_of(candidate) == 1, "every prime passes Lucas", candidate);
+  }
+  expect(lucas_pseudoprimes_found == 16, "exactly the published strong Lucas pseudoprimes", (u128)lucas_pseudoprimes_found);
+
+  // Strong pseudoprimes to base 2 pass that step: Lucas must catch them.
+  static const uint32_t base_2_pseudoprimes[] = {2047, 3277, 4033, 4681, 8321, 15841, 29341, 42799, 49141, 52633};
+  for (size_t index = 0; index < sizeof base_2_pseudoprimes / sizeof *base_2_pseudoprimes; index++) {
+    primality_verdict verdict = bpsw_of(base_2_pseudoprimes[index], NULL);
+    expect(verdict == PRIMALITY_COMPOSITE_BY_LUCAS || verdict == PRIMALITY_COMPOSITE_BY_FACTOR, "base-2 pseudoprime caught", base_2_pseudoprimes[index]);
+  }
+
+  // Perfect squares, whose D search never ends without the square check.
+  static const u128 square_roots[] = {43, 1009, 65537, 4294967311ULL, 1000000000039ULL};
+  for (size_t index = 0; index < sizeof square_roots / sizeof *square_roots; index++) {
+    u128 square = square_roots[index] * square_roots[index];
+    primality_verdict verdict = bpsw_of(square, NULL);
+    expect(verdict != PRIMALITY_PROBABLE_PRIME && verdict != PRIMALITY_OUT_OF_MEMORY, "a square is proven composite", square);
+    expect(lucas_of(square) != 1, "a square fails Lucas", square);
+  }
+
+  // Against deterministic Miller–Rabin on random values, which is proven here.
+  for (int round = 0; round < 40000; round++) {
+    uint64_t candidate = (random_u64() >> (random_u64() % 60)) | 1;
+    primality_verdict proven = miller_rabin_u64(candidate, NULL);
+    primality_verdict filter = bpsw_of(candidate, NULL);
+    expect((proven == PRIMALITY_PRIME) == (filter == PRIMALITY_PROBABLE_PRIME), "BPSW against Miller–Rabin", candidate);
+  }
+  // Every prime around the limb changes passes.
+  for (int limbs = 1; limbs <= 2; limbs++) { // 2^32 and 2^64; 2^96 is past a(13), so below
+    u128 center = (u128)1 << (32 * limbs);
+    for (u128 candidate = center - 2001; candidate < center + 2001; candidate += 2) {
+      if (center <= UINT64_MAX)
+        expect((miller_rabin_u64((uint64_t)candidate, NULL) == PRIMALITY_PRIME) == (bpsw_of(candidate, NULL) == PRIMALITY_PROBABLE_PRIME),
+               "BPSW around a limb change", candidate);
+      else {
+        big_number number;
+        big_number_init(&number);
+        set_u128(&number, candidate);
+        expect((miller_rabin(&number, NULL) == PRIMALITY_PRIME) == (bpsw_of(candidate, NULL) == PRIMALITY_PROBABLE_PRIME),
+               "BPSW around a limb change", candidate);
+        big_number_free(&number);
+      }
+    }
+  }
+  // Past a(13): 2^89 − 1 and 2^107 − 1 are Mersenne primes.
+  expect(bpsw_of(((u128)1 << 89) - 1, NULL) == PRIMALITY_PROBABLE_PRIME, "2^89 − 1", ((u128)1 << 89) - 1);
+  expect(bpsw_of(((u128)1 << 107) - 1, NULL) == PRIMALITY_PROBABLE_PRIME, "2^107 − 1", ((u128)1 << 107) - 1);
+  expect(bpsw_of(((u128)1 << 127) - 1, NULL) == PRIMALITY_PROBABLE_PRIME, "2^127 − 1", ((u128)1 << 127) - 1);
+  expect(bpsw_of(((u128)1 << 101) - 1, NULL) != PRIMALITY_PROBABLE_PRIME, "2^101 − 1 is composite", ((u128)1 << 101) - 1);
+}
+
 int main(void) {
   check_against_sieve(10000000, 664579); // π(10^7)
   for (uint64_t candidate = 0; candidate < 200000; candidate++)
@@ -284,6 +386,7 @@ int main(void) {
   check_bound_table();
   check_carmichael_numbers();
   check_large_values();
+  check_bpsw();
 
   printf("native primality tests: %d checks, %d failed\n", checks_run, checks_failed);
   return checks_failed == 0 ? 0 : 1;
