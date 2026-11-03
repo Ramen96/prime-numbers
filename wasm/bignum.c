@@ -797,6 +797,26 @@ int montgomery_power(montgomery_context *context, big_number *result, const big_
 
 // ── for ECPP: inverses, Jacobi symbols and square roots mod a number ──────
 
+// result = (first + second) mod N, for both below N. It works on Montgomery form
+// as it is, as does subtract, since that form is just multiplying by R.
+int big_number_add_mod(big_number *result, const big_number *first, const big_number *second, const big_number *modulus) {
+  if (!big_number_add(result, first, second))
+    return 0;
+  return big_number_compare(result, modulus) < 0 || big_number_subtract(result, result, modulus);
+}
+
+// result = (first − second) mod N, for both below N.
+int big_number_subtract_mod(big_number *result, const big_number *first, const big_number *second,
+                            const big_number *modulus) {
+  if (big_number_compare(first, second) >= 0)
+    return big_number_subtract(result, first, second);
+  big_number sum;
+  big_number_init(&sum);
+  int ok = big_number_add(&sum, first, modulus) && big_number_subtract(result, &sum, second);
+  big_number_free(&sum);
+  return ok;
+}
+
 // result = value⁻¹ mod modulus, by the extended Euclidean algorithm. The
 // coefficients of `value` alternate in sign, so only their sizes are stored,
 // with one sign flag. They never grow past the modulus.

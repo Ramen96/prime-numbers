@@ -117,6 +117,11 @@ int montgomery_power(montgomery_context *context, big_number *result, const big_
 // For ECPP (Phase 5). The moduli there are only probably prime, so none of these
 // assumes a prime modulus for its safety: they end, and report what they found.
 
+// (first ± second) mod modulus, for both below it. Works on Montgomery form too.
+int big_number_add_mod(big_number *result, const big_number *first, const big_number *second, const big_number *modulus);
+int big_number_subtract_mod(big_number *result, const big_number *first, const big_number *second,
+                            const big_number *modulus);
+
 // result = value⁻¹ mod modulus, for any modulus above 0 (1 gives 0). Returns 1, or
 // -1 if there's no inverse (they share a factor), or 0 if memory runs out.
 int big_number_inverse_mod(big_number *result, const big_number *value, const big_number *modulus);

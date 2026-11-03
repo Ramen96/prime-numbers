@@ -442,26 +442,6 @@ static lucas_parameter_result find_lucas_d(const big_number *candidate, int64_t 
   return LUCAS_UNSETTLED;
 }
 
-// result = (first + second) mod N. Both below N. Works on Montgomery form as is,
-// as do the two below, since form is just multiplying by R.
-static int add_mod(big_number *result, const big_number *first, const big_number *second, const big_number *modulus) {
-  if (!big_number_add(result, first, second))
-    return 0;
-  return big_number_compare(result, modulus) < 0 || big_number_subtract(result, result, modulus);
-}
-
-// result = (first − second) mod N. Both below N.
-static int subtract_mod(big_number *result, const big_number *first, const big_number *second,
-                        const big_number *modulus) {
-  if (big_number_compare(first, second) >= 0)
-    return big_number_subtract(result, first, second);
-  big_number sum;
-  big_number_init(&sum);
-  int ok = big_number_add(&sum, first, modulus) && big_number_subtract(result, &sum, second);
-  big_number_free(&sum);
-  return ok;
-}
-
 // number = number / 2 mod N, for odd N: an odd number becomes even by adding N.
 static int halve_mod(big_number *number, const big_number *modulus) {
   if (big_number_is_odd(number) && !big_number_add(number, number, modulus))
@@ -517,15 +497,15 @@ static int passes_strong_lucas(const big_number *candidate, int64_t d) {
 
 // V = V² − 2 · Q^k, and Q^k = (Q^k)²: the step every doubling needs
 #define DOUBLE_V_AND_Q_POWER()                                                                                         \
-  (montgomery_multiply(&context, &v, &v, &v) && add_mod(&product, &q_power, &q_power, modulus) &&                      \
-   subtract_mod(&v, &v, &product, modulus) && montgomery_multiply(&context, &q_power, &q_power, &q_power))
+  (montgomery_multiply(&context, &v, &v, &v) && big_number_add_mod(&product, &q_power, &q_power, modulus) &&                      \
+   big_number_subtract_mod(&v, &v, &product, modulus) && montgomery_multiply(&context, &q_power, &q_power, &q_power))
 
   for (size_t bit = big_number_bit_length(&odd_part) - 1; bit-- > 0;) {
     if (!montgomery_multiply(&context, &u, &u, &v) || !DOUBLE_V_AND_Q_POWER())
       goto done;
     if ((odd_part.limbs[bit / 32] >> (bit % 32)) & 1) {
-      if (!big_number_copy(&old_u, &u) || !add_mod(&u, &u, &v, modulus) || !halve_mod(&u, modulus) ||
-          !montgomery_multiply(&context, &product, &d_form, &old_u) || !add_mod(&v, &v, &product, modulus) ||
+      if (!big_number_copy(&old_u, &u) || !big_number_add_mod(&u, &u, &v, modulus) || !halve_mod(&u, modulus) ||
+          !montgomery_multiply(&context, &product, &d_form, &old_u) || !big_number_add_mod(&v, &v, &product, modulus) ||
           !halve_mod(&v, modulus) || !montgomery_multiply(&context, &q_power, &q_power, &q_form))
         goto done;
     }

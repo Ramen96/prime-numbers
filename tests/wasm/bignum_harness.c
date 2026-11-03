@@ -10,6 +10,7 @@
 #include <stdlib.h>
 
 #include "../../wasm/bignum.h"
+#include "../../wasm/ecpp.h"
 #include "../../wasm/primality.h"
 
 #define MAX_TEST_LIMBS 4096
@@ -26,6 +27,10 @@ static size_t second_output_count;
 uint32_t *harness_first_input(void) { return first_input; }
 uint32_t *harness_second_input(void) { return second_input; }
 uint32_t *harness_third_input(void) { return third_input; }
+static uint32_t fourth_input[MAX_TEST_LIMBS];
+static uint32_t fifth_input[MAX_TEST_LIMBS];
+uint32_t *harness_fourth_input(void) { return fourth_input; }
+uint32_t *harness_fifth_input(void) { return fifth_input; }
 uint32_t *harness_output(void) { return output_limbs; }
 uint32_t *harness_second_output(void) { return second_output_limbs; }
 // The limb count of the last result written to the second output.
@@ -268,4 +273,61 @@ size_t harness_square_root_mod(size_t value_count, size_t modulus_count) {
     return FAILED;
   }
   return store(&result);
+}
+
+// ── elliptic curves ───────────────────────────────────────────────────────
+
+// Inputs: modulus (first), a (second), x (third), y (fourth), scalar (fifth), with
+// b 0 or set by harness_curve_b. x in the output, y in the second output (its count
+// from harness_second_output_count), the status returned, and x's count from
+// harness_first_output_count.
+static uint32_t curve_b = 0;
+static size_t first_output_count;
+void harness_curve_b(uint32_t b) { curve_b = b; }
+size_t harness_first_output_count(void) { return first_output_count; }
+
+int harness_curve_multiply(size_t modulus_count, size_t a_count, size_t x_count, size_t y_count, size_t scalar_count) {
+  big_number modulus = load(first_input, modulus_count), a = load(second_input, a_count), b;
+  big_number x = load(third_input, x_count), y = load(fourth_input, y_count), scalar = load(fifth_input, scalar_count);
+  big_number out_x, out_y;
+  big_number_init(&b);
+  big_number_init(&out_x);
+  big_number_init(&out_y);
+  big_number_set_u64(&b, curve_b);
+  ecpp_curve curve;
+  if (!ecpp_curve_init(&curve, &modulus, &a, &b))
+    abort();
+  ecpp_status status = ecpp_multiply(&curve, &out_x, &out_y, &x, &y, &scalar);
+  first_output_count = store(&out_x);
+  second_output_count = store_into(second_output_limbs, &out_y);
+  ecpp_curve_free(&curve);
+  big_number_free(&modulus);
+  big_number_free(&a);
+  big_number_free(&b);
+  big_number_free(&x);
+  big_number_free(&y);
+  big_number_free(&scalar);
+  return (int)status;
+}
+
+// Inputs: modulus (first), a (second), start x (third). As above for the outputs.
+int harness_curve_find_point(size_t modulus_count, size_t a_count, size_t start_count) {
+  big_number modulus = load(first_input, modulus_count), a = load(second_input, a_count), b;
+  big_number start = load(third_input, start_count), out_x, out_y;
+  big_number_init(&b);
+  big_number_init(&out_x);
+  big_number_init(&out_y);
+  big_number_set_u64(&b, curve_b);
+  ecpp_curve curve;
+  if (!ecpp_curve_init(&curve, &modulus, &a, &b))
+    abort();
+  ecpp_status status = ecpp_find_point(&curve, &out_x, &out_y, &start);
+  first_output_count = store(&out_x);
+  second_output_count = store_into(second_output_limbs, &out_y);
+  ecpp_curve_free(&curve);
+  big_number_free(&modulus);
+  big_number_free(&a);
+  big_number_free(&b);
+  big_number_free(&start);
+  return (int)status;
 }
