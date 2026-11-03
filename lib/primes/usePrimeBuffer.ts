@@ -214,6 +214,9 @@ export function usePrimeBuffer(firstBatchFromServer: readonly string[]): PrimeBu
     worker.onmessage = (event: MessageEvent<WorkerResponse>) =>
       handleWorkerMessageRef.current(event.data);
     worker.onerror = (errorEvent) => {
+      // Terminating a worker that's still loading fails its import, which
+      // arrives here a moment later: that isn't a crash of anything in use.
+      if (workerRef.current !== worker) return;
       cannotContinueRef.current = true;
       console.error("prime worker crashed:", errorEvent.message);
       setStatus("error");

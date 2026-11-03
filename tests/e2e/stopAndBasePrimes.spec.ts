@@ -73,7 +73,7 @@ test.describe("Stop button", () => {
     // Hidden at first, shown once the calculation has run for a moment.
     await expect(primeListPage.primeList.getByTestId("prime-row").first()).toBeVisible();
     await expect(stopButton).toBeVisible();
-    expect(workers).toHaveLength(1);
+    await expect.poll(() => workers.length).toBe(1);
     const primesBeforeStopping = await primeListPage.renderedPrimes();
 
     const firstWorkerClosed = new Promise<void>((resolve) => workers[0].once("close", () => resolve()));
@@ -92,6 +92,25 @@ test.describe("Stop button", () => {
     await expect(counter).toHaveText(/^\d{1,3}(,\d{3})+$/);
     // The fresh worker added primes past the server's first batch (which ends at 3,571).
     await expect.poll(async () => parseNumber(await statValue(page, "frontier"))).toBeGreaterThan(3571);
+  });
+
+  test("stopping while the worker's script loads isn't mistaken for a crash, and scrolling resumes", async ({ page }) => {
+    // Terminating a worker part way through loading fails its import, which
+    // reports an error a moment later. (By chunk name, so on the dev server.)
+    await page.route("**/*primes_worker*", () => {}); // never answered
+    await page.goto("/");
+    const primeListPage = new PrimeListPage(page);
+    const counter = page.locator("header .font-mono").first();
+    const stopButton = page.getByRole("button", { name: "Stop calculating" });
+    await expect(stopButton).toBeVisible();
+    await stopButton.click();
+    await expect(counter).toHaveText("stopped");
+    await page.waitForTimeout(500); // the import's failure arrives after this
+    await expect(counter).toHaveText("stopped");
+
+    await page.unroute("**/*primes_worker*");
+    await primeListPage.scrollByRows(400);
+    await expect(counter).toHaveText(/^\d{1,3}(,\d{3})+$/);
   });
 
   test("is reachable from the keyboard and big enough to tap", async ({ page }) => {
