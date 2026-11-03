@@ -97,6 +97,16 @@ describe("base-prime size bounds against published π(10^n)", () => {
   });
 });
 
+describe("estimatedBasePrimeBytes at any size", () => {
+  it("is Infinity where base primes can't be built, however large the limit", () => {
+    assert.ok(Number.isFinite(estimatedBasePrimeBytes(2n ** 64n - 1n)));
+    for (const limit of [2n ** 64n, 10n ** 299n, 10n ** 300n, 10n ** 5000n]) {
+      assert.equal(estimatedBasePrimeBytes(limit), Infinity);
+    }
+    assert.equal(shouldRestartWorkerToReleaseMemory(2 ** 30, Infinity), false);
+  });
+});
+
 describe("basePrimesCouldFit", () => {
   const limitFor = (from: bigint) => basePrimeLimitNeededFor("next", from, 500);
 

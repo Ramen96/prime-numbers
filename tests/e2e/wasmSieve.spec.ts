@@ -56,6 +56,18 @@ test.describe("WebAssembly sieve", () => {
     expect(pageErrors).toEqual([]);
   });
 
+  test("a jump of any size is answered, not a crash: past 10^600 too", async ({ page }) => {
+    const pageErrors: string[] = [];
+    page.on("pageerror", (error) => pageErrors.push(String(error)));
+    const primeListPage = new PrimeListPage(page);
+    await primeListPage.open();
+    for (const zeros of [600, 5000]) {
+      await primeListPage.jumpTo("1" + "0".repeat(zeros), { waitForLanding: false });
+      await expect(page.getByText("The edge of what’s proven.")).toBeVisible();
+    }
+    expect(pageErrors).toEqual([]);
+  });
+
   test("going up toward a(13) stops at the last prime below it, with the proven-bound notice", async ({ page }) => {
     const provenBound = 3_317_044_064_679_887_385_961_981n; // OEIS A014233, a(13)
     const primeListPage = new PrimeListPage(page);

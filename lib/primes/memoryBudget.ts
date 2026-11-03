@@ -95,9 +95,12 @@ export function fewestBasePrimeBytes(limit: bigint): number {
  * allocated once instead of grown step by step. li(x) is just above π(x) at
  * every size this can reach; 1% and 64 KB on top cover the rare 9-byte gaps
  * and small limits. If it's ever short, sieve.c grows the storage itself.
+ * From 2^64 up they can never be built (see basePrimesCouldFit), so the answer
+ * is Infinity, for a limit of any size: li(x) itself stops at 10^300.
  */
 export function estimatedBasePrimeBytes(limit: bigint): number {
   if (limit < 2n) return 0;
+  if (limit >= 2n ** 64n) return Infinity;
   return Math.ceil(logarithmicIntegral(limit) * 1.01) + 64 * 1024;
 }
 
