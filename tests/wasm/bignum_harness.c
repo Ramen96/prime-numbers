@@ -227,3 +227,45 @@ int harness_strong_lucas(size_t count) {
   big_number_free(&candidate);
   return result;
 }
+
+// ── for ECPP ──────────────────────────────────────────────────────────────
+
+// first⁻¹ mod second, in the output. FAILED if there's no inverse.
+size_t harness_inverse_mod(size_t value_count, size_t modulus_count) {
+  big_number value = load(first_input, value_count), modulus = load(second_input, modulus_count), result;
+  big_number_init(&result);
+  int status = big_number_inverse_mod(&result, &value, &modulus);
+  big_number_free(&value);
+  big_number_free(&modulus);
+  if (status == 0)
+    abort();
+  if (status < 0) {
+    big_number_free(&result);
+    return FAILED;
+  }
+  return store(&result);
+}
+
+int harness_jacobi(size_t top_count, size_t bottom_count) {
+  big_number top = load(first_input, top_count), bottom = load(second_input, bottom_count);
+  int symbol = big_number_jacobi(&top, &bottom);
+  big_number_free(&top);
+  big_number_free(&bottom);
+  return symbol;
+}
+
+// A square root of first mod second, in the output. FAILED if none was found.
+size_t harness_square_root_mod(size_t value_count, size_t modulus_count) {
+  big_number value = load(first_input, value_count), modulus = load(second_input, modulus_count), result;
+  big_number_init(&result);
+  int status = big_number_square_root_mod(&result, &value, &modulus);
+  big_number_free(&value);
+  big_number_free(&modulus);
+  if (status == 0)
+    abort();
+  if (status < 0) {
+    big_number_free(&result);
+    return FAILED;
+  }
+  return store(&result);
+}

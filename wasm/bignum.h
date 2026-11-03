@@ -114,4 +114,19 @@ int montgomery_multiply(montgomery_context *context, big_number *result, const b
 int montgomery_power(montgomery_context *context, big_number *result, const big_number *base,
                      const big_number *exponent);
 
+// For ECPP (Phase 5). The moduli there are only probably prime, so none of these
+// assumes a prime modulus for its safety: they end, and report what they found.
+
+// result = value⁻¹ mod modulus, for any modulus above 0 (1 gives 0). Returns 1, or
+// -1 if there's no inverse (they share a factor), or 0 if memory runs out.
+int big_number_inverse_mod(big_number *result, const big_number *value, const big_number *modulus);
+
+// The Jacobi symbol (top / bottom) for odd bottom: 1, -1 or 0, or -2 if memory runs out.
+int big_number_jacobi(const big_number *top, const big_number *bottom);
+
+// result = a square root of value mod an odd modulus above 2, by Tonelli–Shanks.
+// Returns 1 with a result that's been squared to check it, or -1 if none was
+// found (always the case for a non-residue of a prime), or 0 if memory runs out.
+int big_number_square_root_mod(big_number *result, const big_number *value, const big_number *modulus);
+
 #endif

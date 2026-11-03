@@ -499,8 +499,144 @@ static void check_block_cache(void) {
   }
 }
 
+// ── inverses, Jacobi symbols, square roots ────────────────────────────────
+
+static u128 small_gcd(u128 first, u128 second) {
+  while (second) {
+    u128 rest = first % second;
+    first = second;
+    second = rest;
+  }
+  return first;
+}
+
+static void check_inverse(u128 value, uint64_t modulus_value) {
+  big_number number, modulus, inverse;
+  big_number_init(&number);
+  big_number_init(&modulus);
+  big_number_init(&inverse);
+  set_u128(&number, value);
+  big_number_set_u64(&modulus, modulus_value);
+  int status = big_number_inverse_mod(&inverse, &number, &modulus);
+  int too_big;
+  u128 got = get_u128(&inverse, &too_big);
+  if (modulus_value == 1) {
+    expect_equal("inverse mod 1 is 0", value, 0, got);
+  } else if (small_gcd(value % modulus_value, modulus_value) == 1) {
+    expect_equal("inverse exists", value, 1, (u128)status);
+    checks_run++;
+    if (got >= modulus_value)
+      fail("inverse is reduced", value, modulus_value, got);
+    expect_equal("inverse multiplies to 1", value, 1, (value % modulus_value) * got % modulus_value);
+  } else {
+    expect_equal("no inverse when a factor is shared", value, 0, (u128)(status + 1));
+  }
+  big_number_free(&number);
+  big_number_free(&modulus);
+  big_number_free(&inverse);
+}
+
+// The Jacobi symbol from its definition: the product of Legendre symbols of
+// bottom's prime factors, each by Euler's criterion.
+static int reference_jacobi(uint64_t top, uint64_t bottom) {
+  int symbol = 1;
+  uint64_t rest = bottom;
+  for (uint64_t prime = 3; rest > 1; prime += 2) {
+    if (prime * prime > rest)
+      prime = rest;
+    while (rest % prime == 0) {
+      rest /= prime;
+      u128 power = reference_power_mod(top, (prime - 1) / 2, prime);
+      symbol *= power == 0 ? 0 : power == 1 ? 1 : -1;
+    }
+  }
+  return symbol;
+}
+
+static void check_jacobi(uint64_t top, uint64_t bottom) {
+  big_number top_number, bottom_number;
+  big_number_init(&top_number);
+  big_number_init(&bottom_number);
+  big_number_set_u64(&top_number, top);
+  big_number_set_u64(&bottom_number, bottom);
+  expect_equal("jacobi", top, (u128)(reference_jacobi(top, bottom) + 2), (u128)(big_number_jacobi(&top_number, &bottom_number) + 2));
+  big_number_free(&top_number);
+  big_number_free(&bottom_number);
+}
+
+static void check_square_root_mod(uint64_t value, uint64_t prime) {
+  big_number number, modulus, root;
+  big_number_init(&number);
+  big_number_init(&modulus);
+  big_number_init(&root);
+  big_number_set_u64(&number, value);
+  big_number_set_u64(&modulus, prime);
+  int status = big_number_square_root_mod(&root, &number, &modulus);
+  u128 reduced = value % prime;
+  int is_square = reduced == 0 || reference_power_mod(reduced, (prime - 1) / 2, prime) == 1;
+  expect_equal("square root exists exactly for squares", value, (u128)(is_square ? 2 : 0), (u128)(status + 1));
+  if (is_square) {
+    u128 got = big_number_to_u64(&root);
+    expect_equal("square root squares back", value, reduced, got * got % prime);
+  }
+  big_number_free(&number);
+  big_number_free(&modulus);
+  big_number_free(&root);
+}
+
+static void check_ecpp_arithmetic(void) {
+  // every value against small moduli, and random ones
+  for (uint64_t modulus = 1; modulus < 400; modulus++)
+    for (uint64_t value = 0; value < modulus + 3; value++)
+      check_inverse(value, modulus);
+  for (uint64_t bottom = 1; bottom < 600; bottom += 2)
+    for (uint64_t top = 0; top < 300; top++)
+      check_jacobi(top, bottom);
+  // small primes, including ones with many factors of 2 in p − 1
+  static const uint64_t small_primes[] = {3, 5, 7, 11, 13, 17, 97, 193, 257, 769, 7681, 12289};
+  for (size_t index = 0; index < sizeof small_primes / sizeof *small_primes; index++) {
+    uint64_t limit = small_primes[index] < 2000 ? small_primes[index] + 2 : 2000;
+    for (uint64_t value = 0; value < limit; value++)
+      check_square_root_mod(value, small_primes[index]);
+  }
+  // large primes: 2^61 − 1, 998244353 = 119 · 2^23 + 1, and 2^64 − 59
+  static const uint64_t large_primes[] = {2305843009213693951ULL, 998244353ULL, 18446744073709551557ULL};
+  for (int round = 0; round < 3000; round++) {
+    uint64_t prime = large_primes[round % 3];
+    u128 root = random_u64() % prime;
+    check_square_root_mod((uint64_t)(root * root % prime), prime); // a square
+    check_square_root_mod(random_u64(), prime);                    // half of these aren't
+    check_inverse(random_value(128), prime);
+    check_inverse(random_value(128), random_u64() | 1);
+  }
+  for (int round = 0; round < 3000; round++) {
+    uint32_t bottom = ((uint32_t)random_u64() >> 12) | 1; // small enough to factor for the definition
+    check_jacobi(random_u64(), bottom);
+  }
+
+  // A composite modulus must end, and any root it gives must be a real root.
+  for (uint64_t modulus = 9; modulus < 2000; modulus += 2) {
+    for (uint64_t value = 0; value < 50; value++) {
+      big_number number, modulus_number, root;
+      big_number_init(&number);
+      big_number_init(&modulus_number);
+      big_number_init(&root);
+      big_number_set_u64(&number, value);
+      big_number_set_u64(&modulus_number, modulus);
+      if (big_number_square_root_mod(&root, &number, &modulus_number) == 1) {
+        uint64_t got = big_number_to_u64(&root);
+        expect_equal("a root modulo a composite is a real root", modulus, value % modulus, (u128)got * got % modulus);
+      }
+      big_number_free(&number);
+      big_number_free(&modulus_number);
+      big_number_free(&root);
+    }
+  }
+}
+
 int main(void) {
   check_block_cache();
+  check_ecpp_arithmetic();
   for (size_t first = 0; first < EDGE_VALUE_COUNT; first++) {
     u128 value = EDGE_VALUES[first];
     check_conversions(value);

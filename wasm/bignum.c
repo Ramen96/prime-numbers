@@ -794,3 +794,186 @@ int montgomery_power(montgomery_context *context, big_number *result, const big_
   big_number_free(&one);
   return ok;
 }
+
+// ── for ECPP: inverses, Jacobi symbols and square roots mod a number ──────
+
+// result = value⁻¹ mod modulus, by the extended Euclidean algorithm. The
+// coefficients of `value` alternate in sign, so only their sizes are stored,
+// with one sign flag. They never grow past the modulus.
+int big_number_inverse_mod(big_number *result, const big_number *value, const big_number *modulus) {
+  big_number remainder, next_remainder, coefficient, next_coefficient, quotient, step_remainder, product;
+  big_number *numbers[] = {&remainder, &next_remainder, &coefficient, &next_coefficient, &quotient, &step_remainder, &product};
+  for (size_t index = 0; index < sizeof numbers / sizeof *numbers; index++)
+    big_number_init(numbers[index]);
+  int status = 0;
+  // coefficient's sign. It starts as 0, and next_coefficient as +1; each step
+  // moves next_coefficient into coefficient and makes the new one opposite. So
+  // after the first step it's +, then −, and so on.
+  int coefficient_negative = 1;
+  if (!big_number_copy(&remainder, modulus) || !big_number_divide(NULL, &next_remainder, value, modulus) ||
+      !big_number_set_u64(&next_coefficient, 1))
+    goto done;
+  while (next_remainder.limb_count > 0) {
+    if (!big_number_divide(&quotient, &step_remainder, &remainder, &next_remainder) ||
+        !big_number_multiply(&product, &quotient, &next_coefficient) ||
+        !big_number_add(&product, &product, &coefficient))
+      goto done;
+    big_number swap = remainder;
+    remainder = next_remainder;
+    next_remainder = step_remainder;
+    step_remainder = swap;
+    swap = coefficient;
+    coefficient = next_coefficient;
+    next_coefficient = product;
+    product = swap;
+    coefficient_negative = !coefficient_negative;
+  }
+  if (big_number_compare_u64(modulus, 1) == 0) { // everything is 0 mod 1
+    status = big_number_set_u64(result, 0);
+    goto done;
+  }
+  if (big_number_compare_u64(&remainder, 1) != 0) {
+    status = -1;
+    goto done;
+  }
+  status = coefficient_negative ? big_number_subtract(result, modulus, &coefficient) : big_number_copy(result, &coefficient);
+done:
+  for (size_t index = 0; index < sizeof numbers / sizeof *numbers; index++)
+    big_number_free(numbers[index]);
+  return status;
+}
+
+// The Jacobi symbol by reciprocity, as for small numbers but on limbs: take out
+// factors of 2 from the top, swap, and reduce, like Euclid's algorithm.
+int big_number_jacobi(const big_number *top, const big_number *bottom) {
+  big_number a, n, reduced;
+  big_number_init(&a);
+  big_number_init(&n);
+  big_number_init(&reduced);
+  int symbol = -2;
+  int sign = 1;
+  if (!big_number_divide(NULL, &a, top, bottom) || !big_number_copy(&n, bottom))
+    goto done;
+  while (a.limb_count > 0) {
+    size_t zero_bits = 0;
+    while (!(a.limbs[zero_bits / LIMB_BITS] >> (zero_bits % LIMB_BITS) & 1))
+      zero_bits++;
+    if (!big_number_shift_right(&a, &a, zero_bits))
+      goto done;
+    uint32_t n_low = n.limbs[0];
+    if ((zero_bits & 1) && ((n_low & 7) == 3 || (n_low & 7) == 5))
+      sign = -sign; // (2 / n) is −1 for these
+    if ((a.limbs[0] & 3) == 3 && (n_low & 3) == 3)
+      sign = -sign; // reciprocity: both are 3 mod 4
+    if (!big_number_divide(NULL, &reduced, &n, &a) || !big_number_copy(&n, &a) || !big_number_copy(&a, &reduced))
+      goto done;
+  }
+  symbol = big_number_compare_u64(&n, 1) == 0 ? sign : 0;
+done:
+  big_number_free(&a);
+  big_number_free(&n);
+  big_number_free(&reduced);
+  return symbol;
+}
+
+// How many small numbers to try as a non-residue. Half of all numbers are one
+// for a prime, so a prime never gets near this: only a composite that's nearly
+// a square can, and then "none found" is the right answer for a prover to move on.
+#define NON_RESIDUE_TRIES 100000
+
+// Tonelli–Shanks. Write modulus − 1 = odd · 2^twos. With z a non-residue, keep
+//   t = value^odd   (its order divides 2^twos)
+//   r = value^((odd + 1) / 2)   (so r² = t · value)
+// and repeatedly multiply t by squares of powers of z^odd to halve t's order,
+// keeping r² = t · value, until t = 1 and so r² = value. Works in Montgomery form.
+int big_number_square_root_mod(big_number *result, const big_number *value, const big_number *modulus) {
+  montgomery_context context;
+  big_number odd_part, exponent, base, one, t, r, c, value_form, probe, adjustment;
+  big_number *numbers[] = {&odd_part, &exponent, &base, &one, &t, &r, &c, &value_form, &probe, &adjustment};
+  for (size_t index = 0; index < sizeof numbers / sizeof *numbers; index++)
+    big_number_init(numbers[index]);
+  int status = 0;
+  int context_ready = montgomery_init(&context, modulus);
+  if (!context_ready)
+    goto done;
+
+  if (!big_number_divide(NULL, &base, value, modulus))
+    goto done;
+  if (base.limb_count == 0) { // the root of 0 is 0
+    status = big_number_set_u64(result, 0);
+    goto done;
+  }
+  if (!big_number_copy(&odd_part, modulus) || !big_number_subtract_small(&odd_part, 1))
+    goto done;
+  size_t twos = 0;
+  while (!(odd_part.limbs[twos / LIMB_BITS] >> (twos % LIMB_BITS) & 1))
+    twos++;
+  if (!big_number_shift_right(&odd_part, &odd_part, twos))
+    goto done;
+
+  // the first small number whose symbol is −1
+  uint64_t non_residue = 2;
+  for (;; non_residue++) {
+    if (non_residue > NON_RESIDUE_TRIES) {
+      status = -1;
+      goto done;
+    }
+    if (!big_number_set_u64(&probe, non_residue))
+      goto done;
+    int symbol = big_number_jacobi(&probe, modulus);
+    if (symbol == -2)
+      goto done;
+    if (symbol == -1)
+      break;
+  }
+
+  if (!big_number_set_u64(&one, 1) || !montgomery_to_form(&context, &one, &one) ||
+      !montgomery_to_form(&context, &value_form, &base) ||
+      !montgomery_power(&context, &c, &probe, &odd_part) || !montgomery_to_form(&context, &c, &c) ||
+      !montgomery_power(&context, &t, &base, &odd_part) || !montgomery_to_form(&context, &t, &t) ||
+      !big_number_copy(&exponent, &odd_part) || !big_number_add_small(&exponent, 1) ||
+      !big_number_shift_right(&exponent, &exponent, 1) || !montgomery_power(&context, &r, &base, &exponent) ||
+      !montgomery_to_form(&context, &r, &r))
+    goto done;
+
+  size_t order_bits = twos;
+  while (big_number_compare(&t, &one) != 0) {
+    // the smallest i with t^(2^i) = 1. None below order_bits: no root (or a composite)
+    size_t smallest = 0;
+    if (!big_number_copy(&probe, &t))
+      goto done;
+    while (big_number_compare(&probe, &one) != 0) {
+      if (++smallest >= order_bits) {
+        status = -1;
+        goto done;
+      }
+      if (!montgomery_multiply(&context, &probe, &probe, &probe))
+        goto done;
+    }
+    if (!big_number_copy(&adjustment, &c))
+      goto done;
+    for (size_t round = smallest + 1; round < order_bits; round++)
+      if (!montgomery_multiply(&context, &adjustment, &adjustment, &adjustment))
+        goto done;
+    if (!montgomery_multiply(&context, &r, &r, &adjustment) ||
+        !montgomery_multiply(&context, &c, &adjustment, &adjustment) ||
+        !montgomery_multiply(&context, &t, &t, &c))
+      goto done;
+    order_bits = smallest;
+  }
+
+  // Proven by checking, whatever the modulus turned out to be.
+  if (!montgomery_multiply(&context, &probe, &r, &r))
+    goto done;
+  if (big_number_compare(&probe, &value_form) != 0) {
+    status = -1;
+    goto done;
+  }
+  status = montgomery_from_form(&context, result, &r);
+done:
+  if (context_ready)
+    montgomery_free(&context);
+  for (size_t index = 0; index < sizeof numbers / sizeof *numbers; index++)
+    big_number_free(numbers[index]);
+  return status;
+}

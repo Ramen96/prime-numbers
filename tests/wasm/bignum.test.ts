@@ -28,6 +28,9 @@ interface Harness {
   harness_shift_right(count: number, bits: number): number;
   harness_divide(dividendCount: number, divisorCount: number): number;
   harness_power_mod(baseCount: number, exponentCount: number, modulusCount: number): number;
+  harness_inverse_mod(valueCount: number, modulusCount: number): number;
+  harness_jacobi(topCount: number, bottomCount: number): number;
+  harness_square_root_mod(valueCount: number, modulusCount: number): number;
 }
 
 const { instance } = await WebAssembly.instantiate(readFileSync(".cache/bignum_harness.wasm"), {
@@ -61,6 +64,9 @@ const harness: Harness = {
   harness_divide: (dividendCount, divisorCount) => exports.harness_divide(dividendCount, divisorCount) >>> 0,
   harness_power_mod: (baseCount, exponentCount, modulusCount) =>
     exports.harness_power_mod(baseCount, exponentCount, modulusCount) >>> 0,
+  harness_inverse_mod: (valueCount, modulusCount) => exports.harness_inverse_mod(valueCount, modulusCount) >>> 0,
+  harness_jacobi: (topCount, bottomCount) => exports.harness_jacobi(topCount, bottomCount),
+  harness_square_root_mod: (valueCount, modulusCount) => exports.harness_square_root_mod(valueCount, modulusCount) >>> 0,
   memory: exports.memory,
 };
 
@@ -366,6 +372,85 @@ describe("bignum.c general arithmetic against BigInt, up to 8,192 bits", () => {
       assert.equal(readLimbs(harness.harness_output(), harness.harness_multiply(...writePair(first, second))), first * second);
       expectDivision(first * second + (first >> 1n), second);
       expectPowerMod(randomBig(1000), randomBig(2), second | 1n);
+    }
+  });
+});
+
+// ── for ECPP ──────────────────────────────────────────────────────────────
+
+function greatestCommonDivisor(first: bigint, second: bigint): bigint {
+  while (second > 0n) [first, second] = [second, first % second];
+  return first;
+}
+
+function referenceJacobi(top: bigint, bottom: bigint): number {
+  let result = 1;
+  let [a, n] = [top % bottom, bottom];
+  while (a !== 0n) {
+    while ((a & 1n) === 0n) {
+      a >>= 1n;
+      if (n % 8n === 3n || n % 8n === 5n) result = -result;
+    }
+    [a, n] = [n, a];
+    if (a % 4n === 3n && n % 4n === 3n) result = -result;
+    a %= n;
+  }
+  return n === 1n ? result : 0;
+}
+
+describe("bignum.c arithmetic for ECPP, against BigInt", () => {
+  it("inverts modulo any number, and refuses when a factor is shared", () => {
+    for (let round = 0; round < ROUNDS; round++) {
+      const modulus = (randomBig(round % 2 === 0 ? 4 : 40) || 1n) + 1n;
+      const value = randomBig(round % 2 === 0 ? 4 : 40);
+      const count = harness.harness_inverse_mod(...writePair(value, modulus));
+      if (greatestCommonDivisor(value % modulus, modulus) === 1n) {
+        assert.notEqual(count, FAILED, `${value} mod ${modulus}`);
+        const inverse = readLimbs(harness.harness_output(), count);
+        assert.ok(inverse < modulus);
+        assert.equal((inverse * value) % modulus, 1n, `${value} mod ${modulus}`);
+      } else {
+        assert.equal(count, FAILED, `${value} mod ${modulus}`);
+      }
+    }
+  });
+
+  it("agrees on Jacobi symbols, at any size", () => {
+    for (let round = 0; round < ROUNDS; round++) {
+      const bottom = randomBig(round % 2 === 0 ? 4 : 40) | 1n;
+      const top = randomBig(40);
+      assert.equal(harness.harness_jacobi(...writePair(top, bottom)), referenceJacobi(top, bottom), `${top} / ${bottom}`);
+    }
+  });
+
+  it("finds square roots modulo large primes, and none for non-residues", () => {
+    // 2^61 − 1, 2^521 − 1, 10^100 + 267, and a prime with many factors of 2 in p − 1
+    const primes = [2n ** 61n - 1n, 2n ** 521n - 1n, 10n ** 100n + 267n, 27n * 2n ** 59n + 1n, 2n ** 2203n - 1n];
+    for (const prime of primes) {
+      for (let round = 0; round < 40; round++) {
+        const square = randomBig(40) ** 2n % prime;
+        const count = harness.harness_square_root_mod(...writePair(square, prime));
+        assert.notEqual(count, FAILED, `root of ${square} mod ${prime}`);
+        const root = readLimbs(harness.harness_output(), count);
+        assert.equal((root * root) % prime, square, `root of ${square} mod ${prime}`);
+
+        const other = randomBig(40) % prime;
+        if (referenceJacobi(other, prime) === -1) {
+          assert.equal(harness.harness_square_root_mod(...writePair(other, prime)), FAILED, `${other} isn't a square`);
+        }
+      }
+    }
+  });
+
+  it("ends modulo composites, and only ever returns a real root", () => {
+    for (let round = 0; round < 500; round++) {
+      const modulus = (randomBig(4) | 1n) + 8n;
+      const value = randomBig(4);
+      const count = harness.harness_square_root_mod(...writePair(value, modulus));
+      if (count !== FAILED) {
+        const root = readLimbs(harness.harness_output(), count);
+        assert.equal((root * root) % modulus, value % modulus, `${value} mod ${modulus}`);
+      }
     }
   });
 });
