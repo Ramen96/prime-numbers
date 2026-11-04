@@ -16,6 +16,7 @@ set -e
 mkdir -p .cache
 warnings="-std=c11 -Wall -Wextra"
 sources="wasm/sieve.c wasm/bignum.c wasm/primality.c -lm"
+prover_sources="wasm/ecpp_prover.c wasm/ecpp.c wasm/classpoly.c wasm/primality.c wasm/bignum.c -lm"
 threaded="-DSIEVE_THREADS -DBASE_PRIME_CHECKPOINT_INTERVAL=7 -pthread"
 
 case "$1" in
@@ -35,6 +36,8 @@ fast)
   .cache/ecpp_test
   cc -O2 $warnings -o .cache/classpoly_test tests/native/classpoly_test.c wasm/classpoly.c wasm/bignum.c -lm
   .cache/classpoly_test
+  cc -O2 $warnings -o .cache/ecpp_prover_test tests/native/ecpp_prover_test.c $prover_sources
+  .cache/ecpp_prover_test
   ;;
 slow)
   cc -O2 $warnings -DSIEVE_TEST_HOOKS -o .cache/sieve_slow_test tests/native/sieve_slow_test.c $sources
@@ -58,6 +61,8 @@ asan)
   .cache/ecpp_test_asan
   cc $sanitizers $warnings -o .cache/classpoly_test_asan tests/native/classpoly_test.c wasm/classpoly.c wasm/bignum.c -lm
   .cache/classpoly_test_asan
+  cc $sanitizers $warnings -o .cache/ecpp_prover_test_asan tests/native/ecpp_prover_test.c $prover_sources
+  .cache/ecpp_prover_test_asan
   cc $sanitizers $warnings -DSIEVE_TEST_HOOKS $threaded -o .cache/sieve_test_asan tests/native/sieve_test.c $sources
   SIEVE_TEST_HELPERS=8 .cache/sieve_test_asan
   ;;

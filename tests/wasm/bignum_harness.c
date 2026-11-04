@@ -12,6 +12,7 @@
 #include "../../wasm/bignum.h"
 #include "../../wasm/classpoly.h"
 #include "../../wasm/ecpp.h"
+#include "../../wasm/ecpp_prover.h"
 #include "../../wasm/primality.h"
 
 #define MAX_TEST_LIMBS 4096
@@ -420,4 +421,40 @@ int harness_class_root(size_t n_count) {
   first_output_count = store(&root);
   big_number_free(&n);
   return status;
+}
+
+// ── the prover ────────────────────────────────────────────────────────────
+
+static ecpp_prover prover;
+static int prover_ready = 0;
+
+// Proves the first input prime, with a starting effort limit (0 for the default).
+// Returns the step count, or FAILED if memory ran out.
+size_t harness_prove(size_t n_count, size_t effort_limit) {
+  if (prover_ready && prover.initial_effort_limit != (effort_limit ? effort_limit : prover.initial_effort_limit)) {
+    ecpp_prover_free(&prover);
+    prover_ready = 0;
+  }
+  if (!prover_ready && !ecpp_prover_init(&prover, effort_limit))
+    return FAILED;
+  prover_ready = 1;
+  big_number n = load(first_input, n_count);
+  int ok = ecpp_prover_reset(&prover, &n);
+  big_number_free(&n);
+  if (!ok)
+    return FAILED;
+  ecpp_proof_status status;
+  while ((status = ecpp_prover_run(&prover, 1u << 20)) == ECPP_PROOF_MORE)
+    ;
+  return status == ECPP_PROOF_DONE ? ecpp_prover_step_count(&prover) : FAILED;
+}
+
+// One value of one step (0 number, 1 a, 2 b, 3 x, 4 y, 5 q), into the output.
+size_t harness_proof_value(size_t step_index, size_t field) {
+  const ecpp_certificate_step *step = ecpp_prover_step(&prover, step_index);
+  const big_number *values[] = {&step->number, &step->curve_a, &step->curve_b, &step->point_x, &step->point_y, &step->order_prime};
+  big_number copy;
+  big_number_init(&copy);
+  big_number_copy(&copy, values[field]);
+  return store(&copy);
 }
