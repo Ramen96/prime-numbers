@@ -5,6 +5,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
+import { isPrime as isProbablePrime } from "../support/primality.ts";
 
 interface Harness {
   memory: WebAssembly.Memory;
@@ -13,6 +14,9 @@ interface Harness {
   harness_class_polynomial(discriminant: number): number;
   harness_class_coefficient(index: number): number;
   harness_class_coefficient_is_negative(index: number): number;
+  harness_class_root(n: number): number;
+  harness_first_input(): number;
+  harness_first_output_count(): number;
 }
 
 const { instance } = await WebAssembly.instantiate(readFileSync(".cache/bignum_harness.wasm"), {
@@ -44,6 +48,16 @@ function solvesTheEquation(p: bigint, size: bigint): boolean {
   return false;
 }
 
+function powerMod(base: bigint, exponent: bigint, modulus: bigint): bigint {
+  let result = 1n;
+  base = ((base % modulus) + modulus) % modulus;
+  for (; exponent > 0n; exponent >>= 1n) {
+    if (exponent & 1n) result = (result * base) % modulus;
+    base = (base * base) % modulus;
+  }
+  return result;
+}
+
 function isPrime(value: bigint): boolean {
   if (value < 2n) return false;
   for (let divisor = 2n; divisor * divisor <= value; divisor++) if (value % divisor === 0n) return false;
@@ -58,7 +72,8 @@ describe("classpoly.c in Wasm", () => {
   });
 
   it("splits completely mod primes p with 4p = t² + |D|v² (t above 0), at degrees up to 11", () => {
-    for (const [discriminant, degree] of [[-71, 7], [-199, 9], [-1555, 4], [-15667, 11]] as const) {
+    const degrees: [number, number][] = [[-71, 7], [-199, 9], [-1555, 4], [-15667, 11]];
+    for (const [discriminant, degree] of degrees) {
       const size = BigInt(-discriminant);
       const coefficients = classPolynomial(discriminant);
       assert.equal(coefficients.length, degree);
@@ -79,5 +94,70 @@ describe("classpoly.c in Wasm", () => {
 
   it("refuses an invalid discriminant", () => {
     assert.equal(harness.harness_class_polynomial(-5) >>> 0, 0xffffffff);
+  });
+});
+
+function write(pointer: number, value: bigint): number {
+  const limbs: number[] = [];
+  for (let rest = value; rest > 0n; rest >>= 32n) limbs.push(Number(rest & 0xffffffffn));
+  new Uint32Array(harness.memory.buffer, pointer >>> 0, limbs.length).set(limbs);
+  return limbs.length;
+}
+
+/** A root of the last polynomial built, mod n, or null. */
+function rootMod(n: bigint): bigint | null {
+  const status = harness.harness_class_root(write(harness.harness_first_input(), n));
+  if (status !== 1) return null;
+  const count = harness.harness_first_output_count() >>> 0;
+  const limbs = new Uint32Array(harness.memory.buffer, harness.harness_output() >>> 0, count);
+  let root = 0n;
+  for (let limb = count - 1; limb >= 0; limb--) root = (root << 32n) | BigInt(limbs[limb]);
+  return root;
+}
+
+function evaluateMod(coefficients: bigint[], value: bigint, n: bigint): bigint {
+  let sum = 1n;
+  for (let index = coefficients.length - 1; index >= 0; index--) sum = (sum * value + coefficients[index]) % n;
+  return ((sum % n) + n) % n;
+}
+
+describe("classpoly.c roots mod large primes", () => {
+  it("finds a root mod primes 4N = t² + |D|v² of 100 to 300 digits (degrees up to 35), checked in BigInt", () => {
+    const sizesByDiscriminant: [number, bigint[]][] = [
+      [-23, [100n, 300n]],
+      [-71, [100n, 300n]],
+      [-1555, [100n, 300n]],
+      [-15667, [100n, 200n]],
+      [-65707, [100n]],
+    ];
+    for (const [discriminant, sizes] of sizesByDiscriminant) {
+      const coefficients = classPolynomial(discriminant);
+      for (const digits of sizes) {
+        let found = 0;
+        // v = 1 gives an even N for some D (|D| ≡ 7 mod 8), so try v = 2 as well
+        for (let step = 0n; found < 2; step++) {
+          const t = 10n ** (digits / 2n) + step / 2n;
+          const v = 1n + (step % 2n);
+          const fourN = t * t + BigInt(-discriminant) * v * v;
+          if (fourN % 4n !== 0n || (fourN / 4n) % 2n === 0n || !isProbablePrime(fourN / 4n)) continue;
+          const n = fourN / 4n;
+          found++;
+          const root = rootMod(n);
+          assert.notEqual(root, null, `a root mod a ${digits}-digit prime, D = ${discriminant}`);
+          assert.ok(root! < n);
+          assert.equal(evaluateMod(coefficients, root!, n), 0n, `H_D(root) mod a ${digits}-digit prime, D = ${discriminant}`);
+        }
+      }
+    }
+  });
+
+  it("gives only real roots mod a prime that D isn't a square of", () => {
+    // there H_D can still have roots (with an odd degree it always has one), but
+    // ECPP never asks there: only primes that D is a square of have its orders
+    const coefficients = classPolynomial(-71);
+    let n = 10n ** 100n + 1n;
+    while (!isProbablePrime(n) || powerMod(-71n, (n - 1n) / 2n, n) !== n - 1n) n += 2n;
+    const root = rootMod(n);
+    if (root !== null) assert.equal(evaluateMod(coefficients, root, n), 0n);
   });
 });

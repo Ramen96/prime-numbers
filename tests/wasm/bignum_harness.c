@@ -408,3 +408,14 @@ size_t harness_class_coefficient(size_t index) {
 }
 
 int harness_class_coefficient_is_negative(size_t index) { return built_polynomial.negative[index]; }
+
+// A root of the last polynomial built, mod n (first input), into the output.
+// Returns the status (1, -1 or 0); the root's limb count is harness_first_output_count.
+int harness_class_root(size_t n_count) {
+  big_number n = load(first_input, n_count), root;
+  big_number_init(&root);
+  int status = class_polynomial_root(&root, &built_polynomial, &n);
+  first_output_count = store(&root);
+  big_number_free(&n);
+  return status;
+}

@@ -526,3 +526,334 @@ int class_polynomial_build(class_polynomial *polynomial, int64_t discriminant) {
 int class_polynomial_build_from(class_polynomial *polynomial, int64_t discriminant, size_t start_bits, size_t *out_bits) {
   return build_polynomial(polynomial, discriminant, start_bits, out_bits);
 }
+
+// ── a root mod N ──────────────────────────────────────────────────────────
+//
+// When f splits into distinct linear factors mod a prime N, each root α has
+// (α + r)^((N−1)/2) = ±1 (or 0), a coin toss for each α, so gcd with
+// (x + r)^((N−1)/2) − 1 splits f, until a linear factor x − α is left (Cantor and
+// Zassenhaus). ECPP only asks when that's so, which saves taking gcd(f, xᴺ − x)
+// first; if it isn't so, the tries run out, or the root found fails its check. Coefficients are kept in
+// Montgomery form, so the many multiplications mod N need no long division.
+
+// Tries of r before giving up. Each one splits a part with two or more roots with
+// chance at least 1/2, so for a prime N the chance of running out is below 2^−64
+// even for the largest degrees, and running out only means this D isn't used.
+#define SPLITTING_TRIES 128
+
+// A polynomial mod N, lowest coefficient first, in Montgomery form. length 0 is
+// the zero polynomial; otherwise the top coefficient isn't zero.
+typedef struct {
+  big_number *coefficients;
+  size_t length;
+  size_t capacity;
+} residue_polynomial;
+
+// What every polynomial operation mod N needs.
+typedef struct {
+  montgomery_context montgomery;
+  const big_number *n;
+  big_number one; // 1, in Montgomery form
+  big_number product; // working space for one multiplication
+} residue_field;
+
+static void residue_init(residue_polynomial *polynomial) {
+  polynomial->coefficients = NULL;
+  polynomial->length = 0;
+  polynomial->capacity = 0;
+}
+
+static void residue_free(residue_polynomial *polynomial) {
+  for (size_t index = 0; index < polynomial->capacity; index++)
+    big_number_free(&polynomial->coefficients[index]);
+  free(polynomial->coefficients);
+  residue_init(polynomial);
+}
+
+// Makes room for `length` coefficients, and sets the length to it. New ones are zero.
+static int residue_resize(residue_polynomial *polynomial, size_t length) {
+  if (length > polynomial->capacity) {
+    big_number *grown = realloc(polynomial->coefficients, length * sizeof *grown);
+    if (grown == NULL)
+      return 0;
+    for (size_t index = polynomial->capacity; index < length; index++)
+      big_number_init(&grown[index]);
+    polynomial->coefficients = grown;
+    polynomial->capacity = length;
+  }
+  for (size_t index = polynomial->length; index < length; index++)
+    polynomial->coefficients[index].limb_count = 0;
+  polynomial->length = length;
+  return 1;
+}
+
+static void residue_normalize(residue_polynomial *polynomial) {
+  while (polynomial->length > 0 && polynomial->coefficients[polynomial->length - 1].limb_count == 0)
+    polynomial->length--;
+}
+
+static int residue_copy(residue_polynomial *result, const residue_polynomial *polynomial) {
+  if (result == polynomial)
+    return 1;
+  if (!residue_resize(result, polynomial->length))
+    return 0;
+  for (size_t index = 0; index < polynomial->length; index++)
+    if (!big_number_copy(&result->coefficients[index], &polynomial->coefficients[index]))
+      return 0;
+  return 1;
+}
+
+static void residue_swap(residue_polynomial *first, residue_polynomial *second) {
+  residue_polynomial held = *first;
+  *first = *second;
+  *second = held;
+}
+
+// target = target − factor · value, all mod N.
+static int subtract_product(residue_field *field, big_number *target, const big_number *factor, const big_number *value) {
+  return montgomery_multiply(&field->montgomery, &field->product, factor, value) &&
+         big_number_subtract_mod(target, target, &field->product, field->n);
+}
+
+// result = first · second. result may be either input. A square (the same
+// polynomial twice) needs only about half the products: each cross term twice.
+static int residue_multiply(residue_field *field, residue_polynomial *result, const residue_polynomial *first,
+                            const residue_polynomial *second) {
+  residue_polynomial product;
+  residue_init(&product);
+  int ok = 1;
+  int square = first == second;
+  if (first->length > 0 && second->length > 0) {
+    ok = residue_resize(&product, first->length + second->length - 1);
+    for (size_t i = 0; ok && i < first->length; i++) {
+      for (size_t j = square ? i : 0; ok && j < second->length; j++) {
+        big_number *target = &product.coefficients[i + j];
+        ok = montgomery_multiply(&field->montgomery, &field->product, &first->coefficients[i], &second->coefficients[j]) &&
+             big_number_add_mod(target, target, &field->product, field->n) &&
+             (!square || j == i || big_number_add_mod(target, target, &field->product, field->n));
+      }
+    }
+  }
+  if (ok) {
+    residue_normalize(&product);
+    residue_swap(result, &product);
+  }
+  residue_free(&product);
+  return ok;
+}
+
+// remainder = remainder mod divisor, for a monic divisor of degree at least 1, and
+// quotient (may be NULL) = the quotient. They must be different polynomials.
+static int residue_divide_monic(residue_field *field, residue_polynomial *quotient, residue_polynomial *remainder,
+                                const residue_polynomial *divisor) {
+  size_t degree = divisor->length - 1;
+  if (quotient != NULL && !residue_resize(quotient, remainder->length > degree ? remainder->length - degree : 0))
+    return 0;
+  for (size_t top = remainder->length; top-- > degree;) {
+    big_number *leading = &remainder->coefficients[top];
+    if (leading->limb_count == 0)
+      continue;
+    if (quotient != NULL && !big_number_copy(&quotient->coefficients[top - degree], leading))
+      return 0;
+    for (size_t index = 0; index < degree; index++)
+      if (!subtract_product(field, &remainder->coefficients[top - degree + index], leading, &divisor->coefficients[index]))
+        return 0;
+    leading->limb_count = 0;
+  }
+  residue_normalize(remainder);
+  if (quotient != NULL)
+    residue_normalize(quotient);
+  return 1;
+}
+
+// Divides by the top coefficient. Returns 1, -1 if it has no inverse mod N (so N
+// is composite), or 0 if memory runs out. polynomial isn't zero.
+static int residue_make_monic(residue_field *field, residue_polynomial *polynomial) {
+  big_number ordinary, inverse;
+  big_number_init(&ordinary);
+  big_number_init(&inverse);
+  int result = 0;
+  if (montgomery_from_form(&field->montgomery, &ordinary, &polynomial->coefficients[polynomial->length - 1])) {
+    result = big_number_inverse_mod(&inverse, &ordinary, field->n);
+    if (result == 1 && !montgomery_to_form(&field->montgomery, &inverse, &inverse))
+      result = 0;
+    for (size_t index = 0; result == 1 && index < polynomial->length; index++)
+      if (!montgomery_multiply(&field->montgomery, &polynomial->coefficients[index], &polynomial->coefficients[index], &inverse))
+        result = 0;
+  }
+  big_number_free(&ordinary);
+  big_number_free(&inverse);
+  return result;
+}
+
+// result = the monic gcd of first and second, which aren't both zero. Returns 1,
+// -1 if a top coefficient had no inverse (N is composite), or 0 if memory runs out.
+static int residue_gcd(residue_field *field, residue_polynomial *result, const residue_polynomial *first,
+                       const residue_polynomial *second) {
+  residue_polynomial larger, smaller;
+  residue_init(&larger);
+  residue_init(&smaller);
+  int status = residue_copy(&larger, first) && residue_copy(&smaller, second);
+  while (status == 1 && smaller.length > 0) {
+    status = residue_make_monic(field, &smaller);
+    if (status == 1 && smaller.length == 1) {
+      // a nonzero constant: the gcd is 1
+      residue_swap(&larger, &smaller);
+      smaller.length = 0;
+      break;
+    }
+    if (status == 1)
+      status = residue_divide_monic(field, NULL, &larger, &smaller);
+    if (status == 1)
+      residue_swap(&larger, &smaller);
+  }
+  if (status == 1)
+    status = residue_make_monic(field, &larger);
+  if (status == 1)
+    residue_swap(result, &larger);
+  residue_free(&larger);
+  residue_free(&smaller);
+  return status;
+}
+
+// result = (x + shift)^exponent mod modulus, for a monic modulus of degree at least 1.
+// shift is in Montgomery form; zero gives xᵉ.
+static int residue_power_of_linear(residue_field *field, residue_polynomial *result, const big_number *shift,
+                                   const big_number *exponent, const residue_polynomial *modulus) {
+  residue_polynomial power, shifted;
+  residue_init(&power);
+  residue_init(&shifted);
+  int ok = residue_resize(&power, 1) && big_number_copy(&power.coefficients[0], &field->one);
+  for (size_t bit = big_number_bit_length(exponent); ok && bit-- > 0;) {
+    ok = residue_multiply(field, &power, &power, &power) && residue_divide_monic(field, NULL, &power, modulus);
+    if (ok && (exponent->limbs[bit / 32] >> (bit % 32) & 1)) {
+      // power · (x + shift): every coefficient moves up one, plus shift times itself
+      ok = residue_resize(&shifted, power.length + 1);
+      for (size_t index = 0; ok && index < shifted.length; index++) {
+        ok = index > 0 ? big_number_copy(&shifted.coefficients[index], &power.coefficients[index - 1])
+                       : (shifted.coefficients[index].limb_count = 0, 1);
+        if (ok && index < power.length && shift->limb_count > 0)
+          ok = montgomery_multiply(&field->montgomery, &field->product, &power.coefficients[index], shift) &&
+               big_number_add_mod(&shifted.coefficients[index], &shifted.coefficients[index], &field->product, field->n);
+      }
+      if (ok) {
+        residue_normalize(&shifted);
+        residue_swap(&power, &shifted);
+        ok = residue_divide_monic(field, NULL, &power, modulus);
+      }
+    }
+  }
+  if (ok)
+    residue_swap(result, &power);
+  residue_free(&power);
+  residue_free(&shifted);
+  return ok;
+}
+
+// The class polynomial mod N: monic, in Montgomery form.
+static int reduce_polynomial(residue_field *field, residue_polynomial *result, const class_polynomial *polynomial) {
+  if (!residue_resize(result, polynomial->degree + 1) || !big_number_copy(&result->coefficients[polynomial->degree], &field->one))
+    return 0;
+  big_number zero;
+  big_number_init(&zero);
+  int ok = 1;
+  for (size_t index = 0; ok && index < polynomial->degree; index++) {
+    big_number *coefficient = &result->coefficients[index];
+    ok = montgomery_to_form(&field->montgomery, coefficient, &polynomial->magnitudes[index]);
+    if (ok && polynomial->negative[index])
+      ok = big_number_subtract_mod(coefficient, &zero, coefficient, field->n);
+  }
+  big_number_free(&zero);
+  return ok;
+}
+
+// Whether f(value) = 0 mod N, by Horner's rule, all in Montgomery form. -1 if
+// memory runs out.
+static int is_a_root(residue_field *field, const residue_polynomial *f, const big_number *value) {
+  big_number sum;
+  big_number_init(&sum);
+  int ok = 1;
+  for (size_t index = f->length; ok && index-- > 0;)
+    ok = montgomery_multiply(&field->montgomery, &sum, &sum, value) &&
+         big_number_add_mod(&sum, &sum, &f->coefficients[index], field->n);
+  int result = ok ? sum.limb_count == 0 : -1;
+  big_number_free(&sum);
+  return result;
+}
+
+int class_polynomial_root(big_number *root, const class_polynomial *polynomial, const big_number *n) {
+  if (!big_number_is_odd(n) || big_number_compare_u64(n, 3) < 0 || polynomial->degree == 0)
+    return -1;
+  residue_field field;
+  field.n = n;
+  big_number_init(&field.one);
+  big_number_init(&field.product);
+  if (!montgomery_init(&field.montgomery, n)) {
+    big_number_free(&field.one);
+    big_number_free(&field.product);
+    return 0;
+  }
+  residue_polynomial f, part, power, factor, quotient;
+  residue_polynomial *polynomials[] = {&f, &part, &power, &factor, &quotient};
+  for (size_t index = 0; index < 5; index++)
+    residue_init(polynomials[index]);
+  big_number shift, half, candidate, zero;
+  big_number *numbers[] = {&shift, &half, &candidate, &zero};
+  for (size_t index = 0; index < 4; index++)
+    big_number_init(numbers[index]);
+
+  int status = 0;
+  if (!big_number_set_u64(&shift, 1) || !montgomery_to_form(&field.montgomery, &field.one, &shift) ||
+      !reduce_polynomial(&field, &f, polynomial))
+    goto done;
+
+  // split f until it's linear
+  if (!residue_copy(&part, &f) || !big_number_copy(&half, n) || !big_number_shift_right(&half, &half, 1))
+    goto done;
+  status = 1;
+  for (uint64_t attempt = 1; status == 1 && part.length > 2 && attempt <= SPLITTING_TRIES; attempt++) {
+    if (!big_number_set_u64(&shift, attempt) || !montgomery_to_form(&field.montgomery, &shift, &shift) ||
+        !residue_power_of_linear(&field, &power, &shift, &half, &part) || !residue_resize(&power, power.length > 1 ? power.length : 1) ||
+        !big_number_subtract_mod(&power.coefficients[0], &power.coefficients[0], &field.one, n)) {
+      status = 0;
+      break;
+    }
+    residue_normalize(&power);
+    if (power.length == 0)
+      continue; // every root gave 1: no split this time
+    status = residue_gcd(&field, &factor, &part, &power);
+    if (status != 1 || factor.length < 2 || factor.length >= part.length)
+      continue;
+    // keep the smaller of factor and part / factor
+    if (!residue_copy(&power, &part) || !residue_divide_monic(&field, &quotient, &power, &factor)) {
+      status = 0;
+      break;
+    }
+    residue_swap(&part, factor.length <= quotient.length ? &factor : &quotient);
+  }
+  if (status != 1)
+    goto done;
+  status = -1;
+  if (part.length != 2)
+    goto done;
+
+  // part = x + c, so the root is −c; check it against f itself
+  if (!big_number_subtract_mod(&candidate, &zero, &part.coefficients[0], n)) {
+    status = 0;
+    goto done;
+  }
+  int holds = is_a_root(&field, &f, &candidate);
+  if (holds < 0 || (holds == 1 && !montgomery_from_form(&field.montgomery, root, &candidate)))
+    status = 0;
+  else
+    status = holds == 1 ? 1 : -1;
+done:
+  for (size_t index = 0; index < 5; index++)
+    residue_free(polynomials[index]);
+  for (size_t index = 0; index < 4; index++)
+    big_number_free(numbers[index]);
+  big_number_free(&field.one);
+  big_number_free(&field.product);
+  montgomery_free(&field.montgomery);
+  return status;
+}

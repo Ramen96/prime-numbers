@@ -54,4 +54,11 @@ int class_polynomial_build_from(class_polynomial *polynomial, int64_t discrimina
 
 void class_polynomial_free(class_polynomial *polynomial);
 
+// A root of the polynomial mod an odd n > 2, into `root`, for when it splits into
+// distinct linear factors mod n. H_D does that mod a prime n with 4n = t² + |D|v²,
+// which is the only time ECPP asks. Any other n is safe: it ends, and any root it
+// returns is still checked. Returns 1 with a root that's been checked against the
+// polynomial, -1 if none was found, or 0 if memory runs out.
+int class_polynomial_root(big_number *root, const class_polynomial *polynomial, const big_number *n);
+
 #endif

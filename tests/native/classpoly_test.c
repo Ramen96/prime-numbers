@@ -240,6 +240,63 @@ static void check_doubling(int64_t d) {
   class_polynomial_free(&doubled);
 }
 
+// ── a root mod N ──────────────────────────────────────────────────────────
+
+// H(j) mod n, for n below 2^31, from the polynomial's coefficients.
+static int64_t evaluate_mod(const class_polynomial *polynomial, int64_t j, int64_t n) {
+  int64_t value = 1;
+  for (size_t index = polynomial->degree; index-- > 0;) {
+    int64_t coefficient = (int64_t)big_number_mod_small(&polynomial->magnitudes[index], (uint64_t)n);
+    if (polynomial->negative[index] && coefficient != 0)
+      coefficient = n - coefficient;
+    value = (value * j + coefficient) % n;
+  }
+  return value;
+}
+
+static void set_small(big_number *number, int64_t value) { big_number_set_u64(number, (uint64_t)value); }
+
+// Every odd p in a range: any root it gives is one, and a prime where H_D has as
+// many distinct roots as its degree (by brute force) always gets one. Composites:
+// it ends, and any root it gives is one.
+static void check_roots(int64_t d) {
+  class_polynomial polynomial;
+  expect(class_polynomial_build(&polynomial, d) == 1, "builds", d, 0);
+  big_number n, root;
+  big_number_init(&n);
+  big_number_init(&root);
+  for (int64_t p = 3; p < 1500; p += 2) {
+    int prime = is_small_prime(p);
+    int64_t roots = 0;
+    if (prime)
+      for (int64_t j = 0; j < p; j++)
+        roots += evaluate_mod(&polynomial, j, p) == 0;
+    set_small(&n, p);
+    int status = class_polynomial_root(&root, &polynomial, &n);
+    expect(status != 0, "never runs out of memory here", d, p);
+    if (status == 1)
+      expect(evaluate_mod(&polynomial, (int64_t)big_number_to_u64(&root), p) == 0 && big_number_compare_u64(&root, (uint64_t)p) < 0,
+             "a root is a root", d, p);
+    if (prime && roots == (int64_t)polynomial.degree)
+      expect(status == 1, "a prime where it splits completely has a root found", d, p);
+  }
+  // larger composites, including squares and products of primes it splits for
+  static const int64_t composites[] = {1009 * 1013, 3917 * 3919, 1031 * 1031, 9 * 1009, 3 * 5 * 7 * 11 * 13 * 17};
+  for (size_t index = 0; index < sizeof composites / sizeof *composites; index++) {
+    set_small(&n, composites[index]);
+    int status = class_polynomial_root(&root, &polynomial, &n);
+    expect(status != 0, "a composite ends", d, composites[index]);
+    if (status == 1)
+      expect(evaluate_mod(&polynomial, (int64_t)big_number_to_u64(&root), composites[index]) == 0, "a composite's root is a root", d,
+             composites[index]);
+  }
+  set_small(&n, 1000);
+  expect(class_polynomial_root(&root, &polynomial, &n) == -1, "an even n is refused", d, 1000);
+  big_number_free(&n);
+  big_number_free(&root);
+  class_polynomial_free(&polynomial);
+}
+
 int main(void) {
   check_class_numbers();
   check_known_polynomials();
@@ -248,6 +305,9 @@ int main(void) {
     check_against_counts(discriminants[index], 1009, 6);
   for (size_t index = 0; index < 9; index++)
     check_doubling(discriminants[index]);
+  static const int64_t root_discriminants[] = {-3, -4, -7, -163, -15, -23, -71, -199, -1555, -5923, -15667};
+  for (size_t index = 0; index < sizeof root_discriminants / sizeof *root_discriminants; index++)
+    check_roots(root_discriminants[index]);
   printf("native classpoly tests: %d checks, %d failed\n", checks_run, checks_failed);
   return checks_failed > 0;
 }
