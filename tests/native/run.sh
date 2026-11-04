@@ -31,7 +31,7 @@ fast)
   .cache/bignum_test
   cc -O2 $warnings -o .cache/primality_test tests/native/primality_test.c wasm/primality.c wasm/bignum.c -lm
   .cache/primality_test
-  cc -O2 $warnings -o .cache/ecpp_test tests/native/ecpp_test.c wasm/ecpp.c wasm/bignum.c -lm
+  cc -O2 $warnings -o .cache/ecpp_test tests/native/ecpp_test.c wasm/ecpp.c wasm/classpoly.c wasm/bignum.c -lm
   .cache/ecpp_test
   cc -O2 $warnings -o .cache/classpoly_test tests/native/classpoly_test.c wasm/classpoly.c wasm/bignum.c -lm
   .cache/classpoly_test
@@ -54,7 +54,7 @@ asan)
   .cache/bignum_test_asan
   cc $sanitizers $warnings -o .cache/primality_test_asan tests/native/primality_test.c wasm/primality.c wasm/bignum.c -lm
   .cache/primality_test_asan
-  cc $sanitizers $warnings -o .cache/ecpp_test_asan tests/native/ecpp_test.c wasm/ecpp.c wasm/bignum.c -lm
+  cc $sanitizers $warnings -o .cache/ecpp_test_asan tests/native/ecpp_test.c wasm/ecpp.c wasm/classpoly.c wasm/bignum.c -lm
   .cache/ecpp_test_asan
   cc $sanitizers $warnings -o .cache/classpoly_test_asan tests/native/classpoly_test.c wasm/classpoly.c wasm/bignum.c -lm
   .cache/classpoly_test_asan

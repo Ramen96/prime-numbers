@@ -28,6 +28,7 @@ interface Harness {
   harness_ecpp_order(index: number): number;
   harness_ecpp_curve(n: number, discriminant: number, order: number, q: number): number;
   harness_ecpp_curve_value(index: number): number;
+  harness_class_polynomial(discriminant: number): number;
 }
 
 const { instance } = await WebAssembly.instantiate(readFileSync(".cache/bignum_harness.wasm"), {
@@ -136,7 +137,8 @@ describe("ecpp.c at large sizes", () => {
 
 // ── curves with a known order ─────────────────────────────────────────────
 
-const DISCRIMINANTS = [-3, -4, -7, -8, -11, -19, -43, -67, -163];
+// Every D of class number 1, then some above 1, up to 11.
+const DISCRIMINANTS = [-3, -4, -7, -8, -11, -19, -43, -67, -163, -15, -20, -23, -24, -31, -35, -40, -71, -1555, -15667];
 const SMALL_PRIMES = [2n, 3n, 5n, 7n, 11n, 13n, 17n, 19n, 23n, 29n, 31n, 37n, 41n, 43n, 47n, 53n, 59n, 61n, 67n, 71n, 73n, 79n, 83n, 89n, 97n];
 const NOT_FOUND = 0xffffffff;
 
@@ -147,6 +149,8 @@ function ordersFor(n: bigint, discriminant: number): bigint[] {
 }
 
 function curveFor(n: bigint, discriminant: number, order: bigint, q: bigint) {
+  // D = −3 and −4 need no class polynomial; for any other D the curve's j is a root of H_D
+  if (discriminant < -4) harness.harness_class_polynomial(discriminant);
   const status = harness.harness_ecpp_curve(
     write(harness.harness_first_input(), n),
     discriminant,
@@ -192,7 +196,33 @@ describe("ecpp.c curves with a known order", () => {
       }
     }
     assert.ok(stepsChecked > 20, `only ${stepsChecked} steps`);
-    assert.deepEqual([...seenDiscriminants].sort((a, b) => a - b), [...DISCRIMINANTS].sort((a, b) => a - b), "every D was used");
+    // a D of class number h has orders for only about 1 in 2h primes, so the larger
+    // ones aren't all certain to come up in 180 primes
+    for (const discriminant of DISCRIMINANTS.slice(0, 9)) assert.ok(seenDiscriminants.has(discriminant), `D = ${discriminant} was used`);
+    const largerUsed = DISCRIMINANTS.slice(9).filter((discriminant) => seenDiscriminants.has(discriminant));
+    assert.ok(largerUsed.length >= 6, `only ${largerUsed.join(", ")} of class number above 1 were used`);
+  });
+
+  it("reaches every twist for D = −3 and −4, even where small values miss some", () => {
+    // mod this prime, no y² = x³ + b with b from 1 to 64 has the first D = −3 order
+    // (2, 3 and 11 are sixth powers), so trying small b alone missed it
+    const missed = curveFor(700010000000000000000000000017n, -3, 700010000000001518696923673857n, 27928136025116726647n);
+    assert.notEqual(missed, null);
+    assert.equal(stepProblem(missed!), null);
+    // and every usable order of 40 primes, for both families
+    for (let n = 10n ** 40n, prime = 0; prime < 40; prime++) {
+      n = nextPrimeAfter(n);
+      for (const discriminant of [-3, -4]) {
+        for (const order of ordersFor(n, discriminant)) {
+          let q = order;
+          for (const small of SMALL_PRIMES) while (q % small === 0n) q /= small;
+          if (!orderIsLargeEnough(q, n) || !isPrime(q)) continue;
+          const step = curveFor(n, discriminant, order, q);
+          assert.notEqual(step, null, `a curve for ${n}, D = ${discriminant}, order ${order}`);
+          assert.equal(stepProblem(step!), null);
+        }
+      }
+    }
   });
 
   it("finds nothing for a wrong order or a q that doesn't divide it", () => {

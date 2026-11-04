@@ -163,7 +163,27 @@ static int64_t largest_prime_factor(int64_t value) {
   return value > 1 ? value : largest;
 }
 
+// Every D of class number 1, then some above 1 (up to 8), fundamental or not.
+static const int64_t discriminants[] = {-3, -4, -7, -8, -11, -19, -43, -67, -163, -12, -15, -16, -20, -23, -24, -27, -28, -31, -35, -39, -40, -47, -56, -71};
+#define DISCRIMINANT_COUNT (sizeof discriminants / sizeof *discriminants)
+
+// Whether 4p = t² + |D|v² for some t and v above 0, by trying every v. (t = 0 is a
+// prime dividing D, where D isn't a square, so there are no orders.)
+static int has_solution(int64_t p, int64_t d) {
+  for (int64_t v = 1; -d * v * v <= 4 * p; v++) {
+    int64_t rest = 4 * p + d * v * v, t = 0;
+    while (t * t < rest)
+      t++;
+    if (t > 0 && t * t == rest)
+      return 1;
+  }
+  return 0;
+}
+
 static void check_known_orders(void) {
+  class_polynomial polynomials[DISCRIMINANT_COUNT];
+  for (size_t which = 0; which < DISCRIMINANT_COUNT; which++)
+    expect(class_polynomial_build(&polynomials[which], discriminants[which]) == 1, "H_D builds", 0, (uint64_t)-discriminants[which], 0, 0);
   big_number orders[ECPP_MOST_ORDERS], n, q, order, out_a, out_b, out_x, out_y;
   big_number *numbers[] = {&n, &q, &order, &out_a, &out_b, &out_x, &out_y};
   for (size_t index = 0; index < ECPP_MOST_ORDERS; index++)
@@ -175,13 +195,11 @@ static void check_known_orders(void) {
     if (!is_small_prime(p))
       continue;
     set(&n, (uint64_t)p);
-    for (int which = 0; which < ECPP_DISCRIMINANT_COUNT; which++) {
-      int d = ecpp_discriminants[which];
+    for (size_t which = 0; which < DISCRIMINANT_COUNT; which++) {
+      int64_t d = discriminants[which];
       size_t count = 0;
       ecpp_status status = ecpp_find_orders(&n, d, orders, &count);
-      // class number 1: a solution exists exactly when D is a square mod p
-      int d_is_square = legendre(d, p) == 1;
-      expect((status == ECPP_FOUND) == d_is_square, "orders exist exactly when D is a square", (uint64_t)p, (uint64_t)-d, 0, 0);
+      expect((status == ECPP_FOUND) == has_solution(p, d), "orders exist exactly when 4p = t² + |D|v² can be solved", (uint64_t)p, (uint64_t)-d, 0, 0);
       if (status != ECPP_FOUND)
         continue;
       size_t expected_count = d == -3 ? 6 : d == -4 ? 4 : 2;
@@ -196,8 +214,11 @@ static void check_known_orders(void) {
         if (q_value * q_value <= 16 * p)
           continue;
         set(&q, (uint64_t)q_value);
-        status = ecpp_curve_with_order(&n, d, &orders[index], &q, &out_a, &out_b, &out_x, &out_y);
-        expect(status == ECPP_FOUND, "a curve is found for every order", (uint64_t)p, (uint64_t)-d, 0, (uint64_t)order_value);
+        status = ecpp_curve_with_order(&n, d, &polynomials[which], &orders[index], &q, &out_a, &out_b, &out_x, &out_y);
+        // H_D can have repeated roots mod a prime that divides its discriminant, and
+        // those are all at most D² / 4 (Gross and Zagier); above that it must work
+        if (p > d * d / 4)
+          expect(status == ECPP_FOUND, "a curve is found for every order", (uint64_t)p, (uint64_t)-d, 0, (uint64_t)order_value);
         if (status != ECPP_FOUND)
           continue;
         int64_t a = (int64_t)big_number_to_u64(&out_a), b = (int64_t)big_number_to_u64(&out_b);
@@ -221,8 +242,8 @@ static void check_known_orders(void) {
     if (is_small_prime(composite))
       continue;
     set(&n, (uint64_t)composite);
-    for (int which = 0; which < ECPP_DISCRIMINANT_COUNT; which++) {
-      int d = ecpp_discriminants[which];
+    for (size_t which = 0; which < DISCRIMINANT_COUNT; which++) {
+      int64_t d = discriminants[which];
       size_t count = 0;
       if (ecpp_find_orders(&n, d, orders, &count) != ECPP_FOUND)
         continue;
@@ -239,6 +260,8 @@ static void check_known_orders(void) {
     big_number_free(&orders[index]);
   for (size_t index = 0; index < 7; index++)
     big_number_free(numbers[index]);
+  for (size_t which = 0; which < DISCRIMINANT_COUNT; which++)
+    class_polynomial_free(&polynomials[which]);
 }
 
 int main(void) {

@@ -335,6 +335,8 @@ int harness_curve_find_point(size_t modulus_count, size_t a_count, size_t start_
 
 // ── curves with a known order ─────────────────────────────────────────────
 
+static class_polynomial built_polynomial; // see harness_class_polynomial below
+
 static big_number found_orders[ECPP_MOST_ORDERS];
 static big_number found_curve[4];
 static int found_ready = 0;
@@ -371,7 +373,8 @@ size_t harness_ecpp_order(size_t index) {
 int harness_ecpp_curve(size_t n_count, int discriminant, size_t order_count, size_t q_count) {
   prepare_found();
   big_number n = load(first_input, n_count), order = load(second_input, order_count), q = load(third_input, q_count);
-  ecpp_status status = ecpp_curve_with_order(&n, discriminant, &order, &q, &found_curve[0], &found_curve[1], &found_curve[2], &found_curve[3]);
+  // D = −3 and −4 need no polynomial; any other D uses the one harness_class_polynomial built
+  ecpp_status status = ecpp_curve_with_order(&n, discriminant, discriminant < -4 ? &built_polynomial : NULL, &order, &q, &found_curve[0], &found_curve[1], &found_curve[2], &found_curve[3]);
   big_number_free(&n);
   big_number_free(&order);
   big_number_free(&q);
@@ -388,7 +391,6 @@ size_t harness_ecpp_curve_value(size_t index) {
 
 // ── class polynomials ─────────────────────────────────────────────────────
 
-static class_polynomial built_polynomial;
 static int polynomial_built = 0;
 
 // Builds H_D. Returns its degree, or FAILED.

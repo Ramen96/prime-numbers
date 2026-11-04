@@ -220,31 +220,6 @@ done:
 
 // ── curves with a known order ─────────────────────────────────────────────
 
-const int ecpp_discriminants[ECPP_DISCRIMINANT_COUNT] = {-3, -4, -7, -8, -11, -19, -43, -67, -163};
-
-// The j-invariant for D. They're integers (a famous fact about class number 1),
-// and all fit in 64 bits: the largest in size is 640320³.
-static int64_t j_invariant(int discriminant) {
-  switch (discriminant) {
-  case -7:
-    return -3375;
-  case -8:
-    return 8000;
-  case -11:
-    return -32768;
-  case -19:
-    return -884736;
-  case -43:
-    return -884736000;
-  case -67:
-    return -147197952000;
-  case -163:
-    return -262537412640768000;
-  default:
-    return 0; // D = −3 and −4 have their own families of curves
-  }
-}
-
 // result = value mod n, for a small value of either sign.
 static int signed_to_mod(big_number *result, int64_t value, const big_number *n) {
   big_number magnitude;
@@ -263,7 +238,7 @@ static int signed_to_mod(big_number *result, int64_t value, const big_number *n)
 // (Cohen, A Course in Computational Algebraic Number Theory, 1.5.3): start from a
 // square root of D with the same parity as D, and run Euclid's algorithm on
 // (2n, root) until the remainder is at most √(4n). That remainder is t.
-static ecpp_status solve_for_t_and_v(const big_number *n, int discriminant, big_number *t, big_number *v) {
+static ecpp_status solve_for_t_and_v(const big_number *n, int64_t discriminant, big_number *t, big_number *v) {
   big_number d_mod, root, a, b, remainder, four_n, limit, rest, divisor, quotient, leftover, check;
   big_number *numbers[] = {&d_mod, &root, &a, &b, &remainder, &four_n, &limit, &rest, &divisor, &quotient, &leftover, &check};
   for (size_t index = 0; index < sizeof numbers / sizeof *numbers; index++)
@@ -287,7 +262,7 @@ static ecpp_status solve_for_t_and_v(const big_number *n, int discriminant, big_
     goto done;
   }
   // the root's parity must match D's: n − root has the other parity, n being odd
-  int d_is_odd = discriminant & 1;
+  int d_is_odd = (int)(discriminant & 1);
   if (big_number_is_odd(&root) != d_is_odd && !big_number_subtract(&root, n, &root))
     goto done;
 
@@ -329,7 +304,7 @@ static int add_order_pair(const big_number *n_plus_one, const big_number *trace,
   return 1;
 }
 
-ecpp_status ecpp_find_orders(const big_number *n, int discriminant, big_number orders[ECPP_MOST_ORDERS], size_t *count) {
+ecpp_status ecpp_find_orders(const big_number *n, int64_t discriminant, big_number orders[ECPP_MOST_ORDERS], size_t *count) {
   big_number t, v, n_plus_one, three_v, trace;
   big_number_init(&t);
   big_number_init(&v);
@@ -425,21 +400,17 @@ static ecpp_status point_of_order(const big_number *n, const big_number *a, cons
   return status;
 }
 
-// Small values of a (or b) to try for D = −4 (or −3). The curves split evenly into
-// 4 (or 6) twists, and each value lands on a random one, so a prime N finds its
-// twist well before this.
-#define FAMILY_TRIES 64
-
-// The curve y² = x³ + 3kc²x + 2kc³, where k = j / (1728 − j) gives the j-invariant,
-// and a non-residue c gives the quadratic twist. ECPP_NOT_FOUND if 1728 − j shares a
-// factor with n, which no prime n that D is a square of can do.
-static ecpp_status curve_from_j(const big_number *n, int64_t j, const big_number *c, big_number *a, big_number *b) {
+// The curve y² = x³ + 3kc²x + 2kc³, where k = j / (1728 − j) gives the j-invariant
+// (j below n), and a non-residue c gives the quadratic twist. ECPP_NOT_FOUND if
+// 1728 − j shares a factor with n, which for a prime n means j = 1728: D = −4's.
+static ecpp_status curve_from_j(const big_number *n, const big_number *j, const big_number *c, big_number *a, big_number *b) {
   big_number j_mod, denominator, k, c_squared, three, two;
   big_number *numbers[] = {&j_mod, &denominator, &k, &c_squared, &three, &two};
   for (size_t index = 0; index < 6; index++)
     big_number_init(numbers[index]);
   ecpp_status status = ECPP_OUT_OF_MEMORY;
-  if (signed_to_mod(&j_mod, j, n) && signed_to_mod(&denominator, 1728 - j, n)) {
+  if (big_number_copy(&j_mod, j) && signed_to_mod(&denominator, 1728, n) &&
+      big_number_subtract_mod(&denominator, &denominator, &j_mod, n)) {
     int inverse = big_number_inverse_mod(&denominator, &denominator, n);
     if (inverse < 0)
       status = ECPP_NOT_FOUND;
@@ -473,9 +444,72 @@ static ecpp_status first_non_residue(const big_number *n, big_number *c) {
   return ECPP_NOT_FOUND;
 }
 
-ecpp_status ecpp_curve_with_order(const big_number *n, int discriminant, const big_number *order, const big_number *q,
-                                  big_number *out_a, big_number *out_b, big_number *out_x, big_number *out_y) {
-  big_number cofactor, leftover, a, b, c;
+// For D = −3 the curves y² = x³ + b fall into 6 twists, by b's class modulo sixth
+// powers; for D = −4, y² = x³ + ax into 4, by a's class modulo fourth powers. Small
+// values of b can all miss a twist (mod some N, 2, 3, 5, 7 and 11 lie in only a few
+// classes), so the values tried are the powers wᵏ of one w that generates the
+// classes: wᵏ for k = 0 … 5 (or 3) is each class exactly once. For a prime N, w
+// generates them when it's not a square and (for D = −3) not a cube.
+static ecpp_status family_generator(const big_number *n, int64_t discriminant, big_number *w) {
+  montgomery_context montgomery;
+  if (!montgomery_init(&montgomery, n))
+    return ECPP_OUT_OF_MEMORY;
+  big_number exponent, power, remainder, three;
+  big_number_init(&exponent);
+  big_number_init(&power);
+  big_number_init(&remainder);
+  big_number_init(&three);
+  ecpp_status status = ECPP_NOT_FOUND;
+  int need_cube_test = discriminant == -3;
+  // (n − 1) / 3, for the test of cubes; n ≡ 1 mod 3 whenever D = −3 has orders
+  if (!big_number_copy(&exponent, n) || !big_number_subtract_small(&exponent, 1) || !big_number_set_u64(&three, 3) ||
+      !big_number_divide(&exponent, &remainder, &exponent, &three)) {
+    status = ECPP_OUT_OF_MEMORY;
+    goto done;
+  }
+  if (need_cube_test && remainder.limb_count > 0)
+    goto done;
+  for (uint64_t value = 2; value < NON_RESIDUE_TRIES; value++) {
+    if (!big_number_set_u64(w, value)) {
+      status = ECPP_OUT_OF_MEMORY;
+      break;
+    }
+    int symbol = big_number_jacobi(w, n);
+    if (symbol == -2) {
+      status = ECPP_OUT_OF_MEMORY;
+      break;
+    }
+    if (symbol != -1)
+      continue;
+    if (!need_cube_test) {
+      status = ECPP_FOUND;
+      break;
+    }
+    if (!montgomery_power(&montgomery, &power, w, &exponent)) {
+      status = ECPP_OUT_OF_MEMORY;
+      break;
+    }
+    if (big_number_compare_u64(&power, 1) != 0) {
+      status = ECPP_FOUND;
+      break;
+    }
+  }
+done:
+  big_number_free(&exponent);
+  big_number_free(&power);
+  big_number_free(&remainder);
+  big_number_free(&three);
+  montgomery_free(&montgomery);
+  return status;
+}
+
+ecpp_status ecpp_curve_with_order(const big_number *n, int64_t discriminant, const class_polynomial *polynomial,
+                                  const big_number *order, const big_number *q, big_number *out_a, big_number *out_b,
+                                  big_number *out_x, big_number *out_y) {
+  big_number cofactor, leftover, a, b, c, j, w, family_value;
+  big_number_init(&j);
+  big_number_init(&w);
+  big_number_init(&family_value);
   big_number_init(&cofactor);
   big_number_init(&leftover);
   big_number_init(&a);
@@ -489,18 +523,39 @@ ecpp_status ecpp_curve_with_order(const big_number *n, int discriminant, const b
     goto done;
   }
 
-  int64_t j = j_invariant(discriminant);
-  // the twists to try: small a or b for the two special families; otherwise c = 1,
+  int special_family = discriminant == -3 || discriminant == -4;
+  if (special_family) {
+    status = family_generator(n, discriminant, &w);
+    if (status != ECPP_FOUND)
+      goto done;
+  } else {
+    // j: a root of H_D mod n, which exists for a prime n that has this D's orders
+    if (polynomial == NULL) {
+      status = ECPP_NOT_FOUND;
+      goto done;
+    }
+    int found = class_polynomial_root(&j, polynomial, n);
+    if (found <= 0) {
+      status = found == 0 ? ECPP_OUT_OF_MEMORY : ECPP_NOT_FOUND;
+      goto done;
+    }
+  }
+  // the twists to try: every class wᵏ for the two special families; otherwise c = 1,
   // and then the first non-residue c
-  int tries = j == 0 ? FAMILY_TRIES : 2;
+  int tries = discriminant == -3 ? 6 : discriminant == -4 ? 4 : 2;
   status = ECPP_NOT_FOUND;
   for (int attempt = 1; attempt <= tries && status == ECPP_NOT_FOUND; attempt++) {
     ecpp_status curve_status = ECPP_FOUND;
-    if (discriminant == -3) {
-      if (!big_number_set_u64(&a, 0) || !big_number_set_u64(&b, (uint64_t)attempt))
-        curve_status = ECPP_OUT_OF_MEMORY;
-    } else if (discriminant == -4) {
-      if (!big_number_set_u64(&a, (uint64_t)attempt) || !big_number_set_u64(&b, 0))
+    if (special_family) {
+      // family_value = w^(attempt − 1): 1, w, w², …
+      int ok = attempt == 1 ? big_number_set_u64(&family_value, 1)
+                            : big_number_multiply(&family_value, &family_value, &w) &&
+                                  big_number_divide(NULL, &family_value, &family_value, n);
+      if (discriminant == -3)
+        ok = ok && big_number_set_u64(&a, 0) && big_number_copy(&b, &family_value);
+      else
+        ok = ok && big_number_copy(&a, &family_value) && big_number_set_u64(&b, 0);
+      if (!ok)
         curve_status = ECPP_OUT_OF_MEMORY;
     } else {
       if (attempt == 1)
@@ -508,7 +563,7 @@ ecpp_status ecpp_curve_with_order(const big_number *n, int discriminant, const b
       else
         curve_status = first_non_residue(n, &c);
       if (curve_status == ECPP_FOUND)
-        curve_status = curve_from_j(n, j, &c, &a, &b);
+        curve_status = curve_from_j(n, &j, &c, &a, &b);
     }
     if (curve_status != ECPP_FOUND) {
       status = curve_status;
@@ -519,6 +574,9 @@ ecpp_status ecpp_curve_with_order(const big_number *n, int discriminant, const b
   if (status == ECPP_FOUND && (!big_number_copy(out_a, &a) || !big_number_copy(out_b, &b)))
     status = ECPP_OUT_OF_MEMORY;
 done:
+  big_number_free(&j);
+  big_number_free(&w);
+  big_number_free(&family_value);
   big_number_free(&cofactor);
   big_number_free(&leftover);
   big_number_free(&a);
