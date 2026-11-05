@@ -14,7 +14,7 @@
 // Twelve Prime Bases", Math. Comp. 86 (2017), https://arxiv.org/abs/1509.00864).
 // Using only as many bases as each number needs keeps it fast for small primes.
 
-import type { RejectedComposite } from "./wasmSieve.ts";
+import type { RejectedComposite, RejectionKind } from "./wasmSieve.ts";
 
 const PRIME_BASES = [2n, 3n, 5n, 7n, 11n, 13n, 17n, 19n, 23n, 29n, 31n, 37n, 41n];
 
@@ -174,8 +174,8 @@ export type PrimesVerification =
 /** A whole batch: its primes, and the composites the sieve rejected. */
 export type BatchVerification =
   | PrimesVerification
-  /** The sieve rejected it as composite, but its evidence doesn't prove that. */
-  | { verified: false; disputedComposite: bigint; evidence: number };
+  /** The sieve rejected it as composite, but its evidence (or check of that kind) doesn't prove that. */
+  | { verified: false; disputedComposite: bigint; evidence: number; kind: RejectionKind };
 
 /** Checks every prime in a batch. Stops at the first one that isn't proven prime. */
 export function verifyPrimes(primes: readonly bigint[]): PrimesVerification {
@@ -186,10 +186,25 @@ export function verifyPrimes(primes: readonly bigint[]): PrimesVerification {
   return { verified: true };
 }
 
-/** Checks every rejected composite's evidence. Stops at the first that doesn't hold. */
+/**
+ * Whether a rejected composite really is one: its evidence holds, or for BPSW's
+ * verdicts with no number (past a(13)), the square and strong Lucas tests fail it
+ * again here, in BigInt. Neither can hold for a prime, so a prime rejected by
+ * mistake is always caught.
+ */
+export function rejectionHolds({ candidate, evidence, kind }: RejectedComposite): boolean {
+  if (kind === "evidence") return compositeEvidenceHolds(candidate, evidence);
+  if (kind === "unknown") return false;
+  return candidate % 2n === 1n && candidate > 41n && failsStrongLucas(candidate);
+}
+
+/** Checks every rejected composite. Stops at the first that doesn't hold. */
 export function verifyRejectedComposites(rejected: readonly RejectedComposite[]): BatchVerification {
-  for (const { candidate, evidence } of rejected) {
-    if (!compositeEvidenceHolds(candidate, evidence)) return { verified: false, disputedComposite: candidate, evidence };
+  for (const composite of rejected) {
+    if (!rejectionHolds(composite)) {
+      const { candidate, evidence, kind } = composite;
+      return { verified: false, disputedComposite: candidate, evidence, kind };
+    }
   }
   return { verified: true };
 }

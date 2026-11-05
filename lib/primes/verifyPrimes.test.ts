@@ -6,8 +6,10 @@ import {
   DETERMINISTIC_VERIFICATION_LIMIT,
   failsStrongLucas,
   millerRabinVerdict,
+  rejectionHolds,
   verifyBatch,
   verifyPrimes,
+  verifyRejectedComposites,
 } from "./verifyPrimes.ts";
 
 const EVIDENCE_BASES = [2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41];
@@ -95,27 +97,66 @@ describe("compositeEvidenceHolds (re-checking the sieve's rejected composites)",
 describe("verifyBatch", () => {
   it("accepts proven primes and proven composites", () => {
     assert.deepEqual(
-      verifyBatch([1_000_003n], [{ candidate: 2047n, evidence: 3 }, { candidate: 1_000_005n, evidence: 5 }]),
+      verifyBatch([1_000_003n], [{ candidate: 2047n, evidence: 3, kind: "evidence" }, { candidate: 1_000_005n, evidence: 5, kind: "evidence" }]),
       { verified: true },
     );
   });
 
   it("names the first rejected composite whose evidence doesn't hold", () => {
-    assert.deepEqual(verifyBatch([1_000_003n], [{ candidate: 2047n, evidence: 3 }, { candidate: 1_000_033n, evidence: 7 }]), {
+    assert.deepEqual(verifyBatch([1_000_003n], [{ candidate: 2047n, evidence: 3, kind: "evidence" }, { candidate: 1_000_033n, evidence: 7, kind: "evidence" }]), {
       verified: false,
       disputedComposite: 1_000_033n,
       evidence: 7,
+      kind: "evidence",
     });
   });
 
   it("checks the primes first", () => {
-    assert.deepEqual(verifyBatch([2047n], [{ candidate: 1_000_033n, evidence: 7 }]), {
+    assert.deepEqual(verifyBatch([2047n], [{ candidate: 1_000_033n, evidence: 7, kind: "evidence" }]), {
       verified: false,
       disputedPrime: 2047n,
       verdict: "composite",
     });
   });
 });
+
+describe("rejectionHolds (each kind of rejection, checked again)", () => {
+  const A13 = 3_317_044_064_679_887_385_961_981n; // passes the first 13 Miller–Rabin bases; Lucas throws it out
+
+  it("holds for BPSW's Lucas and square verdicts on composites, with no number as evidence", () => {
+    assert.equal(rejectionHolds({ candidate: A13, evidence: 0, kind: "lucas" }), true);
+    assert.equal(rejectionHolds({ candidate: 1093n * 1093n, evidence: 0, kind: "square" }), true); // passes base 2
+    assert.equal(rejectionHolds({ candidate: 2047n, evidence: 3, kind: "evidence" }), true);
+  });
+
+  it("never holds for a prime, whatever the kind: a prime rejected by mistake is always caught", () => {
+    for (const prime of [nextPrime(A13), 2n ** 127n - 1n, 1_000_003n]) {
+      for (const kind of ["evidence", "square", "lucas", "unknown"] as const) {
+        assert.equal(rejectionHolds({ candidate: prime, evidence: 3, kind }), false, `${prime} as ${kind}`);
+      }
+    }
+  });
+
+  it("never holds for an unknown kind, even on a composite", () => {
+    assert.equal(rejectionHolds({ candidate: A13, evidence: 0, kind: "unknown" }), false);
+    assert.equal(rejectionHolds({ candidate: 15n, evidence: 3, kind: "unknown" }), false);
+  });
+
+  it("names the kind when one doesn't hold", () => {
+    const prime = nextPrime(A13);
+    assert.deepEqual(verifyRejectedComposites([{ candidate: A13, evidence: 0, kind: "lucas" }, { candidate: prime, evidence: 0, kind: "lucas" }]), {
+      verified: false,
+      disputedComposite: prime,
+      evidence: 0,
+      kind: "lucas",
+    });
+  });
+});
+
+/** The next prime after n, by the independent reference in tests/support. */
+function nextPrime(n: bigint): bigint {
+  for (let candidate = n + 1n; ; candidate++) if (referenceIsPrime(candidate)) return candidate;
+}
 
 describe("failsStrongLucas (re-checking BPSW's Lucas and square verdicts)", () => {
   it("passes exactly the primes and the 16 published strong Lucas pseudoprimes below 130,140 (OEIS A217255)", () => {

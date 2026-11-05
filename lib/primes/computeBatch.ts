@@ -154,9 +154,15 @@ export async function computeBatch(
 function disputeMessage(verification: Exclude<BatchVerification, { verified: true }>): string {
   if ("disputedComposite" in verification) {
     // a prime rejected by mistake would be skipped: the list stops rather than leave a gap
+    const evidence =
+      verification.kind === "evidence"
+        ? `its evidence (${verification.evidence})`
+        : verification.kind === "unknown"
+          ? "the kind of rejection it gave"
+          : `the ${verification.kind === "square" ? "perfect-square" : "strong Lucas"} test`;
     return (
-      `The sieve rejected ${verification.disputedComposite} as composite, but its evidence ` +
-      `(${verification.evidence}) doesn’t prove that. Stopped rather than risk skipping a prime.`
+      `The sieve rejected ${verification.disputedComposite} as composite, but ${evidence} ` +
+      `doesn’t prove that. Stopped rather than risk skipping a prime.`
     );
   }
   const problem =

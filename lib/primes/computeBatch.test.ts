@@ -145,7 +145,7 @@ describe("computeBatch", () => {
   });
 
   it("passes the rejected composites to the verifier with the primes", async () => {
-    const rejected = [{ candidate: 2047n, evidence: 3 }];
+    const rejected: RejectedComposite[] = [{ candidate: 2047n, evidence: 3, kind: "evidence" }];
     const checked: unknown[] = [];
     await run(standInSieve([2053n], { rejected }), REQUEST, null, {
       verify: async (primes, rejectedComposites) => (checked.push([primes, rejectedComposites]), { verified: true }),
@@ -154,13 +154,13 @@ describe("computeBatch", () => {
   });
 
   it("never sends a batch with a rejected composite whose evidence doesn't hold", async () => {
-    const sent = await run(standInSieve([2053n], { rejected: [{ candidate: 2039n, evidence: 3 }] })); // 2039 is prime
+    const sent = await run(standInSieve([2053n], { rejected: [{ candidate: 2039n, evidence: 3, kind: "evidence" }] })); // 2039 is prime
     assert.deepEqual(sent.map((response) => response.type), ["error"]);
     if (sent[0].type === "error") assert.match(sent[0].message, /rejected 2039 as composite/);
   });
 
   it("says the proven bound was reached when no prime could be proven", async () => {
-    const sent = await run(standInSieve([], { reachedProvenBound: true, rejected: [{ candidate: 15n, evidence: 3 }] }));
+    const sent = await run(standInSieve([], { reachedProvenBound: true, rejected: [{ candidate: 15n, evidence: 3, kind: "evidence" }] }));
     assert.deepEqual(sent.map((response) => response.type), ["proven-bound"]);
   });
 
@@ -171,7 +171,7 @@ describe("computeBatch", () => {
   });
 
   it("checks the rejected composites even when it stops at the bound with no primes", async () => {
-    const sent = await run(standInSieve([], { reachedProvenBound: true, rejected: [{ candidate: 2039n, evidence: 3 }] }));
+    const sent = await run(standInSieve([], { reachedProvenBound: true, rejected: [{ candidate: 2039n, evidence: 3, kind: "evidence" }] }));
     assert.deepEqual(sent.map((response) => response.type), ["error"]);
   });
 

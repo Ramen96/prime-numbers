@@ -26,11 +26,12 @@ describe("verification.worker", () => {
   });
 
   it("checks its share's rejected composites too", () => {
-    assert.deepEqual(check({ primes: [], rejected: [{ candidate: 2047n, evidence: 3 }] }).verification, { verified: true });
-    assert.deepEqual(check({ primes: [], rejected: [{ candidate: 1_000_003n, evidence: 3 }] }).verification, {
+    assert.deepEqual(check({ primes: [], rejected: [{ candidate: 2047n, evidence: 3, kind: "evidence" }] }).verification, { verified: true });
+    assert.deepEqual(check({ primes: [], rejected: [{ candidate: 1_000_003n, evidence: 3, kind: "evidence" }] }).verification, {
       verified: false,
       disputedComposite: 1_000_003n,
       evidence: 3,
+      kind: "evidence",
     });
   });
 });

@@ -107,9 +107,9 @@ describe("VerificationPool", () => {
 describe("VerificationPool and rejected composites (Phase 4)", () => {
   // composites just past 2^32 with no factor up to 41 for most, and evidence that proves each
   const REJECTED: RejectedComposite[] = [
-    { candidate: BIG + 17n, evidence: 3 }, // 3 × 1431655771
-    { candidate: BIG * 3n, evidence: 2 }, // even
-    { candidate: 4_294_967_297n, evidence: 3 }, // 2^32 + 1 = 641 × 6700417; 3 is a witness
+    { candidate: BIG + 17n, evidence: 3, kind: "evidence" }, // 3 × 1431655771
+    { candidate: BIG * 3n, evidence: 2, kind: "evidence" }, // even
+    { candidate: 4_294_967_297n, evidence: 3, kind: "evidence" }, // 2^32 + 1 = 641 × 6700417; 3 is a witness
   ];
 
   it("shares rejected composites between its workers too, and checks every one once", async () => {
@@ -122,26 +122,27 @@ describe("VerificationPool and rejected composites (Phase 4)", () => {
   });
 
   it("finds a rejected composite whose evidence doesn't hold, whichever share it's in", async () => {
-    const wronglyRejected = { candidate: BIG_PRIMES[2], evidence: 7 }; // a prime
+    const wronglyRejected: RejectedComposite = { candidate: BIG_PRIMES[2], evidence: 7, kind: "evidence" }; // a prime
     const pool = new VerificationPool(3, () => standInWorker([]));
     assert.deepEqual(await pool.verify(BIG_PRIMES.slice(0, 2), [...REJECTED, wronglyRejected]), {
       verified: false,
       disputedComposite: wronglyRejected.candidate,
       evidence: 7,
+      kind: "evidence",
     });
   });
 
   it("checks rejected composites even in a batch with no primes", async () => {
     const pool = new VerificationPool(3, () => standInWorker([]));
     assert.deepEqual(await pool.verify([], REJECTED), { verified: true });
-    assert.equal((await pool.verify([], [{ candidate: BIG_PRIMES[0], evidence: 2 }])).verified, false);
+    assert.equal((await pool.verify([], [{ candidate: BIG_PRIMES[0], evidence: 2, kind: "evidence" }])).verified, false);
   });
 
   it("checks small ones inline", async () => {
     let started = 0;
     const pool = new VerificationPool(4, () => (started++, standInWorker([])));
-    assert.deepEqual(await pool.verify([7n], [{ candidate: 9n, evidence: 3 }]), { verified: true });
-    assert.equal((await pool.verify([7n], [{ candidate: 11n, evidence: 3 }])).verified, false);
+    assert.deepEqual(await pool.verify([7n], [{ candidate: 9n, evidence: 3, kind: "evidence" }]), { verified: true });
+    assert.equal((await pool.verify([7n], [{ candidate: 11n, evidence: 3, kind: "evidence" }])).verified, false);
     assert.equal(started, 0);
   });
 });

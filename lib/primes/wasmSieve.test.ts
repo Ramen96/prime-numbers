@@ -24,6 +24,8 @@ const asWasmReturnsIt32 = (value: number) => value | 0;
 interface FakeRejected {
   distances: bigint[];
   evidence: number[];
+  /** rejection_kind values; all 0 ("evidence") if left out. */
+  kinds?: number[];
 }
 
 /**
@@ -45,10 +47,12 @@ function fakeSieve(
   const requestPointer = 8192;
   const rejectedDistancesPointer = 16384;
   const rejectedEvidencePointer = 32768;
+  const rejectedKindsPointer = 49152;
   new Uint32Array(memory.buffer, baseLimbsPointer, baseLimbs.length).set(baseLimbs);
   new BigUint64Array(memory.buffer, offsetsPointer, offsets.length).set(offsets);
   new BigUint64Array(memory.buffer, rejectedDistancesPointer, rejected.distances.length).set(rejected.distances);
   new Uint32Array(memory.buffer, rejectedEvidencePointer, rejected.evidence.length).set(rejected.evidence);
+  new Uint8Array(memory.buffer, rejectedKindsPointer, rejected.distances.length).set(rejected.kinds ?? rejected.distances.map(() => 0));
   return {
     memory,
     request_buffer: () => asWasmReturnsIt32(requestPointer),
@@ -69,6 +73,7 @@ function fakeSieve(
     batch_rejected_count: () => asWasmReturnsIt32(rejected.distances.length),
     batch_rejected_distances: () => asWasmReturnsIt32(rejectedDistancesPointer),
     batch_rejected_evidence: () => asWasmReturnsIt32(rejectedEvidencePointer),
+    batch_rejected_kinds: () => asWasmReturnsIt32(rejectedKindsPointer),
     set_sieve_prime_cap: () => {},
   };
 }
@@ -143,11 +148,11 @@ describe("WasmSieve rejected composites (Phase 4)", () => {
       const going = (direction: "next" | "prev") => sieve.findPrimes(direction, from, 1).rejected;
       assert.deepEqual(
         going("next"),
-        rejected.distances.map((distance, index) => ({ candidate: from + distance, evidence: rejected.evidence[index] })),
+        rejected.distances.map((distance, index) => ({ candidate: from + distance, evidence: rejected.evidence[index], kind: "evidence" })),
       );
       assert.deepEqual(
         going("prev"),
-        rejected.distances.map((distance, index) => ({ candidate: from - distance, evidence: rejected.evidence[index] })),
+        rejected.distances.map((distance, index) => ({ candidate: from - distance, evidence: rejected.evidence[index], kind: "evidence" })),
       );
     });
   }
@@ -160,6 +165,16 @@ describe("WasmSieve rejected composites (Phase 4)", () => {
     assert.equal(batch.reachedProvenBound, true);
     assert.equal(batch.reachedMemoryLimit, false);
     assert.equal(batch.rejected.length, 3);
+  });
+
+  it("reads each one's kind: BPSW's square and Lucas verdicts, and anything else as unknown", () => {
+    const from = 3_317_044_064_679_887_385_961_981n;
+    const kinds = { distances: [0n, 2n, 4n, 6n], evidence: [5, 0, 0, 0], kinds: [0, 1, 2, 7] };
+    const batch = new WasmSieve(fakeSieve(from, [], 0n, kinds)).findPrimes("next", from, 500);
+    assert.deepEqual(
+      batch.rejected.map(({ kind }) => kind),
+      ["evidence", "square", "lucas", "unknown"],
+    );
   });
 
   it("reports none, and no bound, for a batch without them", () => {

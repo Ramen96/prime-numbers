@@ -31,6 +31,7 @@ export interface RawSieveExports {
   batch_rejected_count(): number;
   batch_rejected_distances(): number;
   batch_rejected_evidence(): number;
+  batch_rejected_kinds(): number;
   set_sieve_prime_cap(cap: bigint): void;
   /** Threaded build only: time spent measuring where splitting pays, since last asked. */
   take_measuring_ms?(): number;
@@ -52,15 +53,25 @@ export const SEGMENT_SPAN = 65_536n;
 /** No cap on the base primes a window is sieved with: UINT64_MAX in sieve.c. */
 export const NO_SIEVE_PRIME_CAP = 2n ** 64n - 1n;
 
+/** How the sieve rejected a composite: rejection_kind in sieve.c, in its order. */
+export type RejectionKind = "evidence" | "square" | "lucas" | "unknown";
+const REJECTION_KINDS: readonly RejectionKind[] = ["evidence", "square", "lucas"];
+
 /**
- * A survivor of partial sieving that the sieve's Miller–Rabin found composite
- * (Phase 4), with the evidence, so it can be checked again (Requirement A3).
+ * A survivor of partial sieving that the sieve's Miller–Rabin (or, past a(13),
+ * BPSW) found composite, with how, so it can be checked again (Requirement A3).
  */
 export interface RejectedComposite {
   /** The number, exact, any size. */
   candidate: bigint;
-  /** A small prime (2 to 41) that divides it, or a Miller–Rabin witness base. */
+  /** A small prime that divides it, or a witness base; 0 when the kind needs none. */
   evidence: number;
+  /**
+   * "evidence": the evidence proves it. "square" and "lucas": BPSW's verdicts past
+   * a(13), which have no number. "unknown": a value sieve.c doesn't define, which no
+   * check accepts.
+   */
+  kind: RejectionKind;
 }
 
 export interface SieveBatch {
@@ -182,7 +193,7 @@ export class WasmSieve {
 
   /**
    * The last call's rejected composites: each is a distance from `from` (up
-   * for "next", down for "prev") and its evidence, rebuilt exactly in BigInt.
+   * for "next", down for "prev"), its evidence and kind, rebuilt exactly in BigInt.
    */
   #rejectedComposites(direction: Direction, from: bigint): RejectedComposite[] {
     const raw = this.#raw;
@@ -191,9 +202,11 @@ export class WasmSieve {
     // Fresh views after the call: memory growth detaches old ones.
     const distances = new BigUint64Array(raw.memory.buffer, unsigned32(raw.batch_rejected_distances()), count);
     const evidence = new Uint32Array(raw.memory.buffer, unsigned32(raw.batch_rejected_evidence()), count);
+    const kinds = new Uint8Array(raw.memory.buffer, unsigned32(raw.batch_rejected_kinds()), count);
     return Array.from(distances, (distance, index) => ({
       candidate: direction === "next" ? from + distance : from - distance,
       evidence: evidence[index],
+      kind: REJECTION_KINDS[kinds[index]] ?? "unknown",
     }));
   }
 }

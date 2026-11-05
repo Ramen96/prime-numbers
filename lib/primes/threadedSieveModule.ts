@@ -26,6 +26,7 @@ export interface ThreadedSieveModule {
   _batch_rejected_count(): number;
   _batch_rejected_distances(): number;
   _batch_rejected_evidence(): number;
+  _batch_rejected_kinds(): number;
   _set_sieve_prime_cap(cap: bigint): void;
   _sieve_start_helpers(count: number): number;
   _set_parallel_threshold(checkpoints: number): void;
@@ -63,6 +64,7 @@ export function rawExportsOf(sieveModule: ThreadedSieveModule): RawSieveExports 
     batch_rejected_count: sieveModule._batch_rejected_count,
     batch_rejected_distances: sieveModule._batch_rejected_distances,
     batch_rejected_evidence: sieveModule._batch_rejected_evidence,
+    batch_rejected_kinds: sieveModule._batch_rejected_kinds,
     set_sieve_prime_cap: sieveModule._set_sieve_prime_cap,
     take_measuring_ms: sieveModule._take_measuring_ms,
   };

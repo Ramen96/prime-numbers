@@ -7,9 +7,11 @@
 // pseudoprime to the first 13 prime bases), from J. Sorenson and J. Webster,
 // "Strong Pseudoprimes to Twelve Prime Bases", Math. Comp. 86 (2017), 985–1003,
 // https://arxiv.org/abs/1509.00864. Above that bound the answer is "probably
-// prime" (and "composite" stays definitive: a witness proves it).
+// prime" (and "composite" stays definitive: a witness proves it), with more
+// bases, up to 71: a(13) itself passes the first 13.
 
 const WITNESSES = [2n, 3n, 5n, 7n, 11n, 13n, 17n, 19n, 23n, 29n, 31n, 37n, 41n];
+const MORE_WITNESSES_FROM_THE_BOUND = [43n, 47n, 53n, 59n, 61n, 67n, 71n];
 export const DETERMINISTIC_BELOW = 3_317_044_064_679_887_385_961_981n;
 
 function powerMod(base: bigint, exponent: bigint, modulus: bigint): bigint {
@@ -34,7 +36,8 @@ export function isPrime(candidate: bigint): boolean {
     oddPart >>= 1n;
     powersOfTwo++;
   }
-  witnesses: for (const witness of WITNESSES) {
+  const witnessesToTry = candidate < DETERMINISTIC_BELOW ? WITNESSES : [...WITNESSES, ...MORE_WITNESSES_FROM_THE_BOUND];
+  witnesses: for (const witness of witnessesToTry) {
     let value = powerMod(witness, oddPart, candidate);
     if (value === 1n || value === candidate - 1n) continue;
     for (let round = 1; round < powersOfTwo; round++) {

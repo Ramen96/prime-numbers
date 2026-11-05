@@ -7,6 +7,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 import { NO_SIEVE_PRIME_CAP, WasmSieve, type RawSieveExports, type RejectedComposite } from "../../lib/primes/wasmSieve.ts";
+import { rejectionHolds } from "../../lib/primes/verifyPrimes.ts";
 import { isPrime, nextPrimeAfter, previousPrimeBefore } from "../support/primality.ts";
 
 const sieveModule = new WebAssembly.Module(readFileSync("public/sieve.wasm"));
@@ -99,12 +100,21 @@ function isWitness(candidate: bigint, base: bigint): boolean {
   return true;
 }
 
-/** Each rejected number lies in (low, high), isn't prime, and its evidence proves it composite. */
+/**
+ * Each rejected number lies in (low, high), isn't prime, and its evidence proves it
+ * composite. BPSW's square and Lucas verdicts (past a(13)) carry no number: for
+ * those, the independent reference finding it composite is the check here.
+ */
 function assertRejectedProven(rejected: RejectedComposite[], low: bigint, high: bigint) {
-  for (const { candidate, evidence } of rejected) {
-    const context = `${candidate} (evidence ${evidence})`;
+  for (const { candidate, evidence, kind } of rejected) {
+    const context = `${candidate} (evidence ${evidence}, ${kind})`;
     assert.ok(candidate > low && candidate < high, `${context} is in the range covered`);
     assert.equal(isPrime(candidate), false, `${context} isn't prime`);
+    assert.notEqual(kind, "unknown", `${context}: a kind sieve.c defines`);
+    if (kind !== "evidence") {
+      assert.ok(candidate >= PROVEN_BOUND && evidence === 0, `${context}: BPSW's, past a(13), with no number`);
+      continue;
+    }
     const divides = evidence > 1 && candidate % BigInt(evidence) === 0n && candidate !== BigInt(evidence);
     assert.ok(divides || isWitness(candidate, BigInt(evidence)), `${context}: the evidence holds`);
   }
@@ -156,6 +166,37 @@ describe("partial sieving in the shipped sieve.wasm, cap 65,535", () => {
     const fromAbove = partial.findPrimes("prev", PROVEN_BOUND + 3_000n, 500);
     assert.deepEqual(fromAbove.primes, []);
     assert.equal(fromAbove.reachedProvenBound, true);
+  });
+
+  it("past a(13) with probable primes allowed: BPSW passes reported, every rejection holds, a(13) by Lucas", () => {
+    const bpswInstance = new WebAssembly.Instance(sieveModule, { env: { emscripten_notify_memory_growth: () => {} } });
+    const bpswRaw = bpswInstance.exports as unknown as RawSieveExports & { set_probable_primes_allowed(allowed: number): void };
+    bpswRaw._initialize?.();
+    const bpsw = new WasmSieve(bpswRaw);
+    bpsw.setSievePrimeCap(1000n);
+    bpswRaw.set_probable_primes_allowed(1);
+    for (const [direction, start] of [
+      ["next", PROVEN_BOUND - 3_000n],
+      ["prev", PROVEN_BOUND + 20_000n], // 500 primes span about 28,000 here, so this crosses a(13)
+    ] as const) {
+      const batch = bpsw.findPrimes(direction, start, 500);
+      assert.equal(batch.primes.length, 500, direction);
+      assert.equal(batch.reachedProvenBound, false);
+      assert.equal(batch.reachedMemoryLimit, false);
+      if (direction === "next") assertConsecutivePrimes(batch.primes, start);
+      else assert.equal(batch.primes[499], previousPrimeBefore(start));
+      const [low, high] = direction === "next" ? [start, batch.primes[499]] : [batch.primes[0], start];
+      assertRejectedProven(batch.rejected, low, high);
+      assert.ok(batch.rejected.every((composite) => rejectionHolds(composite)), "the worker's own check accepts every one");
+      assert.deepEqual(
+        batch.rejected.find(({ candidate }) => candidate === PROVEN_BOUND),
+        { candidate: PROVEN_BOUND, evidence: 0, kind: "lucas" },
+        "a(13) passes 13 Miller–Rabin bases; strong Lucas throws it out",
+      );
+    }
+    // switched off again: back to stopping at a(13)
+    bpswRaw.set_probable_primes_allowed(0);
+    assert.equal(bpsw.findPrimes("next", PROVEN_BOUND - 3_000n, 500).reachedProvenBound, true);
   });
 
   it("with no cap again, sieves fully: nothing left for Miller–Rabin to reject", () => {
