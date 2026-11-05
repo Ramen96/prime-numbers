@@ -28,15 +28,31 @@ static uint64_t batch_offsets[MAX_BATCH];
 static int batch_hit_memory_limit = 0;
 // set when the last call stopped at a candidate the sieve can't settle and
 // Miller–Rabin can't prove: one past its proven bound, a(13), about 3.3 * 10^24
-// (primality.h). It and everything after it stay pending (A1) until Phase 5
+// (primality.h). It and everything after it stay pending (A1). Only while
+// probable primes aren't allowed (below)
 static int batch_hit_proven_bound = 0;
 
-// The survivors the last call found composite by Miller–Rabin, so JavaScript
-// can check each one again (A3): its distance from the requested number, and
-// its evidence, a small prime factor or a witness base (primality.h).
+// Past a(13), Miller–Rabin proves nothing, so when this is on, survivors there
+// go through BPSW instead (Phase 5): a composite is rejected with its evidence,
+// and a pass goes into the batch as a candidate, which the worker proves (ECPP)
+// and checks before it's shown. Off until the worker can do that; while it's off,
+// the list stops at a(13) as before. Set between calls only, by the calling thread
+static int probable_primes_allowed = 0;
+void set_probable_primes_allowed(int allowed) { probable_primes_allowed = allowed; }
+
+// The survivors the last call found composite by Miller–Rabin (or BPSW), so
+// JavaScript can check each one again (A3): its distance from the requested
+// number, how it was rejected, and its evidence, a small prime factor or a
+// witness base (primality.h), or 0 when the kind needs none.
 // Distances fit 64 bits for the same reason batch offsets do.
+typedef enum {
+  REJECTED_WITH_EVIDENCE = 0, // the evidence divides it, or is a witness
+  REJECTED_AS_SQUARE = 1,     // it's a perfect square (BPSW)
+  REJECTED_BY_LUCAS = 2,      // it fails the strong Lucas test (BPSW)
+} rejection_kind;
 static uint64_t *rejected_distances = NULL;
 static uint32_t *rejected_evidence = NULL;
+static uint8_t *rejected_kinds = NULL;
 static size_t rejected_count = 0;
 static size_t rejected_capacity = 0;
 
@@ -154,6 +170,7 @@ int batch_reached_proven_bound(void) { return batch_hit_proven_bound; }
 size_t batch_rejected_count(void) { return rejected_count; }
 uint64_t *batch_rejected_distances(void) { return rejected_distances; }
 uint32_t *batch_rejected_evidence(void) { return rejected_evidence; }
+uint8_t *batch_rejected_kinds(void) { return rejected_kinds; }
 
 void set_sieve_prime_cap(uint64_t cap) { sieve_prime_cap = cap; }
 
@@ -430,6 +447,11 @@ typedef struct {
   uint64_t largest_needed;    // shared window: its largest base prime needed
   size_t checkpoints;         // shared window: checkpoints at or below that
   uint64_t collect_below;     // whole windows: collect the primes below this
+  // other work shared across the threads, kept outside the sieve (the ECPP
+  // proofs, Phase 5): each thread calls task(thread_index, task_context).
+  // NULL task: not a task job
+  void (*task)(int thread_index, void *context);
+  void *task_context;
   // proving survivors (Phase 4): each thread proves its share of these
   // indices into the segment at proof_low, writing the verdicts and evidence
   // at the same positions. NULL proof_indices: not a proving job
@@ -484,14 +506,18 @@ static big_number *thread_survivor(int thread_index) {
 }
 
 // the Miller–Rabin verdict for the number at `index` in the segment at low,
-// with `scratch` for its value. safe on several threads at once: each brings
-// its own scratch, and primality.c keeps no state between calls
+// with `scratch` for its value, or past a(13) the BPSW verdict when probable
+// primes are allowed. safe on several threads at once: each brings its own
+// scratch, and primality.c keeps no state between calls
 static primality_verdict prove_number(const big_number *low, uint64_t index, big_number *scratch, uint32_t *evidence) {
   if (big_number_fits_u64(low) && big_number_to_u64(low) <= UINT64_MAX - 2 * index)
     return miller_rabin_u64(big_number_to_u64(low) + 2 * index, evidence);
-  if (big_number_copy(scratch, low) && big_number_add_small(scratch, 2 * index))
-    return miller_rabin(scratch, evidence);
-  return PRIMALITY_OUT_OF_MEMORY;
+  if (!big_number_copy(scratch, low) || !big_number_add_small(scratch, 2 * index))
+    return PRIMALITY_OUT_OF_MEMORY;
+  primality_verdict verdict = miller_rabin(scratch, evidence);
+  if (verdict == PRIMALITY_BEYOND_PROVEN_BOUND && probable_primes_allowed)
+    verdict = bpsw(scratch, evidence);
+  return verdict;
 }
 
 // one thread's share of a proving job: positions [count * t / threads,
@@ -539,6 +565,10 @@ size_t measured_parallel_threshold(void) {
 
 // one thread's share of a job, in its own segment
 static void run_slice(const sieve_job *job, int thread_index) {
+  if (job->task) {
+    job->task(thread_index, job->task_context);
+    return;
+  }
   if (job->proof_indices) {
     prove_share(job, thread_index);
     return;
@@ -638,6 +668,21 @@ static void run_job(const sieve_job *job) {
 #else
 static void run_job(const sieve_job *job) { run_slice(job, 0); }
 #endif
+
+// how many threads take part in a job: the helpers and the calling thread
+int sieve_thread_count(void) { return helper_count + 1; }
+
+// runs task(t, context) on every thread at once, t = 0 … sieve_thread_count() − 1
+// (the calling thread is 0), and returns when all are done. for work kept outside
+// the sieve, like the ECPP proofs; the sieve's own state isn't touched. calling
+// thread only, between calls, like every other job
+void sieve_run_on_every_thread(void (*task)(int thread_index, void *context), void *context) {
+  sieve_job job = {0};
+  job.threads = helper_count + 1;
+  job.task = task;
+  job.task_context = context;
+  run_job(&job);
+}
 
 // runs a shared-window job on `threads` threads and merges their marks into
 // `segment`: a number is composite if any thread marked it
@@ -949,7 +994,7 @@ static uint64_t first_index_needing_proof(const big_number *low) {
 
 // keeps a composite's distance and evidence for JavaScript to check again.
 // returns 0 if memory runs out
-static int record_rejected(uint64_t distance, uint32_t evidence) {
+static int record_rejected(uint64_t distance, uint32_t evidence, rejection_kind kind) {
   if (rejected_count == rejected_capacity) {
     size_t new_capacity = rejected_capacity ? 2 * rejected_capacity : 1024;
     uint64_t *grown_distances = realloc(rejected_distances, new_capacity * sizeof *grown_distances);
@@ -960,10 +1005,15 @@ static int record_rejected(uint64_t distance, uint32_t evidence) {
     if (!grown_evidence)
       return 0;
     rejected_evidence = grown_evidence;
+    uint8_t *grown_kinds = realloc(rejected_kinds, new_capacity * sizeof *grown_kinds);
+    if (!grown_kinds)
+      return 0;
+    rejected_kinds = grown_kinds;
     rejected_capacity = new_capacity;
   }
   rejected_distances[rejected_count] = distance;
   rejected_evidence[rejected_count] = evidence;
+  rejected_kinds[rejected_count] = (uint8_t)kind;
   rejected_count++;
   return 1;
 }
@@ -1065,13 +1115,20 @@ static survivor_state settle_survivor(const big_number *low, uint64_t index, uin
 
   switch (verdict) {
   case PRIMALITY_PRIME:
+  case PRIMALITY_PROBABLE_PRIME: // past a(13): a candidate, proven by the worker before it's shown
     return SURVIVOR_PRIME;
   case PRIMALITY_COMPOSITE_BY_FACTOR:
   case PRIMALITY_COMPOSITE_BY_WITNESS:
-    if (record_rejected(distance, evidence))
+  case PRIMALITY_COMPOSITE_BY_SQUARE: // these two from BPSW, with no number as evidence
+  case PRIMALITY_COMPOSITE_BY_LUCAS: {
+    rejection_kind kind = verdict == PRIMALITY_COMPOSITE_BY_SQUARE ? REJECTED_AS_SQUARE
+                          : verdict == PRIMALITY_COMPOSITE_BY_LUCAS ? REJECTED_BY_LUCAS
+                                                                     : REJECTED_WITH_EVIDENCE;
+    if (record_rejected(distance, kind == REJECTED_WITH_EVIDENCE ? evidence : 0, kind))
       return SURVIVOR_COMPOSITE;
     batch_hit_memory_limit = 1; // proven, but it couldn't be kept for checking
     return SURVIVOR_UNSETTLED;
+  }
   case PRIMALITY_BEYOND_PROVEN_BOUND:
     batch_hit_proven_bound = 1;
     return SURVIVOR_UNSETTLED;

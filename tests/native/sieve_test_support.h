@@ -30,6 +30,10 @@ int batch_reached_proven_bound(void);
 size_t batch_rejected_count(void);
 uint64_t *batch_rejected_distances(void);
 uint32_t *batch_rejected_evidence(void);
+uint8_t *batch_rejected_kinds(void);
+void set_probable_primes_allowed(int allowed);
+int sieve_thread_count(void);
+void sieve_run_on_every_thread(void (*task)(int thread_index, void *context), void *context);
 void set_sieve_prime_cap(uint64_t cap);
 uint64_t base_prime_limit(void);
 int extend_base_primes(uint64_t limit);
@@ -114,8 +118,13 @@ static u128 power_mod(u128 base, u128 exponent, u128 modulus) {
   return result;
 }
 
+#define PROVEN_BOUND (((u128)0x2be69 << 64) | ((u128)0x51adc5b2 << 32) | 0x2410a5fd)
+
+// Deterministic below a(13). From there up, more bases (to 71): not a proof, but
+// a(13) itself passes the first 13, and this shares no code with BPSW, which is
+// what it's checked against there.
 static int is_prime_reference(u128 candidate) {
-  static const u128 witnesses[] = {2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41};
+  static const u128 witnesses[] = {2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47, 53, 59, 61, 67, 71};
   if (candidate < 2)
     return 0;
   for (size_t i = 0; i < sizeof witnesses / sizeof *witnesses; i++) {
@@ -128,7 +137,8 @@ static int is_prime_reference(u128 candidate) {
     odd_part >>= 1;
     powers_of_two++;
   }
-  for (size_t i = 0; i < sizeof witnesses / sizeof *witnesses; i++) {
+  size_t bases = candidate < PROVEN_BOUND ? 13 : sizeof witnesses / sizeof *witnesses;
+  for (size_t i = 0; i < bases; i++) {
     u128 value = power_mod(witnesses[i], odd_part, candidate);
     if (value == 1 || value == candidate - 1)
       continue;
@@ -217,9 +227,6 @@ static void check_record_gap(const char *test_name, u128 prime, unsigned gap) {
 
 // ── partial sieving (Phase 4) ─────────────────────────────────────────────
 
-// a(13) (OEIS A014233): from here up, Miller–Rabin proves nothing
-#define PROVEN_BOUND (((u128)0x2be69 << 64) | ((u128)0x51adc5b2 << 32) | 0x2410a5fd)
-
 // The smallest prime factor of odd n, if it's at most `limit` (else 0).
 static u128 small_factor(u128 n, uint64_t limit) {
   for (uint64_t divisor = 3; divisor <= limit && (u128)divisor * divisor <= n; divisor += 2)
@@ -237,6 +244,7 @@ static void check_partial_batch(const char *test_name, int next, u128 from, int 
   set_sieve_prime_cap(cap);
   check_batch(test_name, next, from, count);
   expect(test_name, "no proven-bound stop", 0, (u128)batch_reached_proven_bound());
+  expect(test_name, "not the memory limit", 0, (u128)batch_reached_memory_limit());
 
   // the range the batch covered, and its rejected candidates as numbers
   static u128 primes[MAX_PRIMES];
@@ -284,10 +292,19 @@ static void check_partial_batch(const char *test_name, int next, u128 from, int 
     rejected_met += rejected_numbers[index] >= low && rejected_numbers[index] <= high &&
                     !is_prime_reference(rejected_numbers[index]);
   expect(test_name, "every rejected number is a composite in the range", rejected, rejected_met);
-  // each one's evidence proves it composite: a factor, or a Miller–Rabin witness
+  // each one's evidence proves it composite: a factor, or a Miller–Rabin witness.
+  // BPSW's square and Lucas verdicts (past a(13)) carry no number: the reference
+  // has already found each one composite, above
   for (size_t index = 0; index < rejected; index++) {
     u128 n = rejected_numbers[index];
-    uint32_t evidence = batch_rejected_evidence()[next ? index : rejected - 1 - index]; // same order as above
+    size_t position = next ? index : rejected - 1 - index; // same order as above
+    uint32_t evidence = batch_rejected_evidence()[position];
+    uint8_t kind = batch_rejected_kinds()[position];
+    checks_run++;
+    if (kind > 2 || (kind != 0 && (evidence != 0 || n < PROVEN_BOUND)))
+      fail(test_name, "a rejection with no number as evidence is BPSW's, past a(13)", n, kind);
+    if (kind != 0)
+      continue;
     u128 odd_part = n - 1;
     int powers_of_two = 0;
     while (!(odd_part & 1)) {

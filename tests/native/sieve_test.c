@@ -296,6 +296,53 @@ static void test_partial_sieving(void) {
   expect("partial sieving", "proofs never redone", 0, (u128)sieve_test_proofs_redone());
 }
 
+// ── past a(13), with BPSW (Phase 5) ───────────────────────────────────────
+
+// With probable primes allowed, the sieve doesn't stop at a(13): every survivor
+// past it gets BPSW, passes are reported, and composites are rejected with
+// their evidence, or their kind when BPSW's verdict has no number. a(13) itself
+// passes the first 13 Miller–Rabin bases, so BPSW must throw it out by Lucas.
+static void test_probable_primes(void) {
+  set_probable_primes_allowed(1);
+  check_partial_batch("BPSW: next across a(13), cap 1000", 1, PROVEN_BOUND - 5000, BATCH_SIZE, 1000);
+  check_partial_batch("BPSW: prev across a(13), cap 1000", 0, PROVEN_BOUND + 30000, BATCH_SIZE, 1000);
+  check_partial_batch("BPSW: next past a(13), cap 3", 1, PROVEN_BOUND + 1000000, BATCH_SIZE, 3);
+
+  // a(13) is rejected by the strong Lucas test, with no number as evidence
+  set_sieve_prime_cap(1000);
+  static u128 primes[MAX_PRIMES];
+  sieve_primes(1, PROVEN_BOUND - 2, 1, primes);
+  int found = 0;
+  for (size_t index = 0; index < batch_rejected_count(); index++)
+    if (batch_rejected_distances()[index] == 2) {
+      found = 1;
+      expect("BPSW at a(13)", "rejected by Lucas", 2, batch_rejected_kinds()[index]);
+      expect("BPSW at a(13)", "with no number as evidence", 0, batch_rejected_evidence()[index]);
+    }
+  expect("BPSW at a(13)", "a(13) was rejected", 1, (u128)found);
+  set_sieve_prime_cap(UINT64_MAX);
+  set_probable_primes_allowed(0);
+}
+
+// sieve_run_on_every_thread: the task runs once on each thread, and all of them
+// have finished when it returns
+static int task_calls[64];
+static void count_task_call(int thread_index, void *context) {
+  (void)context;
+  if (thread_index >= 0 && thread_index < 64)
+    __atomic_add_fetch(&task_calls[thread_index], 1, __ATOMIC_RELAXED);
+}
+
+static void test_running_on_every_thread(void) {
+  for (int round = 0; round < 3; round++) {
+    memset(task_calls, 0, sizeof task_calls);
+    sieve_run_on_every_thread(count_task_call, NULL);
+    for (int thread = 0; thread < 64; thread++)
+      expect("running on every thread", "once on each thread, none elsewhere", thread < sieve_thread_count() ? 1 : 0,
+             (u128)__atomic_load_n(&task_calls[thread], __ATOMIC_RELAXED));
+  }
+}
+
 // ── sweeps ────────────────────────────────────────────────────────────────
 
 #define SWEEP_LIMIT 3000000
@@ -368,6 +415,8 @@ int main(void) {
   test_record_gaps();
   test_sweeps_against_a_plain_sieve();
   test_partial_sieving();
+  test_probable_primes();
+  test_running_on_every_thread();
   // after everything, including the rolled-back extensions
   expect("base prime storage", "ascending, below the limit, checkpoints where they belong", 1, (u128)sieve_test_base_primes_consistent());
 #ifdef SIEVE_THREADS
