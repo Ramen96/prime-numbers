@@ -2,6 +2,7 @@
 // as WasmSieve sees it. Shared by the worker's loader (loadSieve.ts) and the
 // Wasm tests, so both go through the same boundary.
 
+import type { RawProofSlotExports } from "./proofSlots.ts";
 import type { RawSieveExports } from "./wasmSieve.ts";
 
 /** The threaded module's starting memory: Emscripten's default INITIAL_MEMORY. */
@@ -32,6 +33,15 @@ export interface ThreadedSieveModule {
   _set_parallel_threshold(checkpoints: number): void;
   _measured_parallel_threshold(): number;
   _take_measuring_ms(): number;
+  _proof_slot_count(): number;
+  _proof_input_buffer(limbCount: number): number;
+  _proof_slot_start(slot: number, limbCount: number): number;
+  _proof_slots_run(work: number): number;
+  _proof_slot_state_of(slot: number): number;
+  _proof_slot_step_count(slot: number): number;
+  _proof_slot_value(slot: number, step: number, field: number): number;
+  _proof_output_buffer(): number;
+  _proof_slot_clear(slot: number): void;
 }
 
 /**
@@ -67,5 +77,21 @@ export function rawExportsOf(sieveModule: ThreadedSieveModule): RawSieveExports 
     batch_rejected_kinds: sieveModule._batch_rejected_kinds,
     set_sieve_prime_cap: sieveModule._set_sieve_prime_cap,
     take_measuring_ms: sieveModule._take_measuring_ms,
+  };
+}
+
+/** The module's proof slot exports under the names ProofSlots expects (proofSlots.ts). */
+export function rawProofSlotExportsOf(sieveModule: ThreadedSieveModule): RawProofSlotExports {
+  return {
+    memory: sieveModule.wasmMemory,
+    proof_slot_count: sieveModule._proof_slot_count,
+    proof_input_buffer: sieveModule._proof_input_buffer,
+    proof_slot_start: sieveModule._proof_slot_start,
+    proof_slots_run: sieveModule._proof_slots_run,
+    proof_slot_state_of: sieveModule._proof_slot_state_of,
+    proof_slot_step_count: sieveModule._proof_slot_step_count,
+    proof_slot_value: sieveModule._proof_slot_value,
+    proof_output_buffer: sieveModule._proof_output_buffer,
+    proof_slot_clear: sieveModule._proof_slot_clear,
   };
 }
