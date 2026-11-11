@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useLayoutEffect, useMemo, useRef, useState } from "react";
+import { formatWholeNumber } from "@/lib/formatNumber";
 import scrollbar from "./ThemedScrollbar.module.scss";
 import { PI_PRIME, PiMark } from "./PiMark";
 import { Wolf359Mark, WOLF_359_PRIME } from "./Wolf359Mark";
@@ -18,7 +19,6 @@ const RENDER_MARGIN_PX = 600;
 /** Until the browser can measure, assume a typical screen. */
 const INITIAL_VIEWPORT_HEIGHT_GUESS_PX = 800;
 
-const numberFormatter = new Intl.NumberFormat("en-US");
 
 interface Props {
   /** Decimal strings, ascending. */
@@ -119,7 +119,7 @@ export function FavoritesList({ favorites, onRemoveFavorite }: Props) {
   const renderedRows = [];
   for (let index = firstRenderedIndex; index < lastRenderedIndexExclusive; index++) {
     const favorite = favorites[index];
-    const formattedPrime = numberFormatter.format(BigInt(favorite));
+    const formattedPrime = formatWholeNumber(BigInt(favorite));
     renderedRows.push(
       <li
         key={favorite}

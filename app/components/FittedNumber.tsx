@@ -1,10 +1,10 @@
 "use client";
 
 import { useLayoutEffect, useRef, useState } from "react";
+import { formatWholeNumber } from "@/lib/formatNumber";
 import { fitNumber, type GlyphWidths } from "@/lib/shortenNumber";
 import { GlyphRuler, readGlyphWidths } from "./GlyphRuler";
 
-const numberFormatter = new Intl.NumberFormat("en-US");
 
 /**
  * How a shortened number looks: a dotted underline as the hint that it opens
@@ -61,7 +61,7 @@ export function FittedNumber({
     return () => resizeObserver.disconnect();
   }, []);
 
-  const formatted = value === null ? "—" : numberFormatter.format(value);
+  const formatted = value === null ? "—" : formatWholeNumber(value);
   const fitted =
     value !== null && space ? fitNumber(formatted, space.widthPx, space.glyphs) : { text: formatted, shortened: false };
 

@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { ELLIPSIS, fitNumber, textWidth, type GlyphWidths } from "./shortenNumber.ts";
+import { formatWholeNumber } from "./formatNumber.ts";
 
-const numberFormatter = new Intl.NumberFormat("en-US");
-const format = (value: bigint) => numberFormatter.format(value);
+// Intl.NumberFormat throws past about a million digits, so not that (formatNumber.ts)
+const format = formatWholeNumber;
 
 // Widths are multiples of 1/8 px, so every sum is exact in floating point and
 // "exactly as wide as the space" really is exact.

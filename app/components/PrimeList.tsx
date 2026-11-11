@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { bufferLabelsAreEstimated } from "@/lib/primes/rollingBuffer";
 import type { Batch, BufferStatus, ScrollInstruction } from "@/lib/primes/usePrimeBuffer";
+import { formatWholeNumber } from "@/lib/formatNumber";
 import { PROVEN_BOUND_LINES } from "@/lib/mentatLines";
 import { DETERMINISTIC_VERIFICATION_LIMIT } from "@/lib/primes/verifyPrimes";
 import { fitNumber, textWidth, type GlyphWidths } from "@/lib/shortenNumber";
@@ -49,7 +50,6 @@ interface Props {
   onShowFullPrime: (prime: bigint, opener: HTMLElement) => void;
 }
 
-const numberFormatter = new Intl.NumberFormat("en-US");
 
 // Below 640px a row stacks the prime above its position label, so a 16-digit
 // prime, its label and the star all fit; from 640px up they share one line.
@@ -325,8 +325,8 @@ export function PrimeList({
       const primeIndex = screenRowToPrimeIndex(screenRow);
       const prime = allPrimes[primeIndex];
       // 2 is #1, 3 is #2, … After a jump this is estimated (see rollingBuffer.ts).
-      const ordinal = numberFormatter.format(ordinalOfFirstPrime + BigInt(primeIndex));
-      const formattedPrime = numberFormatter.format(prime);
+      const ordinal = formatWholeNumber(ordinalOfFirstPrime + BigInt(primeIndex));
+      const formattedPrime = formatWholeNumber(prime);
       const isFavorite = favoritePrimes.has(String(prime));
       // Shortened in the middle if it doesn't fit beside (or above) its label.
       let shownPrime = { text: formattedPrime, shortened: false };

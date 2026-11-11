@@ -25,7 +25,39 @@ function statValue(page: Page, label: string): Locator {
   return page.locator("dt", { hasText: label }).locator("xpath=following-sibling::dd[1]");
 }
 
+/**
+ * Commas every three digits, written here without Intl.NumberFormat, which
+ * throws for numbers this long (Chromium 158 from 999,001 digits).
+ */
+function groupedByThrees(digits: string): string {
+  const groups = [digits.slice(0, digits.length % 3 || 3)];
+  for (let index = groups[0].length; index < digits.length; index += 3) groups.push(digits.slice(index, index + 3));
+  return groups.join(",");
+}
+
+/** A record of just over a million digits: past where Intl.NumberFormat gives up. */
+const MILLION_DIGIT_RECORD = "7" + "0".repeat(999_999) + "13";
+
 test.describe("long numbers in the stats", () => {
+  test("a record of over a million digits is shown, shortened, with no error", async ({ page }) => {
+    expect(MILLION_DIGIT_RECORD).toHaveLength(1_000_002);
+    const pageErrors: string[] = [];
+    page.on("pageerror", (error) => pageErrors.push(String(error)));
+    await seedRecords(page, { furthestScroll: null, biggestPrimeVisited: MILLION_DIGIT_RECORD });
+    await new PrimeListPage(page).open();
+
+    const whole = groupedByThrees(MILLION_DIGIT_RECORD);
+    const button = statValue(page, "biggest visited").getByRole("button");
+    await expect(button).toBeVisible();
+    expect(await button.getAttribute("aria-label"), "named with the whole number").toBe(whole);
+    const [front, back] = (await button.innerText()).split(ELLIPSIS);
+    expect(whole.startsWith(front) && whole.endsWith(back), "shortened to the whole number's ends").toBe(true);
+
+    await button.click();
+    await expect(page.getByText("1,000,002 digits")).toBeVisible();
+    expect(pageErrors).toEqual([]);
+  });
+
   test("are shortened in the middle, with the full number as their name and nothing overflowing", async ({ page }) => {
     expect(SIXTY_DIGIT_RECORD).toHaveLength(60);
     expect(THOUSAND_DIGIT_RECORD).toHaveLength(1000);
@@ -71,8 +103,11 @@ test.describe("long numbers in the stats", () => {
       const lineHeightPx = parseFloat(getComputedStyle(paragraph).lineHeight);
       // Each digit group is its own text node (WrappableNumber.tsx); one that
       // wraps inside itself has more than one box.
-      const splitGroups = [...paragraph.childNodes]
-        .filter((node) => node.nodeType === Node.TEXT_NODE && /\d/.test(node.textContent ?? ""))
+      const textNodes: Node[] = [];
+      const walker = document.createTreeWalker(paragraph, NodeFilter.SHOW_TEXT);
+      while (walker.nextNode()) textNodes.push(walker.currentNode);
+      const splitGroups = textNodes
+        .filter((node) => /\d/.test(node.textContent ?? ""))
         .filter((node) => {
           const range = document.createRange();
           range.selectNodeContents(node);
@@ -102,8 +137,11 @@ test.describe("long numbers in the stats", () => {
     // own box (rather than spilling out over the buttons below it).
     const scrolledToEnd = await fullNumber.evaluate((paragraph) => {
       paragraph.scrollTop = paragraph.scrollHeight;
+      // the last text node, the number's last digit group, however deep it sits
+      let lastText: Node = paragraph;
+      while (lastText.lastChild) lastText = lastText.lastChild;
       const lastGroup = document.createRange();
-      lastGroup.selectNodeContents(paragraph.lastChild!);
+      lastGroup.selectNodeContents(lastText);
       const lastGroupBox = lastGroup.getBoundingClientRect();
       const paragraphBox = paragraph.getBoundingClientRect();
       return {

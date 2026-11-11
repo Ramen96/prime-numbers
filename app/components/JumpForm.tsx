@@ -7,6 +7,7 @@ import {
   useSyncExternalStore,
   type SubmitEvent,
 } from "react";
+import { formatWholeNumber } from "@/lib/formatNumber";
 import { jumpParameterFrom } from "@/lib/jumpUrl";
 import { parseJumpTarget } from "@/lib/primes/parseJumpTarget";
 import type { JumpResult } from "@/lib/primes/usePrimeBuffer";
@@ -18,7 +19,6 @@ interface Props {
   lastJump: JumpResult | null;
 }
 
-const numberFormatter = new Intl.NumberFormat("en-US");
 
 // The page is statically rendered, so ?jump= can only be read in the browser:
 // the server snapshot is always an empty query string.
@@ -98,10 +98,10 @@ export function JumpForm({ onJump, lastJump }: Props) {
           <span key={lastJump.generation} className={`${fadingNotice.fadingNotice} text-muted`}>
             Jumped to{" "}
             <span className="font-mono text-foreground">
-              {numberFormatter.format(lastJump.firstPrimeFound)}
+              {formatWholeNumber(lastJump.firstPrimeFound)}
             </span>
             {lastJump.firstPrimeFound !== lastJump.requestedNumber &&
-              ` (first prime ≥ ${numberFormatter.format(lastJump.requestedNumber)})`}
+              ` (first prime ≥ ${formatWholeNumber(lastJump.requestedNumber)})`}
           </span>
         ) : null}
       </p>
