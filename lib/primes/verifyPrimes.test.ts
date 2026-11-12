@@ -68,12 +68,14 @@ describe("verifyPrimes from a(13) up (certificates)", () => {
   ]);
 
   it("accepts primes past a(13) whose certificates hold, alongside primes below it", () => {
-    assert.deepEqual(verifyPrimes([1_000_003n, justPastBound.prime, thirtyDigits.prime], bothCertificates), { verified: true });
+    const mixed = [1_000_003n, justPastBound.prime, thirtyDigits.prime];
+    assert.deepEqual(verifyPrimes(mixed, bothCertificates), { verified: true });
     assert.deepEqual(verifyBatch([justPastBound.prime], [], bothCertificates), { verified: true });
   });
 
   it("refuses a prime past a(13) with no certificate", () => {
-    assert.deepEqual(verifyPrimes([justPastBound.prime, thirtyDigits.prime], new Map([[justPastBound.prime, justPastBound.steps]])), {
+    const onlyFirst = new Map([[justPastBound.prime, justPastBound.steps]]);
+    assert.deepEqual(verifyPrimes([justPastBound.prime, thirtyDigits.prime], onlyFirst), {
       verified: false,
       disputedPrime: thirtyDigits.prime,
       verdict: "beyond-proven-bound",

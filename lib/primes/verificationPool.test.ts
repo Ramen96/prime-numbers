@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import { certifiedPrimeFrom } from "../../tests/support/curveCertificates.ts";
+import type { CertificateStep } from "./primalityCertificate.ts";
 import {
+  certificatesFor,
   joinVerifications,
   SMALLEST_PRIME_WORTH_SHARING,
   splitIntoShares,
@@ -11,17 +14,25 @@ import { verifyBatch } from "./verifyPrimes.ts";
 import type { RejectedComposite } from "./wasmSieve.ts";
 
 /** A stand-in worker that verifies for real, or fails, and records what it was sent. */
-function standInWorker(sent: bigint[][], options: { fails?: boolean; sentRejected?: RejectedComposite[][] } = {}): Worker {
+function standInWorker(
+  sent: bigint[][],
+  options: {
+    fails?: boolean;
+    sentRejected?: RejectedComposite[][];
+    sentCertificates?: VerificationRequest["certificates"][];
+  } = {},
+): Worker {
   const worker = {
     onmessage: null as ((event: { data: unknown }) => void) | null,
     onerror: null as ((event: { message: string; preventDefault(): void }) => void) | null,
     terminated: false,
-    postMessage({ primes, rejected }: VerificationRequest) {
+    postMessage({ primes, rejected, certificates }: VerificationRequest) {
       sent.push(primes);
       options.sentRejected?.push(rejected);
+      options.sentCertificates?.push(certificates);
       queueMicrotask(() => {
         if (options.fails) worker.onerror?.({ message: "failed to load", preventDefault() {} });
-        else worker.onmessage?.({ data: { verification: verifyBatch(primes, rejected) } });
+        else worker.onmessage?.({ data: { verification: verifyBatch(primes, rejected, certificates) } });
       });
     },
     terminate() {
@@ -144,5 +155,56 @@ describe("VerificationPool and rejected composites (Phase 4)", () => {
     assert.deepEqual(await pool.verify([7n], [{ candidate: 9n, evidence: 3, kind: "evidence" }]), { verified: true });
     assert.equal((await pool.verify([7n], [{ candidate: 11n, evidence: 3, kind: "evidence" }])).verified, false);
     assert.equal(started, 0);
+  });
+});
+
+describe("VerificationPool and certificates (Phase 5)", () => {
+  // primes past a(13), each with a real certificate
+  const CERTIFIED = [10n ** 25n, 10n ** 26n, 10n ** 27n, 10n ** 28n, 10n ** 29n, 10n ** 30n].map(certifiedPrimeFrom);
+  const PRIMES = CERTIFIED.map(({ prime }) => prime);
+  const CERTIFICATES = new Map(CERTIFIED.map(({ prime, steps }) => [prime, steps]));
+
+  it("sends each share only its own primes' certificates", async () => {
+    const sent: bigint[][] = [];
+    const sentCertificates: VerificationRequest["certificates"][] = [];
+    const pool = new VerificationPool(3, () => standInWorker(sent, { sentCertificates }));
+    assert.deepEqual(await pool.verify(PRIMES, [], CERTIFICATES), { verified: true });
+    assert.equal(sent.length, 3);
+    sent.forEach((share, index) => assert.deepEqual([...sentCertificates[index].keys()], share));
+  });
+
+  it("finds a broken certificate in the last share", async () => {
+    const last = CERTIFIED.at(-1)!;
+    const [first, ...rest] = last.steps;
+    const broken = new Map<bigint, readonly CertificateStep[]>(CERTIFICATES);
+    broken.set(last.prime, [{ ...first, pointX: first.pointX + 1n }, ...rest]);
+    const pool = new VerificationPool(3, () => standInWorker([]));
+    const verification = await pool.verify(PRIMES, [], broken);
+    assert.equal(verification.verified, false);
+    assert.equal("disputedPrime" in verification && verification.disputedPrime, last.prime);
+    assert.equal("verdict" in verification && verification.verdict, "certificate-invalid");
+  });
+
+  it("refuses a prime past a(13) with no certificate, in workers or inline", async () => {
+    const withoutLast = new Map(CERTIFICATES);
+    withoutLast.delete(PRIMES.at(-1)!);
+    const expected = { verified: false, disputedPrime: PRIMES.at(-1), verdict: "beyond-proven-bound" };
+    assert.deepEqual(await new VerificationPool(3, () => standInWorker([])).verify(PRIMES, [], withoutLast), expected);
+    assert.deepEqual(await new VerificationPool(1, () => standInWorker([])).verify(PRIMES, [], withoutLast), expected);
+  });
+
+  it("checks certificates inline when a worker fails", async () => {
+    const pool = new VerificationPool(2, () => standInWorker([], { fails: true }));
+    assert.deepEqual(await pool.verify(PRIMES, [], CERTIFICATES), { verified: true });
+  });
+});
+
+describe("certificatesFor", () => {
+  it("keeps only the certificates of the primes given", () => {
+    const steps = (number: bigint): CertificateStep[] => [
+      { number, curveA: 0n, curveB: 0n, pointX: 0n, pointY: 0n, orderPrime: 0n },
+    ];
+    const all = new Map([5n, 7n, 11n].map((prime) => [prime, steps(prime)]));
+    assert.deepEqual(certificatesFor([7n, 13n], all), new Map([[7n, steps(7n)]]));
   });
 });

@@ -5,17 +5,21 @@
 // sieving, when the sieving threads are idle. So the batch is split into
 // shares, checked in parallel, and the answers joined in order: the first
 // share with a dispute decides (within a share, primes are checked before
-// rejected composites). Small batches are checked inline, where messaging
+// rejected composites). Each share carries the certificates of its own primes
+// past a(13), and only those. Small batches are checked inline, where messaging
 // would cost more than checking. If the workers can't be used, verification
 // is inline: slower, never skipped.
 
-import { verifyBatch, type BatchVerification } from "./verifyPrimes.ts";
+import type { CertificateStep } from "./primalityCertificate.ts";
+import { verifyBatch, type BatchVerification, type Certificates } from "./verifyPrimes.ts";
 import type { RejectedComposite } from "./wasmSieve.ts";
 
 export interface VerificationRequest {
   primes: bigint[];
   /** Survivors the sieve's Miller–Rabin rejected, with their evidence (Phase 4). */
   rejected: RejectedComposite[];
+  /** Certificates for this share's primes from a(13) up, keyed by prime (Phase 5). */
+  certificates: Certificates;
 }
 export interface VerificationResponse {
   verification: BatchVerification;
@@ -30,6 +34,16 @@ export function splitIntoShares<T>(primes: readonly T[], shareCount: number): T[
   return Array.from({ length: count }, (_, index) =>
     primes.slice(Math.floor((primes.length * index) / count), Math.floor((primes.length * (index + 1)) / count)),
   );
+}
+
+/** The certificates for `primes` alone, so a share is sent only what it checks. */
+export function certificatesFor(primes: readonly bigint[], certificates: Certificates): Certificates {
+  const share = new Map<bigint, readonly CertificateStep[]>();
+  for (const prime of primes) {
+    const certificate = certificates.get(prime);
+    if (certificate !== undefined) share.set(prime, certificate);
+  }
+  return share;
 }
 
 /** The first share (in order) that isn't verified decides; otherwise all are verified. */
@@ -49,13 +63,17 @@ export class VerificationPool {
     this.#createWorker = createWorker;
   }
 
-  async verify(primes: readonly bigint[], rejected: readonly RejectedComposite[] = []): Promise<BatchVerification> {
+  async verify(
+    primes: readonly bigint[],
+    rejected: readonly RejectedComposite[] = [],
+    certificates: Certificates = new Map(),
+  ): Promise<BatchVerification> {
     const numbersToCheck = primes.length + rejected.length;
     const anyBig =
       (primes.at(-1) ?? 0n) >= SMALLEST_PRIME_WORTH_SHARING ||
       rejected.some(({ candidate }) => candidate >= SMALLEST_PRIME_WORTH_SHARING);
     if (this.#size < 2 || this.#unusable || numbersToCheck === 0 || !anyBig) {
-      return verifyBatch(primes, rejected);
+      return verifyBatch(primes, rejected, certificates);
     }
     try {
       const workers = (this.#workers ??= Array.from({ length: this.#size }, () => this.#createWorker()));
@@ -65,7 +83,12 @@ export class VerificationPool {
       const rejectedShares = splitIntoShares(rejected, shareCount);
       const verifications = await Promise.all(
         Array.from({ length: shareCount }, (_, index) =>
-          this.#verifyShare(workers[index], primeShares[index] ?? [], rejectedShares[index] ?? []),
+          this.#verifyShare(
+            workers[index],
+            primeShares[index] ?? [],
+            rejectedShares[index] ?? [],
+            certificatesFor(primeShares[index] ?? [], certificates),
+          ),
         ),
       );
       return joinVerifications(verifications);
@@ -75,18 +98,23 @@ export class VerificationPool {
       this.#unusable = true;
       this.#workers?.forEach((worker) => worker.terminate());
       this.#workers = null;
-      return verifyBatch(primes, rejected);
+      return verifyBatch(primes, rejected, certificates);
     }
   }
 
-  #verifyShare(worker: Worker, primes: bigint[], rejected: RejectedComposite[]): Promise<BatchVerification> {
+  #verifyShare(
+    worker: Worker,
+    primes: bigint[],
+    rejected: RejectedComposite[],
+    certificates: Certificates,
+  ): Promise<BatchVerification> {
     return new Promise((resolve, reject) => {
       worker.onmessage = (event: MessageEvent<VerificationResponse>) => resolve(event.data.verification);
       worker.onerror = (event) => {
         event.preventDefault();
         reject(new Error(event.message || "verification worker failed"));
       };
-      const request: VerificationRequest = { primes, rejected };
+      const request: VerificationRequest = { primes, rejected, certificates };
       worker.postMessage(request);
     });
   }

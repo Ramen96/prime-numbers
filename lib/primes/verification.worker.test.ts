@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import { certifiedPrimeFrom } from "../../tests/support/curveCertificates.ts";
 import type { VerificationRequest, VerificationResponse } from "./verificationPool.ts";
 
 // The worker script only touches `self`: give it a stand-in, load it, and
@@ -21,17 +22,31 @@ function check(request: VerificationRequest): VerificationResponse {
 
 describe("verification.worker", () => {
   it("checks its share's primes", () => {
-    assert.deepEqual(check({ primes: [1_000_003n], rejected: [] }).verification, { verified: true });
-    assert.equal(check({ primes: [2047n], rejected: [] }).verification.verified, false);
+    const primesOnly = (primes: bigint[]): VerificationRequest => ({ primes, rejected: [], certificates: new Map() });
+    assert.deepEqual(check(primesOnly([1_000_003n])).verification, { verified: true });
+    assert.equal(check(primesOnly([2047n])).verification.verified, false);
   });
 
   it("checks its share's rejected composites too", () => {
-    assert.deepEqual(check({ primes: [], rejected: [{ candidate: 2047n, evidence: 3, kind: "evidence" }] }).verification, { verified: true });
-    assert.deepEqual(check({ primes: [], rejected: [{ candidate: 1_000_003n, evidence: 3, kind: "evidence" }] }).verification, {
+    const rejectedOnly = (candidate: bigint): VerificationRequest => ({
+      primes: [],
+      rejected: [{ candidate, evidence: 3, kind: "evidence" }],
+      certificates: new Map(),
+    });
+    assert.deepEqual(check(rejectedOnly(2047n)).verification, { verified: true });
+    assert.deepEqual(check(rejectedOnly(1_000_003n)).verification, {
       verified: false,
       disputedComposite: 1_000_003n,
       evidence: 3,
       kind: "evidence",
     });
+  });
+
+  it("checks its share's primes past a(13) with their certificates", () => {
+    const { prime, steps } = certifiedPrimeFrom(10n ** 30n);
+    assert.deepEqual(check({ primes: [prime], rejected: [], certificates: new Map([[prime, steps]]) }).verification, {
+      verified: true,
+    });
+    assert.equal(check({ primes: [prime], rejected: [], certificates: new Map() }).verification.verified, false);
   });
 });

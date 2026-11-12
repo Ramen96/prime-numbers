@@ -198,7 +198,10 @@ export type BatchVerification =
  * pass checkCertificate; one with no certificate stays "beyond-proven-bound",
  * so nothing gets through for want of a proof.
  */
-export function verifyPrimes(primes: readonly bigint[], certificates: Certificates = NO_CERTIFICATES): PrimesVerification {
+export function verifyPrimes(
+  primes: readonly bigint[],
+  certificates: Certificates = NO_CERTIFICATES,
+): PrimesVerification {
   for (const prime of primes) {
     const verdict = millerRabinVerdict(prime);
     if (verdict === "prime") continue;
