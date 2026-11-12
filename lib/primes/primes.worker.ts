@@ -49,7 +49,7 @@ self.onmessage = (event: MessageEvent<WorkerRequest>) => {
         memoryBudgetBytes,
         calibrator,
         threads,
-        verify: (primes, rejected) => verificationPool.verify(primes, rejected),
+        verify: (primes, rejected, certificates) => verificationPool.verify(primes, rejected, certificates),
       });
     } catch (error) {
       sendToMainThread({

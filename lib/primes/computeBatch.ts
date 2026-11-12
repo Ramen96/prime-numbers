@@ -13,7 +13,7 @@
 import { basePrimesCouldFit } from "./memoryBudget.ts";
 import type { BatchRequest, WorkerMemory, WorkerResponse } from "./protocol.ts";
 import { buildBasePrimes, PARTIAL_SIEVE_PRIME_CAP, type SieveCalibrator } from "./sieveCalibrator.ts";
-import { verifyBatch, type BatchVerification } from "./verifyPrimes.ts";
+import { verifyBatch, type BatchVerification, type Certificates } from "./verifyPrimes.ts";
 import {
   basePrimeLimitNeededFor,
   NO_SIEVE_PRIME_CAP,
@@ -38,7 +38,11 @@ export interface ComputeBatchOptions {
   /** Threads sieving each window, reported with the batch. */
   threads?: number;
   /** How to verify a batch: inline by default, or spread over workers (verificationPool.ts). */
-  verify?: (primes: bigint[], rejected: RejectedComposite[]) => BatchVerification | Promise<BatchVerification>;
+  verify?: (
+    primes: bigint[],
+    rejected: RejectedComposite[],
+    certificates: Certificates,
+  ) => BatchVerification | Promise<BatchVerification>;
   /** What's measured on this device. Without one, only memory decides how to sieve. */
   calibrator?: Pick<SieveCalibrator, "capFor">;
   now?: () => number;
@@ -116,8 +120,11 @@ export async function computeBatch(
   // Miller–Rabin rejected (a prime rejected by mistake would be skipped). If
   // the check and the sieve ever disagree, stop: the disputed batch is never
   // sent. Done even when there are no primes: the rejections still count.
+  // Nothing proves primes past a(13) yet, so there are no certificates, and
+  // verification refuses any prime there (step 4c, c4, adds the proofs).
+  const certificates: Certificates = new Map();
   const verificationStartTime = now();
-  const verification = await verify(primes, rejected);
+  const verification = await verify(primes, rejected, certificates);
   const verificationDurationMs = now() - verificationStartTime;
   if (!verification.verified) {
     send({ type: "error", id, generation, message: disputeMessage(verification) });
@@ -165,9 +172,15 @@ function disputeMessage(verification: Exclude<BatchVerification, { verified: tru
       `doesn’t prove that. Stopped rather than risk skipping a prime.`
     );
   }
+  if (verification.verdict === "certificate-invalid") {
+    return (
+      `The certificate for ${verification.disputedPrime} doesn’t prove it prime (${verification.reason}). ` +
+      `Stopped rather than show it.`
+    );
+  }
   const problem =
     verification.verdict === "composite"
       ? "Miller–Rabin found it composite"
-      : "it is beyond the bound where Miller–Rabin is proven deterministic";
+      : "it is beyond the bound where Miller–Rabin is proven deterministic, and has no certificate";
   return `The sieve reported ${verification.disputedPrime} as prime, but ${problem}. Stopped rather than show it.`;
 }

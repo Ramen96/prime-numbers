@@ -105,6 +105,38 @@ describe("computeBatch", () => {
     if (sent[0].type === "error") assert.match(sent[0].message, /reported 9 as prime/);
   });
 
+  it("passes the verifier certificates (none yet: nothing proves primes past a(13))", async () => {
+    const passed: unknown[] = [];
+    await run(standInSieve([2n, 3n, 5n]), REQUEST, null, {
+      verify: async (_primes, _rejected, certificates) => (passed.push(certificates), { verified: true }),
+    });
+    assert.deepEqual(passed, [new Map()]);
+  });
+
+  it("refuses a prime past a(13) that has no certificate, and says so", async () => {
+    const sent = await run(standInSieve([10n ** 30n + 57n]), { ...REQUEST, from: 10n ** 30n, count: 1 });
+    assert.deepEqual(sent.map((response) => response.type), ["error"]);
+    if (sent[0].type === "error") {
+      assert.match(sent[0].message, /reported 1000000000000000000000000000057 as prime, .*no certificate/);
+    }
+  });
+
+  it("names a prime whose certificate doesn't hold, with the checker's reason", async () => {
+    const sent = await run(standInSieve([10n ** 30n + 57n]), { ...REQUEST, from: 10n ** 30n, count: 1 }, null, {
+      verify: async () => ({
+        verified: false,
+        disputedPrime: 10n ** 30n + 57n,
+        verdict: "certificate-invalid",
+        reason: "the chain is broken",
+      }),
+    });
+    assert.deepEqual(sent.map((response) => response.type), ["error"]);
+    if (sent[0].type === "error") {
+      assert.match(sent[0].message, /certificate for 1000000000000000000000000000057 doesn’t prove it prime/);
+      assert.match(sent[0].message, /\(the chain is broken\)/);
+    }
+  });
+
   it("sieves fully, with no cap, when every base prime a batch needs fits", async () => {
     const sieve = standInSieve([2n, 3n, 5n]);
     await run(sieve);
