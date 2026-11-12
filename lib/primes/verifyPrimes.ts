@@ -13,7 +13,14 @@
 // (a(12) and a(13) from J. Sorenson and J. Webster, "Strong Pseudoprimes to
 // Twelve Prime Bases", Math. Comp. 86 (2017), https://arxiv.org/abs/1509.00864).
 // Using only as many bases as each number needs keeps it fast for small primes.
+//
+// From a(13) up, Miller–Rabin proves nothing, so a prime there must come with
+// a primality certificate (Phase 5), checked by primalityCertificate.ts.
 
+// primalityCertificate.ts imports millerRabinVerdict from here too. The cycle
+// is harmless: both modules only export functions, and neither calls the
+// other while loading.
+import { checkCertificate, type CertificateStep } from "./primalityCertificate.ts";
 import type { RejectedComposite, RejectionKind } from "./wasmSieve.ts";
 
 const PRIME_BASES = [2n, 3n, 5n, 7n, 11n, 13n, 17n, 19n, 23n, 29n, 31n, 37n, 41n];
@@ -166,10 +173,18 @@ export function millerRabinVerdict(candidate: bigint): Verdict {
   return "prime";
 }
 
+/** Certificates for primes from a(13) up, keyed by the prime each one proves. */
+export type Certificates = ReadonlyMap<bigint, readonly CertificateStep[]>;
+
+const NO_CERTIFICATES: Certificates = new Map();
+
 /** The primes alone: each one proven prime, or the first that isn't. */
 export type PrimesVerification =
   | { verified: true }
-  | { verified: false; disputedPrime: bigint; verdict: Exclude<Verdict, "prime"> };
+  /** Miller–Rabin found it composite, or it's from a(13) up and has no certificate. */
+  | { verified: false; disputedPrime: bigint; verdict: Exclude<Verdict, "prime"> }
+  /** Its certificate doesn't prove it prime; `reason` is the checker's. */
+  | { verified: false; disputedPrime: bigint; verdict: "certificate-invalid"; reason: string };
 
 /** A whole batch: its primes, and the composites the sieve rejected. */
 export type BatchVerification =
@@ -177,11 +192,23 @@ export type BatchVerification =
   /** The sieve rejected it as composite, but its evidence (or check of that kind) doesn't prove that. */
   | { verified: false; disputedComposite: bigint; evidence: number; kind: RejectionKind };
 
-/** Checks every prime in a batch. Stops at the first one that isn't proven prime. */
-export function verifyPrimes(primes: readonly bigint[]): PrimesVerification {
+/**
+ * Checks every prime in a batch. Stops at the first one that isn't proven prime.
+ * Below a(13), Miller–Rabin decides. From a(13) up, the prime's certificate must
+ * pass checkCertificate; one with no certificate stays "beyond-proven-bound",
+ * so nothing gets through for want of a proof.
+ */
+export function verifyPrimes(primes: readonly bigint[], certificates: Certificates = NO_CERTIFICATES): PrimesVerification {
   for (const prime of primes) {
     const verdict = millerRabinVerdict(prime);
-    if (verdict !== "prime") return { verified: false, disputedPrime: prime, verdict };
+    if (verdict === "prime") continue;
+    const certificate = verdict === "beyond-proven-bound" ? certificates.get(prime) : undefined;
+    if (certificate === undefined) return { verified: false, disputedPrime: prime, verdict };
+    const check = checkCertificate(prime, certificate);
+    if (!check.valid) {
+      const reason = check.number === prime ? check.reason : `${check.reason} (at ${check.number})`;
+      return { verified: false, disputedPrime: prime, verdict: "certificate-invalid", reason };
+    }
   }
   return { verified: true };
 }
@@ -210,7 +237,11 @@ export function verifyRejectedComposites(rejected: readonly RejectedComposite[])
 }
 
 /** A whole batch: every prime proven prime, then every rejected composite proven composite. */
-export function verifyBatch(primes: readonly bigint[], rejected: readonly RejectedComposite[] = []): BatchVerification {
-  const primesVerification = verifyPrimes(primes);
+export function verifyBatch(
+  primes: readonly bigint[],
+  rejected: readonly RejectedComposite[] = [],
+  certificates: Certificates = NO_CERTIFICATES,
+): BatchVerification {
+  const primesVerification = verifyPrimes(primes, certificates);
   return primesVerification.verified ? verifyRejectedComposites(rejected) : primesVerification;
 }

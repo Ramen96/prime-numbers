@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import { certifiedPrimeFrom } from "../../tests/support/curveCertificates.ts";
 import { isPrime as referenceIsPrime } from "../../tests/support/primality.ts";
 import {
   compositeEvidenceHolds,
@@ -53,6 +54,71 @@ describe("verifyPrimes", () => {
     assert.deepEqual(verifyPrimes([7n, 11n, 2047n, 13n, 15n]), {
       verified: false,
       disputedPrime: 2047n,
+      verdict: "composite",
+    });
+  });
+});
+
+describe("verifyPrimes from a(13) up (certificates)", () => {
+  const justPastBound = certifiedPrimeFrom(DETERMINISTIC_VERIFICATION_LIMIT);
+  const thirtyDigits = certifiedPrimeFrom(10n ** 30n);
+  const bothCertificates = new Map([
+    [justPastBound.prime, justPastBound.steps],
+    [thirtyDigits.prime, thirtyDigits.steps],
+  ]);
+
+  it("accepts primes past a(13) whose certificates hold, alongside primes below it", () => {
+    assert.deepEqual(verifyPrimes([1_000_003n, justPastBound.prime, thirtyDigits.prime], bothCertificates), { verified: true });
+    assert.deepEqual(verifyBatch([justPastBound.prime], [], bothCertificates), { verified: true });
+  });
+
+  it("refuses a prime past a(13) with no certificate", () => {
+    assert.deepEqual(verifyPrimes([justPastBound.prime, thirtyDigits.prime], new Map([[justPastBound.prime, justPastBound.steps]])), {
+      verified: false,
+      disputedPrime: thirtyDigits.prime,
+      verdict: "beyond-proven-bound",
+    });
+  });
+
+  it("refuses a certificate with one value changed", () => {
+    const [first, ...rest] = thirtyDigits.steps;
+    const tampered = [{ ...first, pointY: first.pointY + 1n }, ...rest];
+    const verification = verifyPrimes([thirtyDigits.prime], new Map([[thirtyDigits.prime, tampered]]));
+    assert.equal(verification.verified, false);
+    assert.equal("verdict" in verification && verification.verdict, "certificate-invalid");
+    assert.equal("disputedPrime" in verification && verification.disputedPrime, thirtyDigits.prime);
+  });
+
+  it("refuses another prime's certificate", () => {
+    assert.deepEqual(verifyPrimes([thirtyDigits.prime], new Map([[thirtyDigits.prime, justPastBound.steps]])), {
+      verified: false,
+      disputedPrime: thirtyDigits.prime,
+      verdict: "certificate-invalid",
+      reason: `the chain is broken (at ${justPastBound.prime})`,
+    });
+  });
+
+  it("refuses a chain that stops past a(13), where Miller–Rabin proves nothing", () => {
+    const shortened = thirtyDigits.steps.slice(0, -1);
+    assert.deepEqual(verifyPrimes([thirtyDigits.prime], new Map([[thirtyDigits.prime, shortened]])), {
+      verified: false,
+      disputedPrime: thirtyDigits.prime,
+      verdict: "certificate-invalid",
+      reason: `the chain doesn't end at a number proven prime (at ${shortened.at(-1)!.orderPrime})`,
+    });
+    assert.deepEqual(verifyPrimes([thirtyDigits.prime], new Map([[thirtyDigits.prime, []]])), {
+      verified: false,
+      disputedPrime: thirtyDigits.prime,
+      verdict: "certificate-invalid",
+      reason: "the chain doesn't end at a number proven prime",
+    });
+  });
+
+  it("still finds a composite with a small factor composite, certificate or not", () => {
+    const composite = thirtyDigits.prime * 7n;
+    assert.deepEqual(verifyPrimes([composite], new Map([[composite, thirtyDigits.steps]])), {
+      verified: false,
+      disputedPrime: composite,
       verdict: "composite",
     });
   });
