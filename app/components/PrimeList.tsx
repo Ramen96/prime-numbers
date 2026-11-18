@@ -2,19 +2,18 @@
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { bufferLabelsAreEstimated } from "@/lib/primes/rollingBuffer";
-import type { Batch, BufferStatus, ScrollInstruction } from "@/lib/primes/usePrimeBuffer";
+import type { Batch, BufferStatus, PrimeBuffer, ScrollInstruction } from "@/lib/primes/usePrimeBuffer";
 import { formatWholeNumber } from "@/lib/formatNumber";
-import { PROVEN_BOUND_LINES } from "@/lib/mentatLines";
-import { DETERMINISTIC_VERIFICATION_LIMIT } from "@/lib/primes/verifyPrimes";
+import { PROVING_LINES } from "@/lib/mentatLines";
+import { describeProving, type ProvingStatus } from "@/lib/provingStatus";
 import { fitNumber, textWidth, type GlyphWidths } from "@/lib/shortenNumber";
 import { SHORTENED_NUMBER_HINT_CLASSES } from "./FittedNumber";
 import { GlyphRuler, readGlyphWidths } from "./GlyphRuler";
 import { PI_PRIME, PiMark } from "./PiMark";
-import { useMentatLine } from "./useMentatLine";
 import { WOLF_359_PRIME, Wolf359Mark } from "./Wolf359Mark";
 import { StarIcon } from "./StarIcon";
+import { useMentatLine } from "./useMentatLine";
 import scrollbar from "./ThemedScrollbar.module.scss";
-import { WrappableNumber } from "./WrappableNumber";
 
 const ROW_HEIGHT_PX = 44;
 /** Extra rows rendered above and below the viewport so fast scrolling doesn't flash blank space. */
@@ -30,13 +29,31 @@ const INITIAL_VIEWPORT_HEIGHT_GUESS_PX = 900;
 const HEADER_ROWS = 1;
 const FOOTER_ROWS = 1;
 
+/**
+ * The “proving primality…” row's text: how the proof is going, or now and then
+ * a Mentat line instead, hidden from screen readers, which still get the text.
+ * Truncated, never wrapped, so the row stays 44 px at any width.
+ */
+function ProvingRowText({ status, mentatLine }: { status: ProvingStatus; mentatLine: string | null }) {
+  const text = describeProving(status);
+  if (!mentatLine) return <span className="truncate">{text}</span>;
+  return (
+    <>
+      <span aria-hidden="true" data-testid="proving-mentat-line" className="truncate">
+        {mentatLine}
+      </span>
+      <span className="sr-only">{text}</span>
+    </>
+  );
+}
+
 interface Props {
   batches: Batch[];
   status: BufferStatus;
   /** The sieve can't go further up: memory ran out before it could settle the next number. */
   reachedMemoryLimit: boolean;
-  /** The sieve can't go further up: the next number is past where Miller–Rabin is a proof. */
-  reachedProvenBound: boolean;
+  /** A prime past a(13) being proven: the row at that end says so (usePrimeBuffer). */
+  proving: PrimeBuffer["proving"];
   /** Why calculation stopped with an error, shown above the list. */
   errorMessage: string | null;
   reportView: (firstVisiblePrime: number, lastVisiblePrime: number) => void;
@@ -101,7 +118,7 @@ export function PrimeList({
   batches,
   status,
   reachedMemoryLimit,
-  reachedProvenBound,
+  proving,
   errorMessage,
   reportView,
   takeScrollInstruction,
@@ -114,6 +131,8 @@ export function PrimeList({
   /** Holds the notices above the list (the memory limit, the estimate banner). */
   const noticeAreaRef = useRef<HTMLDivElement>(null);
   const previousNoticeAreaHeightRef = useRef(0);
+  /** Where a jump asked the list to scroll, until the list is tall enough to get there (see below). */
+  const wantedScrollTopRef = useRef<number | null>(null);
   const [scrollTopPx, setScrollTopPx] = useState(0);
   // Until the browser can measure, assume a typical screen so the server
   // renders a full first screen of primes into the HTML.
@@ -139,8 +158,9 @@ export function PrimeList({
   }, [batches]);
 
   const bufferStartsAtTwo = allPrimes[0] === 2n;
-  // Dune easter egg: sometimes a second line under the proven-bound notice (lib/mentatLines.ts).
-  const provenBoundMentatLine = useMentatLine(PROVEN_BOUND_LINES, reachedProvenBound);
+  // Dune easter egg: sometimes a Mentat line in the “proving primality…” row (lib/mentatLines.ts).
+  const provingMentatLine = useMentatLine(PROVING_LINES, proving !== null);
+  const provingRow = proving && <ProvingRowText status={proving.status} mentatLine={provingMentatLine} />;
 
 
   /** Tells the buffer which primes are on screen so it can decide whether to fetch more. */
@@ -191,7 +211,11 @@ export function PrimeList({
   // - A batch dropped from the top (scrolling down) or added at the top
   //   (scrolling up) moves every row below it. Scroll by the same amount so
   //   the user keeps seeing the same primes.
-  // - After a jump, put the first prime found at the top of the viewport.
+  // - After a jump, put the first prime found at the top of the viewport. Past
+  //   a(13) a jump lands on its first proven primes, before the list is tall
+  //   enough to scroll that far, so the browser clamps the position: keep the
+  //   one asked for (moved along with any rows added above it) and apply it
+  //   again as rows arrive, until it's reached.
   // - The notices sit above the scroll container, so when one appears it
   //   pushes the container's top edge down by its height (and when one goes,
   //   pulls it back up). Scroll by the same amount so the visible primes stay
@@ -209,12 +233,16 @@ export function PrimeList({
     const instruction = takeScrollInstruction();
     if (instruction?.type === "showPrimeAtTop") {
       // Absolute position inside the container, so it already lands below the notices.
-      scrollContainer.scrollTop = (HEADER_ROWS + instruction.primeIndex) * ROW_HEIGHT_PX;
+      wantedScrollTopRef.current = (HEADER_ROWS + instruction.primeIndex) * ROW_HEIGHT_PX;
     } else {
-      if (instruction?.type === "keepPosition") {
-        scrollContainer.scrollTop += instruction.rowsAddedAbove * ROW_HEIGHT_PX;
-      }
-      scrollContainer.scrollTop += noticeAreaGrewBy;
+      const movedByPx =
+        (instruction?.type === "keepPosition" ? instruction.rowsAddedAbove * ROW_HEIGHT_PX : 0) + noticeAreaGrewBy;
+      if (wantedScrollTopRef.current !== null) wantedScrollTopRef.current += movedByPx;
+      else scrollContainer.scrollTop += movedByPx;
+    }
+    if (wantedScrollTopRef.current !== null) {
+      scrollContainer.scrollTop = wantedScrollTopRef.current;
+      if (Math.abs(scrollContainer.scrollTop - wantedScrollTopRef.current) < 1) wantedScrollTopRef.current = null;
     }
 
     setScrollTopPx(scrollContainer.scrollTop);
@@ -225,7 +253,6 @@ export function PrimeList({
     batches,
     labelsAreEstimated,
     reachedMemoryLimit,
-    reachedProvenBound,
     errorMessage,
     takeScrollInstruction,
     reportVisiblePrimes,
@@ -305,20 +332,18 @@ export function PrimeList({
         allPrimes.length === 0 ? "" : bufferStartsAtTwo ? "it all begins here" : "recomputing the past…";
       renderedRows.push(
         <div key="header" className={STATUS_ROW_CLASSES} style={positionStyle}>
-          {headerText}
+          {proving?.direction === "prev" ? provingRow : headerText}
         </div>,
       );
     } else if (screenRow === footerScreenRow) {
-      const footerText = reachedProvenBound
-        ? "past what’s proven: not checked yet"
-        : reachedMemoryLimit
-          ? "memory limit: not checked yet"
-          : status === "error"
-            ? "the worker gave up"
-            : "computing…";
+      const footerText = reachedMemoryLimit
+        ? "memory limit: not checked yet"
+        : status === "error"
+          ? "the worker gave up"
+          : "computing…";
       renderedRows.push(
         <div key="footer" className={STATUS_ROW_CLASSES} style={positionStyle}>
-          {footerText}
+          {proving?.direction === "next" ? provingRow : footerText}
         </div>,
       );
     } else {
@@ -415,20 +440,6 @@ export function PrimeList({
             <strong>This device’s memory limit.</strong> It ran out of memory before it could check
             the next number, so the list stops at the last prime it could prove. Nothing after it
             has been skipped or guessed; it just hasn’t been checked.
-          </p>
-        )}
-        {reachedProvenBound && (
-          <p role="status" className="bg-(--hot-surface) px-5 py-3 text-white">
-            <strong>The edge of what’s proven.</strong> From{" "}
-            <WrappableNumber value={DETERMINISTIC_VERIFICATION_LIMIT} /> on, the Miller–Rabin test
-            this site uses no longer proves anything, so the list stops at the last prime it could
-            prove. Nothing after it has been skipped or guessed; it just hasn’t been checked.
-          </p>
-        )}
-        {/* Outside the status region above, so it's never announced, only read in passing. */}
-        {reachedProvenBound && provenBoundMentatLine && (
-          <p data-testid="mentat-line" className="-mt-2 bg-(--hot-surface) px-5 pb-3 text-white italic">
-            {provenBoundMentatLine}
           </p>
         )}
         {labelsAreEstimated && (

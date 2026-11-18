@@ -10,7 +10,7 @@ const PAGE_PATH = "/how-it-works";
 const PAGE_TITLE = "How It Works: Sieves, Prime Counting and Big Numbers | Every Prime Number";
 const PAGE_HEADLINE = "How Every Prime Number works";
 const PAGE_DESCRIPTION =
-  "How Every Prime Number finds primes live in your browser: the segmented sieve of Eratosthenes on several threads, a constant-memory infinite scroll, estimating π(x) with li(x), numbers bigger than 64 bits as 32-bit limbs, and fun facts about primes.";
+  "How Every Prime Number finds primes live in your browser: the segmented sieve of Eratosthenes on several threads, a constant-memory infinite scroll, estimating π(x) with li(x), numbers bigger than 64 bits as 32-bit limbs, proving huge primes with elliptic curve certificates, and fun facts about primes.";
 
 export const metadata = pageMetadata({
   title: PAGE_TITLE,
@@ -38,6 +38,7 @@ const SECTIONS = [
   { id: "estimated-positions", title: "How the site estimates a prime’s position after a jump" },
   { id: "javascript-number-limit", title: "What is the largest number JavaScript can store exactly?" },
   { id: "numbers-bigger-than-64-bits", title: "How to work with numbers bigger than 64 bits: 32-bit limbs" },
+  { id: "proving-huge-primes", title: "How to prove a huge number is prime: elliptic curve certificates" },
   { id: "displaying-long-primes", title: "How the list shows primes too long for the screen" },
   { id: "measuring-speed", title: "Why measuring speed in a browser is harder than it looks" },
   { id: "fun-facts", title: "Fun facts about prime numbers" },
@@ -226,7 +227,8 @@ function sieveSegment(low, high, basePrimes, isComposite) {
         Before a batch is shown, every prime in it is checked again by a completely separate
         method: a Miller–Rabin test, written in TypeScript and sharing no code with the C sieve.
         With the first 13 primes as its test bases, it’s proven never to call a composite prime
-        below about 3.3 × 10²⁴, which is as far as the list goes. If the two ever disagreed, the
+        below about 3.3 × 10²⁴; past that, each prime’s{" "}
+        <a href="#proving-huge-primes">certificate</a> is checked instead. If the two ever disagreed, the
         site would stop with an error rather than show the disputed number. Once it sieves
         partially, the C side runs its own Miller–Rabin test too (see below), and every number it
         throws out comes with evidence: a small factor, or a “witness” base. The TypeScript side
@@ -262,8 +264,11 @@ function sieveSegment(low, high, basePrimes, isComposite) {
       <p>
         Scrolling back up recomputes primes the page has already seen, on purpose. Storing them
         all would make memory grow forever. Recomputing keeps memory flat and only costs CPU,
-        which is the whole point of the site anyway. Only the rows near the screen are actually
-        drawn, so the number of elements on the page stays small too.
+        which is the whole point of the site anyway. The one exception is past 3.3 × 10²⁴, where
+        each prime needs a <a href="#proving-huge-primes">proof</a> that can take minutes: there
+        the worker keeps the primes it has proven, up to about 16 MB of them, oldest dropped
+        first, so scrolling back doesn’t prove them all again. Only the rows near the screen are
+        actually drawn, so the number of elements on the page stays small too.
       </p>
       <p>
         The worker only computes when the buffer asks for more, so it never races ahead into
@@ -595,9 +600,9 @@ return EULER_MASCHERONI + Math.log(lnX) + Math.sqrt(x) * sum;`}
         base primes and keeps the fastest. Past 2⁶⁴, where the arithmetic changes, it times
         those sizes again. Both ways must find exactly the same primes, or the site stops with
         an error, so every measurement is also a check. That proof only holds below
-        3,317,044,064,679,887,385,961,981 (about 3.3 × 10²⁴), so there the list stops at the last
-        prime it could prove and says so, rather than guessing or skipping ahead. Going further
-        needs a real primality proof for each number, which isn’t built yet.
+        3,317,044,064,679,887,385,961,981 (about 3.3 × 10²⁴). Past it, each number the sieve
+        can’t cross off needs a real primality proof, which has{" "}
+        <a href="#proving-huge-primes">its own section below</a>.
       </p>
       <p>
         How much memory that is comes from your device, not from the code: a quarter of its
@@ -737,6 +742,132 @@ for (size_t index = limb_count; index-- > 0;)
       </p>
 
       {/* 11 */}
+      <SectionHeading id="proving-huge-primes" />
+      <p>
+        Miller–Rabin with the first 13 primes as bases is a proof only below
+        3,317,044,064,679,887,385,961,981, and for a good reason: that number is composite, and
+        it passes all 13. Past it, every number the partial sieve can’t cross off goes through
+        two more stages before it can join the list.
+      </p>
+      <p>
+        First, a fast filter: the <strong>Baillie–PSW</strong> test, one Miller–Rabin round with
+        base 2 and a strong Lucas test. No composite is known that passes both, but nobody has
+        proven that none exists, so a pass only makes a number a <em>probable</em> prime. A
+        fail is a proof, though, and most composites fail at once. Each one thrown out is
+        checked again on the TypeScript side, with its factor, its witness, or the Lucas test
+        run again in <code>BigInt</code>.
+      </p>
+      <p>
+        Then a real proof, with <strong>elliptic curve primality proving</strong> (ECPP, after
+        Atkin and Morain). Take a curve <em>y</em>² = <em>x</em>³ + <em>ax</em> + <em>b</em>{" "}
+        modulo <em>N</em>, and a point <em>Q</em> on it. Suppose that adding <em>Q</em> to
+        itself <em>q</em> times gives the curve’s identity point, for a prime <em>q</em> with
+      </p>
+      <math display="block">
+        <mi>q</mi>
+        <mo>&gt;</mo>
+        <msup>
+          <mrow>
+            <mo>(</mo>
+            <msup>
+              <mi>N</mi>
+              <mrow>
+                <mn>1</mn>
+                <mo>/</mo>
+                <mn>4</mn>
+              </mrow>
+            </msup>
+            <mo>+</mo>
+            <mn>1</mn>
+            <mo>)</mo>
+          </mrow>
+          <mn>2</mn>
+        </msup>
+      </math>
+      <p>
+        Then <em>N</em> is prime. Take any prime factor <em>p</em> of <em>N</em>. Modulo{" "}
+        <em>p</em>, the point still has order <em>q</em>, so the curve modulo <em>p</em> has at
+        least <em>q</em> points. Hasse’s theorem says it has at most (√<em>p</em> + 1)², so
+      </p>
+      <math display="block">
+        <msup>
+          <mrow>
+            <mo>(</mo>
+            <msqrt>
+              <mi>p</mi>
+            </msqrt>
+            <mo>+</mo>
+            <mn>1</mn>
+            <mo>)</mo>
+          </mrow>
+          <mn>2</mn>
+        </msup>
+        <mo>≥</mo>
+        <mi>q</mi>
+        <mo>&gt;</mo>
+        <msup>
+          <mrow>
+            <mo>(</mo>
+            <msup>
+              <mi>N</mi>
+              <mrow>
+                <mn>1</mn>
+                <mo>/</mo>
+                <mn>4</mn>
+              </mrow>
+            </msup>
+            <mo>+</mo>
+            <mn>1</mn>
+            <mo>)</mo>
+          </mrow>
+          <mn>2</mn>
+        </msup>
+        <mspace width="1em" />
+        <mo>⟹</mo>
+        <mspace width="1em" />
+        <mi>p</mi>
+        <mo>&gt;</mo>
+        <msqrt>
+          <mi>N</mi>
+        </msqrt>
+      </math>
+      <p>
+        Every prime factor of <em>N</em> is bigger than √<em>N</em>, which only a prime allows.
+        That turns proving <em>N</em> into proving <em>q</em>, a smaller number, so the prover
+        repeats the step on <em>q</em>, and again, until the number is below 3.3 × 10²⁴, where
+        Miller–Rabin finishes the job. The list of curves, points and <em>q</em>s is a{" "}
+        <strong>certificate</strong>: anyone can check it without redoing the search.
+      </p>
+      <p>
+        The hard part is finding a curve whose number of points has a large prime factor. ECPP
+        builds one from a discriminant <em>D</em> with 4<em>N</em> = <em>t</em>² + |<em>D</em>|
+        <em>v</em>², using a root of a Hilbert class polynomial modulo <em>N</em>. The site
+        computes those polynomials as it needs them, cheapest first, instead of keeping a
+        table, so no table can run out. If a chain gets stuck, the prover backs up and tries
+        another way down. A composite that slipped past Baillie–PSW never gets a certificate:
+        it would stay pending, and the list would wait there rather than show it.
+      </p>
+      <p>
+        Each certificate is then checked by a separate checker in TypeScript, written to be
+        small enough to read, sharing no code with the C prover. It redoes every step with
+        plain curve arithmetic and refuses any division that has no inverse modulo{" "}
+        <em>N</em>, since that could only happen if <em>N</em> were composite. If a certificate
+        doesn’t hold, the list stops with an error. So every prime shown past 3.3 × 10²⁴ has a
+        proof that was checked independently. Software can’t rule out a hardware fault, or the
+        same mistake made twice, but prover and checker would have to make it in two languages
+        with no code in common.
+      </p>
+      <p>
+        This is where the machine really starts losing. Measured natively on a laptop, on one
+        thread, a proof takes about 0.09 seconds at 100 digits, 2.5 seconds at 200 and 31
+        seconds at 300. Each thread proves a different prime at once, and each prime appears as
+        soon as it and every prime before it are proven and checked. Meanwhile the row at that
+        end of the list says “proving primality…”, with how long the prime has taken and how far
+        down its chain has got. Stop pauses a proof instead of throwing it away: scroll on, or jump back, and it
+        carries on where it was.
+      </p>
+
+      {/* 12 */}
       <SectionHeading id="displaying-long-primes" />
       <p>
         Every row in the list has the same height, 44 pixels. That’s what lets the list draw
@@ -754,7 +885,7 @@ for (size_t index = limb_count; index-- > 0;)
         frontier and records under the counter work the same way.
       </p>
 
-      {/* 12 */}
+      {/* 13 */}
       <SectionHeading id="measuring-speed" />
       <p>
         The primes-per-second counter is the joke of the site: it starts huge and sinks as the
@@ -772,8 +903,10 @@ for (size_t index = limb_count; index-- > 0;)
         <li>
           <strong>Average over a window.</strong> The counter divides the total primes from
           recent batches by their total measured time, keeping enough batches to cover at least
-          50 ms (and at most 32 batches, so it still reacts when things slow down). Batches that
-          measured 0 ms still count. Across many batches the rounding evens out.
+          3 seconds (and at most 32 batches, so it still reacts when things slow down). Batches
+          that measured 0 ms still count. Across many batches the rounding evens out, and far out,
+          where primes arrive one or a few at a time, the counter is an average rather than a
+          reading of the last one.
         </li>
         <li>
           <strong>Cross-origin isolation.</strong> The site sends the{" "}
@@ -788,11 +921,14 @@ for (size_t index = limb_count; index-- > 0;)
         zero. Setting up after a big jump is timed separately and left out, so the counter shows
         steady speed: building base primes, which can take a noticeable moment, and the brief
         timing runs that decide when to split a segment across threads or sieve partially. Once
-        it sieves partially, finding a prime includes proving it with Miller–Rabin, so that time counts;
-        the separate check before anything is shown never does.
+        it sieves partially, finding a prime includes proving it, with Miller–Rabin or past
+        3.3 × 10²⁴ an elliptic curve certificate, so that time counts; the separate check before
+        anything is shown never does. A prime kept from an earlier proof wasn’t found just now,
+        so it doesn’t count either. Below one prime a second, the counter shows how long each
+        prime takes instead, like “42 s per prime”, since a rate there would just read 0.
       </p>
 
-      {/* 13 */}
+      {/* 14 */}
       <SectionHeading id="fun-facts" />
 
       <h3 id="infinitely-many-primes">Why are there infinitely many primes?</h3>

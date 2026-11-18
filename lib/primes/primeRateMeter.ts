@@ -26,14 +26,17 @@ export const EMPTY_RATE_WINDOW: RateWindow = [];
 
 /**
  * Keep at least this much measured time in the window, so the timer's
- * rounding is small compared to the total.
+ * rounding is small compared to the total. Far past 3.3 × 10^24 batches arrive
+ * in pieces (step 5), a prime or a few at a time, and with less than a few
+ * seconds the counter jumped with every piece (2 to 33 primes per second at
+ * 10^100); this makes it an average of the last few seconds.
  */
-export const MIN_WINDOW_DURATION_MS = 50;
+export const MIN_WINDOW_DURATION_MS = 3000;
 
 /**
  * Never keep more than this many batches, even if they don't add up to
  * MIN_WINDOW_DURATION_MS. Fast batches can take thousands of batches to reach
- * 50 ms, and a window that long would barely react when the numbers get bigger.
+ * that, and a window that long would barely react when the numbers get bigger.
  */
 export const MAX_WINDOW_BATCHES = 32;
 

@@ -33,6 +33,7 @@ export interface RawSieveExports {
   batch_rejected_evidence(): number;
   batch_rejected_kinds(): number;
   set_sieve_prime_cap(cap: bigint): void;
+  set_probable_primes_allowed(allowed: number): void;
   /** Threaded build only: time spent measuring where splitting pays, since last asked. */
   take_measuring_ms?(): number;
 }
@@ -156,6 +157,15 @@ export class WasmSieve {
    */
   setSievePrimeCap(cap: bigint): void {
     this.#raw.set_sieve_prime_cap(cap);
+  }
+
+  /**
+   * Past a(13), whether a survivor that passes BPSW counts as a prime in the
+   * batch (on), or stops the batch at the proven bound (off, the default). On
+   * means the caller must prove each such prime before it's shown (Phase 5).
+   */
+  setProbablePrimesAllowed(allowed: boolean): void {
+    this.#raw.set_probable_primes_allowed(allowed ? 1 : 0);
   }
 
   /** Up to `count` primes after (or before) `from`, ascending. */

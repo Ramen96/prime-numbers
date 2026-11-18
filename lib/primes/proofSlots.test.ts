@@ -63,6 +63,9 @@ function standInSlots(
       states[slot] = 0;
       candidates[slot] = null;
     },
+    // like the C: the candidate's own size at the start, a little less after each run, 0 unless proving
+    proof_slot_progress: (slot) =>
+      states[slot] === 1 ? Math.max(1, candidates[slot]!.toString(2).length - (runsNeeded(candidates[slot]!) - runsLeft[slot])) : 0,
   };
   return { raw, log };
 }
@@ -118,7 +121,115 @@ describe("ProofSlots", () => {
 
   it("does nothing for no candidates", async () => {
     const { raw, log } = standInSlots(2, () => 1);
-    assert.deepEqual(await new ProofSlots(raw).proveInOrder([]), { certificates: [], outOfMemory: false });
+    assert.deepEqual(await new ProofSlots(raw).proveInOrder([]), {
+      certificates: [],
+      outOfMemory: false,
+      stopped: false,
+    });
     assert.equal(log.runs, 0);
+  });
+});
+
+describe("ProofSlots stopping and resuming (Stop, or a newer request)", () => {
+  /** shouldStop that says yes after `runs` runs. */
+  const stopAfter = (runs: number) => {
+    let seen = 0;
+    return () => ++seen >= runs;
+  };
+
+  it("stops after a run when asked, returning nothing and keeping every chain", async () => {
+    const { raw, log } = standInSlots(2, () => 10);
+    const result = await new ProofSlots(raw).proveInOrder([11n, 13n], { workPerRun: 1, shouldStop: stopAfter(3) });
+    assert.deepEqual(result, { certificates: [], outOfMemory: false, stopped: true });
+    assert.equal(log.runs, 3);
+  });
+
+  it("resumes each unfinished chain where it stopped instead of starting it again", async () => {
+    // 11 needs 10 runs; stopped after 4, the resumed call needs only the other 6
+    const { raw, log } = standInSlots(1, () => 10);
+    const slots = new ProofSlots(raw);
+    await slots.proveInOrder([11n], { workPerRun: 1, shouldStop: stopAfter(4) });
+    const result = await slots.proveInOrder([11n], { workPerRun: 1 });
+    assert.deepEqual(result.certificates, [certificateOf(11n)]);
+    assert.deepEqual(log.starts, [11n], "started once");
+    assert.equal(log.runs, 10);
+  });
+
+  it("keeps certificates that finished before the stop, and uses them when resumed", async () => {
+    // 13 finishes in 1 run while 11 is still going when it stops
+    const { raw, log } = standInSlots(2, (candidate) => (candidate === 11n ? 10 : 1));
+    const slots = new ProofSlots(raw);
+    await slots.proveInOrder([11n, 13n, 17n], { workPerRun: 1, shouldStop: stopAfter(2) });
+    const result = await slots.proveInOrder([11n, 13n, 17n], { workPerRun: 1 });
+    assert.deepEqual(result.certificates, [11n, 13n, 17n].map(certificateOf));
+    assert.deepEqual(log.starts, [11n, 13n, 17n], "each started once");
+  });
+
+  it("drops the work of candidates a later call doesn't ask for, so their slots can be used", async () => {
+    const { raw, log } = standInSlots(1, () => 5);
+    const slots = new ProofSlots(raw);
+    await slots.proveInOrder([11n], { workPerRun: 1, shouldStop: stopAfter(2) });
+    assert.deepEqual((await slots.proveInOrder([13n], { workPerRun: 1 })).certificates, [certificateOf(13n)]);
+    // 11's chain was dropped: asking for it again starts it over
+    assert.deepEqual((await slots.proveInOrder([11n], { workPerRun: 1 })).certificates, [certificateOf(11n)]);
+    assert.deepEqual(log.starts, [11n, 13n, 11n]);
+  });
+});
+
+describe("ProofSlots reporting each certificate as soon as it can (streaming)", () => {
+  it("reports in order, each one as soon as everything before it is proven", async () => {
+    // 11 takes 4 runs, the rest 1: 13, 17 and 19 must wait for 11
+    const { raw, log } = standInSlots(4, (candidate) => (candidate === 11n ? 4 : 1));
+    const reports: { index: number; afterRuns: number }[] = [];
+    await new ProofSlots(raw).proveInOrder([11n, 13n, 17n, 19n, 23n], {
+      workPerRun: 1,
+      onProven: (index, certificate) => {
+        assert.deepEqual(certificate, certificateOf([11n, 13n, 17n, 19n, 23n][index]));
+        reports.push({ index, afterRuns: log.runs });
+      },
+    });
+    assert.deepEqual(reports.map((report) => report.index), [0, 1, 2, 3, 4]);
+    // 23 starts when 13 finishes and is done by run 2, but waits for 11 like the rest
+    assert.deepEqual(reports.map((report) => report.afterRuns), [4, 4, 4, 4, 4], "none later than it could be");
+  });
+
+  it("reports nothing from the candidate memory ran out on", async () => {
+    const { raw } = standInSlots(2, () => 1, (candidate) => candidate === 13n);
+    const reported: number[] = [];
+    await new ProofSlots(raw).proveInOrder([11n, 13n, 17n], { onProven: (index) => reported.push(index) });
+    assert.deepEqual(reported, [0]);
+  });
+
+  it("after a stop, keeps only certificates not yet reported, and reports the rest once resumed", async () => {
+    // 13 finishes while 11 is still going, so it can't be reported before the stop
+    const { raw, log } = standInSlots(2, (candidate) => (candidate === 11n ? 6 : 1));
+    const slots = new ProofSlots(raw);
+    const firstReports: number[] = [];
+    let runsSeen = 0;
+    await slots.proveInOrder([11n, 13n], {
+      workPerRun: 1,
+      onProven: (index) => firstReports.push(index),
+      shouldStop: () => ++runsSeen >= 2,
+    });
+    assert.deepEqual(firstReports, []);
+    const resumedReports: number[] = [];
+    await slots.proveInOrder([11n, 13n], { workPerRun: 1, onProven: (index) => resumedReports.push(index) });
+    assert.deepEqual(resumedReports, [0, 1]);
+    assert.deepEqual(log.starts, [11n, 13n], "13 wasn't proven again");
+  });
+});
+
+describe("ProofSlots progress on the candidate everything waits on", () => {
+  it("reports the first unfinished candidate's chain after each run, and only that one", async () => {
+    // 11 (4 bits) takes 3 runs; 13 finishes in 1 but must wait for 11
+    const { raw } = standInSlots(2, (candidate) => (candidate === 11n ? 3 : 1));
+    const progress: [number, number][] = [];
+    await new ProofSlots(raw).proveInOrder([11n, 13n, 17n], {
+      workPerRun: 1,
+      onProgress: (index, bits) => progress.push([index, bits]),
+    });
+    // after runs 1 and 2, 11 is still going (4 bits, then 3 and 2 as its chain goes down); then 17 is next
+    assert.deepEqual(progress.slice(0, 2), [[0, 3], [0, 2]]);
+    assert.ok(progress.every(([index]) => index === 0 || index === 2), "never a candidate that isn't next");
   });
 });

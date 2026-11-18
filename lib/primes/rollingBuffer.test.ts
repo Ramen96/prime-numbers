@@ -4,6 +4,7 @@ import { estimatePrimeOrdinal } from "./logarithmicIntegral.ts";
 import {
   addBatch,
   bufferLabelsAreEstimated,
+  extendBatch,
   MAX_BATCHES,
   type Batch,
 } from "./rollingBuffer.ts";
@@ -275,5 +276,42 @@ describe("estimate banner visibility (bufferLabelsAreEstimated)", () => {
       batches = scrollDownOneBatch(batches);
       assert.equal(bufferLabelsAreEstimated(batches), false);
     }
+  });
+});
+
+describe("extendBatch (a batch arriving streamed, in pieces)", () => {
+  /** Every label in order: each batch's primes with their ordinals. */
+  const labelled = (batches: Batch[]) =>
+    batches.flatMap((batch) => batch.primes.map((prime, index) => [prime, batch.ordinalOfFirstPrime + BigInt(index)]));
+
+  it("going up, gives the same buffer and labels as the whole batch at once", () => {
+    const start = addBatch([], primesAfter(100_000n), "next").batches;
+    const whole = primesAfter(start[0].primes.at(-1)!);
+    const atOnce = addBatch(start, whole, "next").batches;
+    let streamed = addBatch(start, whole.slice(0, 7), "next").batches;
+    for (const piece of [whole.slice(7, 200), whole.slice(200)]) streamed = extendBatch(streamed, piece, "next").batches;
+    assert.deepEqual(labelled(streamed), labelled(atOnce));
+    assert.equal(streamed.length, atOnce.length);
+  });
+
+  it("going down, gives the same labels, and says how many rows each piece added above", () => {
+    const start = addBatch([], primesAfter(500_000n), "next").batches;
+    const whole = primesBefore(start[0].primes[0]);
+    const atOnce = addBatch(start, whole, "prev");
+    const first = addBatch(start, whole.slice(-10), "prev");
+    const second = extendBatch(first.batches, whole.slice(-300, -10), "prev");
+    const third = extendBatch(second.batches, whole.slice(0, -300), "prev");
+    assert.deepEqual(labelled(third.batches), labelled(atOnce.batches));
+    assert.deepEqual([first.rowsAddedAbove, second.rowsAddedAbove, third.rowsAddedAbove], [10, 290, whole.length - 300]);
+  });
+
+  it("numbers exactly once a piece reaches 2", () => {
+    const start = addBatch([], primesAfter(1000n), "next").batches;
+    const below = primesBefore(start[0].primes[0]);
+    const first = addBatch(start, below.slice(-20), "prev").batches;
+    assert.equal(bufferLabelsAreEstimated(first), true);
+    const reachedTwo = extendBatch(first, below.slice(0, -20), "prev").batches;
+    assert.equal(bufferLabelsAreEstimated(reachedTwo), false);
+    assert.equal(reachedTwo[0].ordinalOfFirstPrime, 1n);
   });
 });

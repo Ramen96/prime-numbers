@@ -78,8 +78,10 @@ const FREQUENTLY_ASKED_QUESTIONS = [
         every prime up to √<em>x</em>; near 2⁶⁴ (about 18 quintillion) that’s 203,280,221 of
         them. Past a point it measures on your device, it sieves with far fewer and proves each
         remaining number with a Miller–Rabin test, which is a proof only below about 3.3 × 10²⁴.
-        Past that, the list stops at the last prime it could prove and says so. Nothing is
-        skipped or guessed.
+        Past that, each prime gets an elliptic curve certificate, checked separately before
+        it’s shown, so the limit is your device’s time and memory. Nothing is skipped or
+        guessed.{" "}
+        <Link href="/how-it-works#proving-huge-primes">More on the proofs.</Link>
       </>
     ),
   },

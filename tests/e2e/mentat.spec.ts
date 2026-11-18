@@ -1,11 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
-import { CALCULATING_LINES, PROVEN_BOUND_LINES } from "../../lib/mentatLines";
+import { CALCULATING_LINES, PROVING_LINES } from "../../lib/mentatLines";
 import { PrimeListPage } from "./primeListPage";
-
-const PROVEN_BOUND_NOTICE =
-  "The edge of what’s proven. From 3,317,044,064,679,887,385,961,981 on, the Miller–Rabin test this site uses no longer proves anything, so the list stops at the last prime it could prove. Nothing after it has been skipped or guessed; it just hasn’t been checked.";
-/** Past a(13), where nothing can be proven yet: the notice shows at once. */
-const PAST_THE_PROVEN_BOUND = "1" + "0".repeat(25);
 
 /**
  * Replaces the easter egg's random source (lib/mentatLines.ts) before the
@@ -63,31 +58,31 @@ test.describe("Mentat easter egg", () => {
     await expect(page.getByTestId("mentat-line")).toHaveCount(0);
   });
 
-  test("at the proven bound, forced on: each line can appear below the notice, which is unchanged", async ({ page }) => {
-    for (const [index, line] of PROVEN_BOUND_LINES.entries()) {
-      await forceRandom(page, forcedOnPicking(index, PROVEN_BOUND_LINES.length));
+  test("while proving past a(13), forced on: each line can appear in the row, which stays the same height", async ({
+    page,
+  }) => {
+    test.setTimeout(120_000);
+    for (const [index, line] of PROVING_LINES.entries()) {
+      await forceRandom(page, forcedOnPicking(index, PROVING_LINES.length));
       const primeListPage = new PrimeListPage(page);
       await primeListPage.open();
-      await primeListPage.jumpTo(PAST_THE_PROVEN_BOUND, { waitForLanding: false });
-
-      const notice = page.getByRole("status").filter({ hasText: "The edge of what’s proven." });
-      await expect(notice).toHaveText(PROVEN_BOUND_NOTICE);
-      const mentatLine = page.getByTestId("mentat-line").filter({ hasText: line });
-      await expect(mentatLine).toBeVisible();
-      // never announced: not inside any live region
+      await primeListPage.jumpTo("1" + "0".repeat(100), { waitForLanding: false });
+      const mentatLine = primeListPage.primeList.getByTestId("proving-mentat-line");
+      await expect(mentatLine).toHaveText(line, { timeout: 20_000 });
+      // never announced, and the row is still one row
       expect(await mentatLine.evaluate((element) => element.closest("[aria-live], [role=status], [role=alert]"))).toBeNull();
-      expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+      expect(await mentatLine.getAttribute("aria-hidden")).toBe("true");
+      expect((await mentatLine.locator("..").boundingBox())!.height).toBeCloseTo(44, 0);
+      await expect(primeListPage.primeList.getByText("proving primality…", { exact: false })).toBeAttached();
     }
   });
 
-  test("at the proven bound, forced off: the notice alone, unchanged", async ({ page }) => {
+  test("while proving past a(13), forced off: the row just says it's proving", async ({ page }) => {
     await forceRandom(page, FORCED_OFF);
     const primeListPage = new PrimeListPage(page);
     await primeListPage.open();
-    await primeListPage.jumpTo(PAST_THE_PROVEN_BOUND, { waitForLanding: false });
-    await expect(page.getByRole("status").filter({ hasText: "The edge of what’s proven." })).toHaveText(
-      PROVEN_BOUND_NOTICE,
-    );
-    await expect(page.getByTestId("mentat-line")).toHaveCount(0);
+    await primeListPage.jumpTo("1" + "0".repeat(100), { waitForLanding: false });
+    await expect(primeListPage.primeList.getByText(/^proving primality…/)).toBeVisible({ timeout: 20_000 });
+    await expect(primeListPage.primeList.getByTestId("proving-mentat-line")).toHaveCount(0);
   });
 });

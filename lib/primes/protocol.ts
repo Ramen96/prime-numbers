@@ -32,11 +32,44 @@ export interface BatchRequest extends RequestTags {
   count: number;
 }
 
-export type WorkerRequest = BatchRequest;
+/**
+ * Stop proving for request `id` (Stop, while the worker is proving). Handled at
+ * once, not queued: the worker stops after its current bounded run and keeps
+ * every unfinished proof, for a later request that asks for the same numbers.
+ */
+export interface PauseRequest {
+  type: "pause";
+  id: number;
+}
+
+export type WorkerRequest = BatchRequest | PauseRequest;
 
 /** Sent before a batch whose base primes have to be built first, which can take a while. */
 export interface BuildingBasePrimesNotice extends RequestTags {
   type: "building-base-primes";
+}
+
+/**
+ * Sent when a batch has been sieved and its primes past a(13) are being proven.
+ * From here until the batch arrives, a pause request stops it without losing work.
+ */
+export interface ProvingNotice extends RequestTags {
+  type: "proving";
+}
+
+/**
+ * How the proof of the prime the list is waiting on is going, at most about
+ * once a second while it's being proven (the “proving primality…” row).
+ */
+export interface ProvingProgressNotice extends RequestTags {
+  type: "proving-progress";
+  direction: Direction;
+  /** How long the list has waited on this prime so far. */
+  elapsedMs: number;
+  /** Its digits. */
+  digits: number;
+  /** About how many digits the number its chain has reached has: `digits` at the start, fewer as it goes down. */
+  reachedDigits: number;
 }
 
 /** The worker's memory, sent with every result (Wasm memory only grows). */
@@ -51,21 +84,20 @@ export interface BatchResponse extends RequestTags {
   type: "batch";
   direction: Direction;
   /**
-   * Primes in ascending order regardless of direction. May hold fewer than
-   * `count` primes: for "prev" near 2, or when the sieve stopped part way
-   * through at a number it couldn't settle (then `reachedProvenBound` or
-   * `reachedMemoryLimit` says why).
+   * Primes in ascending order regardless of direction: the rest of the batch,
+   * after any already sent in `proven` messages (then possibly none). The whole
+   * batch may hold fewer than `count` primes: for "prev" near 2, or when memory
+   * ran out settling a number (`reachedMemoryLimit`).
    */
   primes: bigint[];
-  /** The sieve stopped because memory ran out before it could settle the next number. */
+  /** How many of `primes` were found now, rather than kept from an earlier proof. */
+  foundCount: number;
+  /** Memory ran out before the next number could be settled: sieved, or past a(13), proven. */
   reachedMemoryLimit: boolean;
   /**
-   * The sieve stopped at a number past the bound where Miller–Rabin is proven
-   * (a(13), about 3.3 × 10^24): it and everything after it stay unchecked
-   * until a primality proof can settle them (Phase 5).
+   * Time spent finding this message's primes, from performance.now(): sieving,
+   * and past a(13) proving them. The speed counter uses only this.
    */
-  reachedProvenBound: boolean;
-  /** Time spent sieving this batch, from performance.now(). The speed counter uses only this. */
   sievingDurationMs: number;
   /**
    * Time spent setting up, not sieving: building base primes, and on the
@@ -74,8 +106,8 @@ export interface BatchResponse extends RequestTags {
    */
   setupDurationMs: number;
   /**
-   * Time spent re-checking every prime with Miller–Rabin before sending it
-   * (Requirement A3). Like setup, it isn't part of the speed counter.
+   * Time spent re-checking every prime before sending it, with Miller–Rabin or
+   * past a(13) its certificate (Requirement A3). Like setup, it isn't part of the speed counter.
    */
   verificationDurationMs: number;
   memory: WorkerMemory;
@@ -85,7 +117,7 @@ export interface BatchResponse extends RequestTags {
 
 /**
  * No primes could be proven at all for this request: memory ran out before
- * the sieve could settle the first number. Nothing is skipped or guessed;
+ * the first number could be settled. Nothing is skipped or guessed;
  * everything from `from` on stays unchecked.
  */
 export interface MemoryLimitResponse extends RequestTags {
@@ -94,14 +126,24 @@ export interface MemoryLimitResponse extends RequestTags {
 }
 
 /**
- * No primes could be proven at all for this request: the first number the
- * sieve couldn't cross off is past the bound where Miller–Rabin is proven
- * (a(13), about 3.3 × 10^24). Nothing is skipped or guessed; it and everything
- * after it stay unchecked until a primality proof can settle them (Phase 5).
+ * Primes past a(13) are shown as soon as they're proven and checked (step 5),
+ * so a batch arrives in pieces: any number of these, then the `batch` with the
+ * rest. Each piece continues the one before, in the order primes join the list.
  */
-export interface ProvenBoundResponse extends RequestTags {
-  type: "proven-bound";
-  memory: WorkerMemory;
+export interface ProvenPrimesResponse extends RequestTags {
+  type: "proven";
+  direction: Direction;
+  /** The next primes of the batch, ascending; every one proven and checked. */
+  primes: bigint[];
+  /** How many were found now, rather than kept from an earlier proof. */
+  foundCount: number;
+  /** Time spent finding them, since the previous piece (sieving, for the first). */
+  findingDurationMs: number;
+}
+
+/** Proving stopped for a pause request: nothing from this batch is sent, and no proof is lost. */
+export interface PausedResponse extends RequestTags {
+  type: "paused";
 }
 
 export interface ErrorResponse extends RequestTags {
@@ -111,7 +153,10 @@ export interface ErrorResponse extends RequestTags {
 
 export type WorkerResponse =
   | BuildingBasePrimesNotice
+  | ProvingNotice
+  | ProvingProgressNotice
+  | ProvenPrimesResponse
+  | PausedResponse
   | BatchResponse
   | MemoryLimitResponse
-  | ProvenBoundResponse
   | ErrorResponse;

@@ -30,11 +30,11 @@ describe("checkCertificate accepts real proofs", () => {
 
 describe("checkCertificate refuses", () => {
   it("anything past a(13) with no proof at all", () => {
-    assert.match(reason(2n ** 89n - 1n, []), /doesn't end/);
+    assert.match(reason(2n ** 89n - 1n, []), /doesn’t end/);
   });
 
   it("a composite, even with no steps, below a(13)", () => {
-    assert.match(reason(1_000_001n, []), /doesn't end/);
+    assert.match(reason(1_000_001n, []), /doesn’t end/);
   });
 
   it("a certificate for a different number", () => {

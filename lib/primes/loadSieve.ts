@@ -17,7 +17,13 @@
 // the list always works; it's just slower.
 
 import { basePrimeBudgetWithin, basePrimeMemoryBudget, moduleMemoryBudget, sharedMemoryMaximumsToTry, WASM_PAGE_BYTES } from "./memoryBudget.ts";
-import { rawExportsOf, THREADED_INITIAL_MEMORY_BYTES, type CreateSieveModule } from "./threadedSieveModule.ts";
+import { ProofSlots, type RawProofSlotExports } from "./proofSlots.ts";
+import {
+  rawExportsOf,
+  rawProofSlotExportsOf,
+  THREADED_INITIAL_MEMORY_BYTES,
+  type CreateSieveModule,
+} from "./threadedSieveModule.ts";
 import { WasmSieve, type RawSieveExports } from "./wasmSieve.ts";
 
 declare const self: DedicatedWorkerGlobalScope;
@@ -28,6 +34,8 @@ export interface LoadedSieve {
   threads: number;
   /** The base-prime budget the sieve was given, or null for "until an allocation fails". */
   memoryBudgetBytes: number | null;
+  /** One ECPP prover per thread, for the primes past a(13) the sieve now lets through. */
+  proofSlots: ProofSlots;
 }
 
 /** One fewer than the cores, at least 1: the page keeps a core to stay smooth. */
@@ -62,7 +70,10 @@ async function loadStandaloneSieve(memoryBudgetBytes: number | null): Promise<Lo
   raw._initialize?.();
   const sieve = new WasmSieve(raw);
   if (memoryBudgetBytes !== null) sieve.setBasePrimeMemoryBudget(memoryBudgetBytes);
-  return { sieve, threads: 1, memoryBudgetBytes };
+  // Past a(13), BPSW passes join the batch, each proven before it's shown (computeBatch.ts).
+  sieve.setProbablePrimesAllowed(true);
+  const proofSlots = new ProofSlots(instance.exports as unknown as RawProofSlotExports);
+  return { sieve, threads: 1, memoryBudgetBytes, proofSlots };
 }
 
 /** The largest shared memory the browser agrees to reserve, from the maximums to try. */
@@ -129,7 +140,10 @@ async function loadThreadedSieve(threads: number, moduleBudget: number | null): 
     // minus the allowance for everything else.
     const memoryBudgetBytes = basePrimeBudgetWithin(maximumBytes);
     sieve.setBasePrimeMemoryBudget(memoryBudgetBytes);
-    return { sieve, threads: helpersStarted + 1, memoryBudgetBytes };
+    // Past a(13), BPSW passes join the batch, each proven before it's shown (computeBatch.ts).
+    sieve.setProbablePrimesAllowed(true);
+    const proofSlots = new ProofSlots(rawProofSlotExportsOf(sieveModule));
+    return { sieve, threads: helpersStarted + 1, memoryBudgetBytes, proofSlots };
   } catch (error) {
     startedWorkers.forEach((worker) => worker.terminate());
     throw error;

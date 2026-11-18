@@ -98,6 +98,12 @@ ecpp_proof_status ecpp_prover_run(ecpp_prover *prover, size_t work);
 size_t ecpp_prover_step_count(const ecpp_prover *prover);
 const ecpp_certificate_step *ecpp_prover_step(const ecpp_prover *prover, size_t index);
 
+// How far the search has got: the bit length of the number it's working on now,
+// the deepest in the chain so far. That's the candidate's own at the start,
+// smaller as the chain goes down, and larger again if a branch gets stuck and the
+// search backs up. 0 when nothing is being proven, or the proof is done.
+size_t ecpp_prover_current_bit_length(const ecpp_prover *prover);
+
 void ecpp_prover_free(ecpp_prover *prover);
 
 #endif

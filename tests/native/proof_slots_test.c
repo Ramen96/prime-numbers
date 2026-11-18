@@ -95,16 +95,33 @@ int main(void) {
       probable_prime_near(&candidates[slot], 28 + 6 * ((slot + round) % 6), (uint64_t)(slot * 1000003 + round * 7));
       start(slot, &candidates[slot]);
       expect(proof_slot_state_of(slot) == PROOF_SLOT_PROVING, "a started slot is proving", (size_t)slot);
+      expect(proof_slot_progress(slot) == big_number_bit_length(&candidates[slot]),
+             "progress starts at the candidate's size", (size_t)slot);
     }
     int pieces = 0;
-    while (proof_slots_run(2) > 0)
+    int went_down = 0;
+    while (proof_slots_run(2) > 0) {
       pieces++;
+      // between runs: every unfinished slot is somewhere in its chain, never past its candidate
+      for (int slot = 0; slot < slots; slot++) {
+        size_t progress = proof_slot_progress(slot);
+        size_t candidate_bits = big_number_bit_length(&candidates[slot]);
+        if (proof_slot_state_of(slot) == PROOF_SLOT_PROVING)
+          expect(progress > 0 && progress <= candidate_bits, "progress is within the candidate's size", progress);
+        else
+          expect(progress == 0, "a slot that isn't proving has no progress", (size_t)slot);
+        went_down |= progress > 0 && progress < candidate_bits;
+      }
+    }
     expect(pieces > 0, "the work took more than one piece", (size_t)pieces);
+    expect(went_down, "some chain was seen part way down", (size_t)round);
     for (int slot = 0; slot < slots; slot++) {
       expect(proof_slot_state_of(slot) == PROOF_SLOT_DONE, "every slot finished", (size_t)slot);
       check_against_lone_prover(&lone, slot, &candidates[slot]);
+      expect(proof_slot_progress(slot) == 0, "a finished slot has no progress", (size_t)slot);
       proof_slot_clear(slot);
       expect(proof_slot_state_of(slot) == PROOF_SLOT_IDLE && proof_slot_step_count(slot) == 0, "a cleared slot is idle", (size_t)slot);
+      expect(proof_slot_progress(slot) == 0, "a cleared slot has no progress", (size_t)slot);
       big_number_free(&candidates[slot]);
     }
   }
@@ -123,6 +140,7 @@ int main(void) {
 
   // what doesn't exist: no slot, no step, no field
   expect(!proof_slot_start(slots, 1) && !proof_slot_start(-1, 1), "no such slot", 0);
+  expect(proof_slot_progress(slots) == 0 && proof_slot_progress(-1) == 0, "no such slot has no progress", 0);
   expect(proof_slot_value(slots - 1, 1000000, 0) == 0 && proof_slot_value(slots - 1, 0, 6) == 0, "no such step or field", 0);
 
   free(candidates);

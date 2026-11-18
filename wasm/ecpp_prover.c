@@ -460,3 +460,10 @@ ecpp_proof_status ecpp_prover_run(ecpp_prover *prover, size_t work) {
 size_t ecpp_prover_step_count(const ecpp_prover *prover) { return prover->step_count; }
 
 const ecpp_certificate_step *ecpp_prover_step(const ecpp_prover *prover, size_t index) { return &prover->steps[index]; }
+
+size_t ecpp_prover_current_bit_length(const ecpp_prover *prover) {
+  // finished (the steps are filled in) or never started: nothing in progress
+  if (prover->step_count > 0 || prover->depth == 0)
+    return 0;
+  return big_number_bit_length(&prover->nodes[prover->depth - 1].n);
+}

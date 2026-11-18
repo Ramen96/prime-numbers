@@ -14,9 +14,10 @@ import {
   type RateWindow,
 } from "./primeRateMeter.ts";
 import { estimatedBasePrimeBytes, shouldRestartWorkerToReleaseMemory } from "./memoryBudget.ts";
-import { addBatch, MAX_BATCHES, type Batch } from "./rollingBuffer.ts";
+import { addBatch, extendBatch, MAX_BATCHES, type Batch } from "./rollingBuffer.ts";
 import { basePrimeLimitNeededFor } from "./wasmSieve.ts";
 import { PRIME_WORKER_NAME } from "./workerNames.ts";
+import type { ProvingStatus } from "../provingStatus.ts";
 
 export type { Batch };
 
@@ -101,11 +102,10 @@ export interface PrimeBuffer {
    */
   reachedMemoryLimit: boolean;
   /**
-   * The sieve reached the bound where Miller–Rabin is proven (a(13), about
-   * 3.3 × 10^24) going up: the next number it can't cross off stays unchecked
-   * until Phase 5's proofs. The list stops at the last proven prime. Cleared by a jump.
+   * While a prime past a(13) is being proven: which end of the list waits on
+   * it, and how its proof is going (the “proving primality…” row). Otherwise null.
    */
-  reachedProvenBound: boolean;
+  proving: { direction: Direction; status: ProvingStatus } | null;
   /** The most recent completed jump, or null if the user hasn't jumped. */
   lastJump: JumpResult | null;
   /** Throw the buffer away and restart it at the first prime ≥ `target`. */
@@ -151,6 +151,7 @@ export function usePrimeBuffer(firstBatchFromServer: readonly string[]): PrimeBu
   const [primesPerSecond, setPrimesPerSecond] = useState<number | null>(null);
   const [heat, setHeat] = useState(0);
   const [lastBatchDurationMs, setLastBatchDurationMs] = useState<number | null>(null);
+  const [proving, setProving] = useState<PrimeBuffer["proving"]>(null);
   const [lastSetupMs, setLastSetupMs] = useState<number | null>(null);
   const [lastVerificationMs, setLastVerificationMs] = useState<number | null>(null);
   const [basePrimeMemoryBytes, setBasePrimeMemoryBytes] = useState<number | null>(null);
@@ -159,7 +160,6 @@ export function usePrimeBuffer(firstBatchFromServer: readonly string[]): PrimeBu
   const [calculationIsSlow, setCalculationIsSlow] = useState(false);
   const [lastJump, setLastJump] = useState<JumpResult | null>(null);
   const [reachedMemoryLimit, setReachedMemoryLimit] = useState(false);
-  const [reachedProvenBound, setReachedProvenBound] = useState(false);
 
   // These refs hold the same values as state, but update instantly. The worker
   // message handler and the scroll handler read them, so they always see the
@@ -168,7 +168,20 @@ export function usePrimeBuffer(firstBatchFromServer: readonly string[]): PrimeBu
   /** Everything the current worker's Wasm module holds, from its last report. */
   const workerMemoryBytesRef = useRef(0);
   const heldBatchesRef = useRef<Batch[]>(batches);
-  const pendingRequestRef = useRef<{ id: number; direction: Direction } | null>(null);
+  /**
+   * The request the worker is working on, if any. `proving` is set once the
+   * worker says it has finished sieving and is proving primes past a(13): from
+   * then on it can be paused, keeping its proofs, instead of being terminated.
+   * `streamed` is set once its first primes have arrived in pieces (`proven`
+   * messages), which are already in the buffer; `findingMs` adds up their time.
+   */
+  const pendingRequestRef = useRef<{
+    id: number;
+    direction: Direction;
+    proving: boolean;
+    streamed: boolean;
+    findingMs: number;
+  } | null>(null);
   const lastRequestIdRef = useRef(0);
   /** Bumped on every seed/jump. Responses tagged with an older generation are ignored. */
   const generationRef = useRef(0);
@@ -195,7 +208,6 @@ export function usePrimeBuffer(firstBatchFromServer: readonly string[]): PrimeBu
    * stops at the last proven prime. Scrolling back down still works.
    */
   const memoryLimitReachedRef = useRef(false);
-  const provenBoundReachedRef = useRef(false);
   /**
    * True from page load until the buffer holds MAX_BATCHES. The server sends
    * the first batch, so nothing has been timed yet; filling the buffer right
@@ -234,25 +246,46 @@ export function usePrimeBuffer(firstBatchFromServer: readonly string[]): PrimeBu
    * Ends the current worker, even in the middle of a long Wasm call (terminate
    * is the only way to interrupt one), and forgets its pending request. The
    * next request starts a fresh worker, which rebuilds its base primes.
-   * Used by Stop, and by jumps that arrive while a calculation is running.
+   * Used by Stop and jumps while the worker is sieving (abandonPendingRequest).
    */
   const discardWorker = useCallback(() => {
     workerRef.current?.terminate();
     workerRef.current = null;
     workerMemoryBytesRef.current = 0;
     pendingRequestRef.current = null;
+    setProving(null);
     clearSlowCalculation();
   }, [clearSlowCalculation]);
+
+  /**
+   * Gives up on the pending request. While the worker is proving, it's told to
+   * pause, which keeps the worker and every unfinished proof (a later request
+   * for the same numbers carries on from there). While it's sieving, a Wasm call
+   * can't be interrupted, so the worker is discarded, as before.
+   */
+  const abandonPendingRequest = useCallback(() => {
+    const pending = pendingRequestRef.current;
+    if (!pending) return;
+    if (pending.proving && workerRef.current) {
+      const pause: WorkerRequest = { type: "pause", id: pending.id };
+      workerRef.current.postMessage(pause);
+      pendingRequestRef.current = null;
+      setProving(null);
+      clearSlowCalculation();
+    } else {
+      discardWorker();
+    }
+  }, [clearSlowCalculation, discardWorker]);
 
   /** Asks the worker for a batch, starting a worker if there isn't one. Ignored if one is in progress. */
   const requestBatch = useCallback(
     (direction: Direction, from: bigint) => {
       if (pendingRequestRef.current || cannotContinueRef.current) return;
-      if (direction === "next" && (memoryLimitReachedRef.current || provenBoundReachedRef.current)) return;
+      if (direction === "next" && memoryLimitReachedRef.current) return;
       const worker = workerRef.current ?? startWorker();
 
       const id = ++lastRequestIdRef.current;
-      pendingRequestRef.current = { id, direction };
+      pendingRequestRef.current = { id, direction, proving: false, streamed: false, findingMs: 0 };
       setStatus("computing");
       clearTimeout(slowCalculationTimerRef.current);
       slowCalculationTimerRef.current = setTimeout(() => {
@@ -287,12 +320,11 @@ export function usePrimeBuffer(firstBatchFromServer: readonly string[]): PrimeBu
   const seedBuffer = useCallback(
     (target: bigint, isUserJump: boolean) => {
       // Anything already sent to the worker now belongs to an old generation.
-      // If it's still calculating, don't wait for it: restart the worker.
+      // If it's still calculating, don't wait for it (abandonPendingRequest).
       generationRef.current++;
-      if (pendingRequestRef.current) discardWorker();
+      abandonPendingRequest();
       cannotContinueRef.current = false;
       memoryLimitReachedRef.current = false;
-      provenBoundReachedRef.current = false;
 
       heldBatchesRef.current = [];
       // Measure the new region on its own, not averaged with where we were.
@@ -304,7 +336,7 @@ export function usePrimeBuffer(firstBatchFromServer: readonly string[]): PrimeBu
 
       requestBatch("next", searchStartFor(target));
     },
-    [discardWorker, requestBatch],
+    [abandonPendingRequest, requestBatch],
   );
 
   const jumpTo = useCallback(
@@ -315,7 +347,6 @@ export function usePrimeBuffer(firstBatchFromServer: readonly string[]): PrimeBu
       setLastJump(null);
       setPrimesPerSecond(null);
       setReachedMemoryLimit(false);
-      setReachedProvenBound(false);
       setErrorMessage(null);
       // Wasm memory never shrinks. If the worker grew for somewhere far away
       // and this jump needs much less, start a fresh one to give it back.
@@ -332,11 +363,11 @@ export function usePrimeBuffer(firstBatchFromServer: readonly string[]): PrimeBu
   );
 
   const stop = useCallback(() => {
-    discardWorker();
+    abandonPendingRequest();
     pendingSeedRef.current = null;
     fillingOnLoadRef.current = false;
     setStatus("stopped");
-  }, [discardWorker]);
+  }, [abandonPendingRequest]);
 
   /** Shows a freshly seeded buffer, landing the view on the first prime ≥ target. */
   const finishSeeding = useCallback(
@@ -375,14 +406,75 @@ export function usePrimeBuffer(firstBatchFromServer: readonly string[]): PrimeBu
       const isAnswerToPendingRequest = response.id === pendingRequestRef.current?.id;
       if (!isFromCurrentGeneration || !isAnswerToPendingRequest) return;
 
+      const pending = pendingRequestRef.current!;
+      /**
+       * Adds primes found in `findingMs` to the speed counter. Primes kept from
+       * an earlier proof weren't found now, so they don't count. Only found
+       * primes add to the rate, so when the worker is idle it holds its value.
+       */
+      const recordFound = (foundCount: number, findingMs: number, setupMs: number) => {
+        if (foundCount === 0) return;
+        rateWindowRef.current = recordBatch(rateWindowRef.current, {
+          primeCount: foundCount,
+          sievingDurationMs: findingMs,
+          setupDurationMs: setupMs,
+        });
+        const measuredRate = measurePrimesPerSecond(rateWindowRef.current);
+        setPrimesPerSecond(measuredRate);
+        if (measuredRate !== null) setHeat(heatFromRate(measuredRate));
+      };
+      /** Puts this request's primes in the buffer: a new batch, or more of the one already streaming in. */
+      const showPrimes = (primes: readonly bigint[], direction: Direction) => {
+        const update = pending.streamed
+          ? extendBatch(heldBatchesRef.current, primes, direction)
+          : addBatch(heldBatchesRef.current, primes, direction);
+        pending.streamed = true;
+        rowsAddedAboveRef.current += update.rowsAddedAbove;
+        heldBatchesRef.current = update.batches;
+        setBatches(update.batches);
+      };
+
+      if (response.type === "proving") {
+        pending.proving = true; // Stop can pause it now, keeping its proofs
+        setProving({ direction: pending.direction, status: { elapsedMs: 0, digits: null, reachedDigits: null } });
+        return;
+      }
+      if (response.type === "proving-progress") {
+        const { direction, elapsedMs, digits, reachedDigits } = response;
+        setProving({ direction, status: { elapsedMs, digits, reachedDigits } });
+        return;
+      }
+      if (response.type === "proven") {
+        // Primes past a(13) arrive as they're proven and checked: show them at once.
+        pending.findingMs += response.findingDurationMs;
+        recordFound(response.foundCount, response.findingDurationMs, 0);
+        // the list now waits on the next prime: its clock starts again
+        setProving({ direction: response.direction, status: { elapsedMs: 0, digits: null, reachedDigits: null } });
+        if (response.primes.length === 0) return;
+        const pendingSeed = pendingSeedRef.current;
+        if (pendingSeed) {
+          // A jump lands on its first proven primes, not when the whole batch is
+          // done; the batch below the target is fetched later, by scrolling up.
+          const fromTarget = pendingSeed.primesFromTarget;
+          const { target, isUserJump } = pendingSeed;
+          if (fromTarget) finishSeeding(target, isUserJump, fromTarget, response.primes);
+          else finishSeeding(target, isUserJump, response.primes, null);
+          pending.streamed = true;
+          return;
+        }
+        showPrimes(response.primes, response.direction);
+        return;
+      }
+      if (response.type === "paused") return; // answers a pause; the request was already given up on
       if (response.type === "building-base-primes") {
         setStatus("building-base-primes"); // the batch itself is still on its way
         return;
       }
 
       pendingRequestRef.current = null;
+      setProving(null);
       clearSlowCalculation();
-      if (response.type === "batch" || response.type === "memory-limit" || response.type === "proven-bound") {
+      if (response.type === "batch" || response.type === "memory-limit") {
         workerMemoryBytesRef.current = response.memory.moduleBytes;
         setBasePrimeMemoryBytes(response.memory.basePrimeBytes);
       }
@@ -397,16 +489,6 @@ export function usePrimeBuffer(firstBatchFromServer: readonly string[]): PrimeBu
         setStatus("idle");
         return;
       }
-      if (response.type === "proven-bound") {
-        // The same, at the bound where Miller–Rabin stops being a proof: a
-        // jump past it leaves an empty list, with the notice explaining.
-        provenBoundReachedRef.current = true;
-        pendingSeedRef.current = null;
-        fillingOnLoadRef.current = false;
-        setReachedProvenBound(true);
-        setStatus("idle");
-        return;
-      }
       if (response.type === "error") {
         cannotContinueRef.current = true;
         console.error("prime worker:", response.message);
@@ -417,6 +499,25 @@ export function usePrimeBuffer(firstBatchFromServer: readonly string[]): PrimeBu
 
       setStatus("idle");
       const { primes: newPrimes, sievingDurationMs, setupDurationMs, direction } = response;
+      if (pending.streamed) {
+        // The rest of a batch that arrived in pieces: already seeded and shown, so just add the rest.
+        recordFound(response.foundCount, sievingDurationMs, setupDurationMs);
+        if (setupDurationMs > 0) setLastSetupMs(setupDurationMs);
+        setLastVerificationMs(response.verificationDurationMs);
+        setSievingThreads(response.threads);
+        setLastBatchDurationMs(pending.findingMs + sievingDurationMs);
+        if (response.reachedMemoryLimit && direction === "next") {
+          memoryLimitReachedRef.current = true;
+          fillingOnLoadRef.current = false;
+          setReachedMemoryLimit(true);
+        }
+        if (newPrimes.length > 0) showPrimes(newPrimes, direction);
+        if (fillingOnLoadRef.current) {
+          if (heldBatchesRef.current.length < MAX_BATCHES) requestNextAfter(heldBatchesRef.current);
+          else fillingOnLoadRef.current = false;
+        }
+        return;
+      }
       if (setupDurationMs > 0) setLastSetupMs(setupDurationMs);
       setLastVerificationMs(response.verificationDurationMs);
       setSievingThreads(response.threads);
@@ -426,24 +527,10 @@ export function usePrimeBuffer(firstBatchFromServer: readonly string[]): PrimeBu
         fillingOnLoadRef.current = false;
         setReachedMemoryLimit(true);
       }
-      if (response.reachedProvenBound && direction === "next") {
-        // These primes are proven; the next number can't be until Phase 5.
-        provenBoundReachedRef.current = true;
-        fillingOnLoadRef.current = false;
-        setReachedProvenBound(true);
-      }
       if (newPrimes.length === 0) return; // asked for primes before 2; there are none
 
-      // Update the primes-per-second counter from sieving time only. Only
-      // batches add to the rate, so when the worker is idle it holds its value.
-      rateWindowRef.current = recordBatch(rateWindowRef.current, {
-        primeCount: newPrimes.length,
-        sievingDurationMs,
-        setupDurationMs,
-      });
-      const measuredRate = measurePrimesPerSecond(rateWindowRef.current);
-      setPrimesPerSecond(measuredRate);
-      if (measuredRate !== null) setHeat(heatFromRate(measuredRate));
+      // The primes-per-second counter uses finding time only (sieving and proving).
+      recordFound(response.foundCount, sievingDurationMs, setupDurationMs);
       setLastBatchDurationMs(sievingDurationMs);
 
       const pendingSeed = pendingSeedRef.current;
@@ -564,7 +651,7 @@ export function usePrimeBuffer(firstBatchFromServer: readonly string[]): PrimeBu
     errorMessage,
     calculationIsSlow,
     reachedMemoryLimit,
-    reachedProvenBound,
+    proving,
     lastJump,
     jumpTo,
     stop,

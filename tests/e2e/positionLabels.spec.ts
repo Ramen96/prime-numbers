@@ -7,6 +7,9 @@ test.describe("position labels", () => {
   test("stay consecutive across batch boundaries in both directions after a jump", async ({
     page,
   }) => {
+    // 180 scroll steps, each waiting for the worker: about 9 s alone, but well past the
+    // default 30 s when tests proving primes past a(13) keep every core busy alongside it.
+    test.setTimeout(90_000);
     const primeListPage = new PrimeListPage(page);
     await primeListPage.open();
     await primeListPage.jumpTo("1,000,000,000");

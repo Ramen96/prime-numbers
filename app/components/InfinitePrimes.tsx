@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, type ReactNode } from "react";
+import { describeRate } from "@/lib/formatRate";
 import { urlForJump } from "@/lib/jumpUrl";
 import { NEW_RECORD_SESSION, sessionAfterJump } from "@/lib/personalRecords";
 import { CALCULATING_LINES } from "@/lib/mentatLines";
@@ -54,7 +55,7 @@ export function InfinitePrimes({ intro, firstBatchFromServer }: Props) {
     errorMessage,
     calculationIsSlow,
     reachedMemoryLimit,
-    reachedProvenBound,
+    proving,
     stop,
     lastJump,
     jumpTo,
@@ -104,6 +105,8 @@ export function InfinitePrimes({ intro, firstBatchFromServer }: Props) {
   const lastBatch = batches[batches.length - 1];
   const frontier = lastBatch ? lastBatch.primes[lastBatch.primes.length - 1] : null;
   const isBuildingBasePrimes = status === "building-base-primes";
+  // A rate, or below one prime a second, the time each prime takes (lib/formatRate.ts).
+  const rateReading = primesPerSecond !== null ? describeRate(primesPerSecond) : null;
   // Dune easter egg: sometimes a Mentat line instead of the "—" (lib/mentatLines.ts).
   const mentatLine = useMentatLine(CALCULATING_LINES, status === "computing" || isBuildingBasePrimes);
 
@@ -123,8 +126,8 @@ export function InfinitePrimes({ intro, firstBatchFromServer }: Props) {
             <div className="font-mono text-[clamp(2rem,8vw,3.75rem)] leading-none font-bold tabular-nums wrap-anywhere text-(--heat-text) transition-colors duration-600 desktop:text-[3.25rem]">
               {status === "stopped" ? (
                 "stopped"
-              ) : primesPerSecond !== null ? (
-                numberFormatter.format(primesPerSecond)
+              ) : rateReading ? (
+                rateReading.value
               ) : mentatLine ? (
                 // Exactly one counter line tall (1em of the counter's font), so
                 // nothing below moves; the line itself is small, two lines at most.
@@ -142,7 +145,7 @@ export function InfinitePrimes({ intro, firstBatchFromServer }: Props) {
                 {isBuildingBasePrimes ? (
                   <span className="text-(--heat-text)">Building base primes…</span>
                 ) : (
-                  "primes per second"
+                  (rateReading?.unit ?? "primes per second")
                 )}
               </p>
               {/* Always laid out, only shown during a slow calculation, so it never shifts the page. */}
@@ -219,7 +222,7 @@ export function InfinitePrimes({ intro, firstBatchFromServer }: Props) {
               batches={batches}
               status={status}
               reachedMemoryLimit={reachedMemoryLimit}
-              reachedProvenBound={reachedProvenBound}
+              proving={proving}
               errorMessage={errorMessage}
               reportView={reportView}
               takeScrollInstruction={takeScrollInstruction}

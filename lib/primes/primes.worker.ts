@@ -10,6 +10,8 @@
 import { computeBatch } from "./computeBatch";
 import { loadSieve, sievingThreadsFor } from "./loadSieve";
 import type { WorkerRequest, WorkerResponse } from "./protocol";
+import { ProvenPrimeCache } from "./provenPrimeCache";
+import { RequestStops, yieldToMessages } from "./requestStops";
 import { SieveCalibrator } from "./sieveCalibrator";
 import { VerificationPool } from "./verificationPool";
 import { VERIFICATION_WORKER_NAME } from "./workerNames";
@@ -35,21 +37,35 @@ function sendToMainThread(response: WorkerResponse) {
 }
 
 // One request at a time, in the order they arrived (computing is async while
-// verification runs in other workers).
+// verification runs in other workers). A pause isn't queued: it's noted at
+// once, and the running request sees it between proving runs (requestStops.ts).
 let previousRequest: Promise<void> = Promise.resolve();
 let calibrator: SieveCalibrator | null = null;
+const requestStops = new RequestStops();
+// Primes past a(13) proven and checked by this worker, so they aren't proven again.
+const provenPrimes = new ProvenPrimeCache();
 
 self.onmessage = (event: MessageEvent<WorkerRequest>) => {
   const request = event.data;
+  if (request.type === "pause") {
+    requestStops.paused(request.id);
+    return;
+  }
+  requestStops.arrived();
   previousRequest = previousRequest.then(async () => {
+    requestStops.started();
     try {
-      const { sieve, threads, memoryBudgetBytes } = await sieveReady;
+      const { sieve, threads, memoryBudgetBytes, proofSlots } = await sieveReady;
       calibrator ??= new SieveCalibrator(sieve, memoryBudgetBytes);
       await computeBatch(sieve, request, sendToMainThread, {
         memoryBudgetBytes,
         calibrator,
         threads,
         verify: (primes, rejected, certificates) => verificationPool.verify(primes, rejected, certificates),
+        prove: (candidates, options) =>
+          proofSlots.proveInOrder(candidates, { ...options, betweenRuns: yieldToMessages }),
+        shouldStop: () => requestStops.shouldStop(request.id),
+        provenPrimes,
       });
     } catch (error) {
       sendToMainThread({

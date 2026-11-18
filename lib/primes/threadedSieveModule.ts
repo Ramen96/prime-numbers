@@ -29,6 +29,7 @@ export interface ThreadedSieveModule {
   _batch_rejected_evidence(): number;
   _batch_rejected_kinds(): number;
   _set_sieve_prime_cap(cap: bigint): void;
+  _set_probable_primes_allowed(allowed: number): void;
   _sieve_start_helpers(count: number): number;
   _set_parallel_threshold(checkpoints: number): void;
   _measured_parallel_threshold(): number;
@@ -42,6 +43,7 @@ export interface ThreadedSieveModule {
   _proof_slot_value(slot: number, step: number, field: number): number;
   _proof_output_buffer(): number;
   _proof_slot_clear(slot: number): void;
+  _proof_slot_progress(slot: number): number;
 }
 
 /**
@@ -76,6 +78,7 @@ export function rawExportsOf(sieveModule: ThreadedSieveModule): RawSieveExports 
     batch_rejected_evidence: sieveModule._batch_rejected_evidence,
     batch_rejected_kinds: sieveModule._batch_rejected_kinds,
     set_sieve_prime_cap: sieveModule._set_sieve_prime_cap,
+    set_probable_primes_allowed: sieveModule._set_probable_primes_allowed,
     take_measuring_ms: sieveModule._take_measuring_ms,
   };
 }
@@ -93,5 +96,6 @@ export function rawProofSlotExportsOf(sieveModule: ThreadedSieveModule): RawProo
     proof_slot_value: sieveModule._proof_slot_value,
     proof_output_buffer: sieveModule._proof_output_buffer,
     proof_slot_clear: sieveModule._proof_slot_clear,
+    proof_slot_progress: sieveModule._proof_slot_progress,
   };
 }

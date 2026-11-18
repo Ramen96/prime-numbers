@@ -131,3 +131,9 @@ void proof_slot_clear(int slot) {
   if (slot >= 0 && slot < slot_count)
     slots[slot].state = PROOF_SLOT_IDLE;
 }
+
+size_t proof_slot_progress(int slot) {
+  if (proof_slot_state_of(slot) != PROOF_SLOT_PROVING)
+    return 0;
+  return ecpp_prover_current_bit_length(&slots[slot].prover);
+}

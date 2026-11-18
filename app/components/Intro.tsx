@@ -5,7 +5,8 @@ export function Intro() {
       <p className="mt-2 max-w-prose text-[0.95rem] leading-relaxed text-muted">
         Every Prime Number is an infinite list of prime numbers, calculated live in your
         browser. As you scroll, your computer finds the next primes on the spot using a
-        segmented sieve of Eratosthenes, running entirely on your own computer. Jump to any
+        segmented sieve of Eratosthenes and, for huge numbers, a proof of each prime, running
+        entirely on your own computer. Jump to any
         number to see the primes around it, and watch the primes-per-second counter fall as
         the numbers grow and your CPU works harder.
       </p>

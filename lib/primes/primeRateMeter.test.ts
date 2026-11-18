@@ -84,7 +84,7 @@ describe("primeRateMeter", () => {
 
   it("ignores setup time: building base primes doesn't drag the rate down", () => {
     // A big jump's first batch: 64 ms building base primes, then 30 ms sieving,
-    // then a 25 ms batch. Together they're needed to cover 50 ms of sieving.
+    // then a 25 ms batch. Together they're still short of the minimum, so both are kept.
     let window = recordBatch(EMPTY_RATE_WINDOW, {
       primeCount: PRIMES_PER_BATCH,
       sievingDurationMs: 30,
@@ -118,17 +118,33 @@ describe("primeRateMeter", () => {
 
   describe("window size", () => {
     it(`keeps at least ${MIN_WINDOW_DURATION_MS} ms of measured time when it can`, () => {
-      const window = recordAll(EMPTY_RATE_WINDOW, Array(30).fill(4));
+      const batchMs = MIN_WINDOW_DURATION_MS / 10;
+      const window = recordAll(EMPTY_RATE_WINDOW, Array(25).fill(batchMs));
       const windowDurationMs = window.reduce((sum, batch) => sum + batch.sievingDurationMs, 0);
       assert.ok(windowDurationMs >= MIN_WINDOW_DURATION_MS);
-      assert.ok(windowDurationMs - 4 < MIN_WINDOW_DURATION_MS, "but no more than it needs");
+      assert.ok(windowDurationMs - batchMs < MIN_WINDOW_DURATION_MS, "but no more than it needs");
+    });
+
+    it("stays steady when a batch streams in uneven pieces, as far past a(13)", () => {
+      // pieces of 1 prime in 0.3 s and 10 primes in 1 s, alternating: a reading of each piece alone
+      // would jump between 3.3 and 10 primes a second
+      let window = EMPTY_RATE_WINDOW;
+      const readings: number[] = [];
+      for (let piece = 0; piece < 40; piece++) {
+        const [primeCount, sievingDurationMs] = piece % 2 === 0 ? [1, 300] : [10, 1000];
+        window = recordBatch(window, { primeCount, sievingDurationMs, setupDurationMs: 0 });
+        if (piece >= 10) readings.push(measurePrimesPerSecond(window)!);
+      }
+      const [lowest, highest] = [Math.min(...readings), Math.max(...readings)];
+      assert.ok(highest / lowest < 1.5, `readings from ${lowest} to ${highest}`);
     });
 
     it("drops old fast batches as soon as one slow batch covers the minimum time", () => {
       let window = recordAll(EMPTY_RATE_WINDOW, Array(MAX_WINDOW_BATCHES).fill(0.05));
-      window = recordBatch(window, { primeCount: PRIMES_PER_BATCH, sievingDurationMs: 80, setupDurationMs: 0 });
+      const slowBatchMs = MIN_WINDOW_DURATION_MS + 30;
+      window = recordBatch(window, { primeCount: PRIMES_PER_BATCH, sievingDurationMs: slowBatchMs, setupDurationMs: 0 });
       assert.equal(window.length, 1);
-      assert.equal(measurePrimesPerSecond(window), PRIMES_PER_BATCH / 0.08);
+      assert.equal(measurePrimesPerSecond(window), PRIMES_PER_BATCH / (slowBatchMs / 1000));
     });
 
     it(`caps at ${MAX_WINDOW_BATCHES} batches, so the rate catches up with a slowdown within that many batches`, () => {

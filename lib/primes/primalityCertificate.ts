@@ -127,9 +127,9 @@ export function stepProblem({ number: n, curveA, curveB, pointX, pointY, orderPr
   const discriminant = modulo(4n * curveA ** 3n + 27n * curveB ** 2n, n);
   if (inverse(discriminant, n) === null) return "the curve is singular modulo a factor";
   const rightSide = pointX ** 3n + curveA * pointX + curveB;
-  if (modulo(pointY ** 2n - rightSide, n) !== 0n) return "the point isn't on the curve";
+  if (modulo(pointY ** 2n - rightSide, n) !== 0n) return "the point isn’t on the curve";
   if (!orderIsLargeEnough(orderPrime, n)) return "the order is too small to prove anything";
-  if (!hasOrder({ x: pointX, y: pointY }, orderPrime, curveA, n)) return "the point doesn't have that order";
+  if (!hasOrder({ x: pointX, y: pointY }, orderPrime, curveA, n)) return "the point doesn’t have that order";
   return null;
 }
 
@@ -147,7 +147,7 @@ export function checkCertificate(candidate: bigint, steps: readonly CertificateS
     current = step.orderPrime;
   }
   if (millerRabinVerdict(current) !== "prime") {
-    return { valid: false, number: current, reason: "the chain doesn't end at a number proven prime" };
+    return { valid: false, number: current, reason: "the chain doesn’t end at a number proven prime" };
   }
   return { valid: true };
 }

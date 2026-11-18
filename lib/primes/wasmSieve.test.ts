@@ -75,6 +75,7 @@ function fakeSieve(
     batch_rejected_evidence: () => asWasmReturnsIt32(rejectedEvidencePointer),
     batch_rejected_kinds: () => asWasmReturnsIt32(rejectedKindsPointer),
     set_sieve_prime_cap: () => {},
+    set_probable_primes_allowed: () => {},
   };
 }
 
@@ -189,6 +190,17 @@ describe("WasmSieve rejected composites (Phase 4)", () => {
     sieve.setSievePrimeCap(65_535n);
     sieve.setSievePrimeCap(NO_SIEVE_PRIME_CAP);
     assert.deepEqual(caps, [65_535n, 2n ** 64n - 1n]);
+  });
+
+  it("passes the probable-prime switch through as 1 or 0", () => {
+    const settings: number[] = [];
+    const sieve = new WasmSieve({
+      ...fakeSieve(3n, [0n]),
+      set_probable_primes_allowed: (allowed: number) => void settings.push(allowed),
+    });
+    sieve.setProbablePrimesAllowed(true);
+    sieve.setProbablePrimesAllowed(false);
+    assert.deepEqual(settings, [1, 0]);
   });
 });
 

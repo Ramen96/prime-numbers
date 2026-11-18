@@ -106,13 +106,13 @@ describe("verifyPrimes from a(13) up (certificates)", () => {
       verified: false,
       disputedPrime: thirtyDigits.prime,
       verdict: "certificate-invalid",
-      reason: `the chain doesn't end at a number proven prime (at ${shortened.at(-1)!.orderPrime})`,
+      reason: `the chain doesn’t end at a number proven prime (at ${shortened.at(-1)!.orderPrime})`,
     });
     assert.deepEqual(verifyPrimes([thirtyDigits.prime], new Map([[thirtyDigits.prime, []]])), {
       verified: false,
       disputedPrime: thirtyDigits.prime,
       verdict: "certificate-invalid",
-      reason: "the chain doesn't end at a number proven prime",
+      reason: "the chain doesn’t end at a number proven prime",
     });
   });
 

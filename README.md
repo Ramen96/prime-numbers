@@ -42,7 +42,7 @@ The page never holds more than 1,500 primes: three batches of 500. Scroll 60% in
 
 Three, not two, so that after every swap the view sits in the middle batch, far from both fetch thresholds. With two, the view would land right next to a threshold and the buffer would thrash.
 
-Scrolling back up recomputes primes instead of storing them: memory stays flat forever and only compute grows, which is the point of the site. The list is virtualized with a fixed row height, so a prime too long for its row is shortened in the middle at comma groups and opens in full on tap.
+Scrolling back up recomputes primes instead of storing them: memory stays flat forever and only compute grows, which is the point of the site. The exception is past 3.3 × 10^24, where a prime costs a proof: the worker keeps primes it has proven and checked (`lib/primes/provenPrimeCache.ts`, about 16 MB, oldest dropped first) so they aren't proven again. The list is virtualized with a fixed row height, so a prime too long for its row is shortened in the middle at comma groups and opens in full on tap.
 
 ### A memory budget, and partial sieving past it
 
@@ -50,13 +50,21 @@ The budget is a quarter of the device's memory where the browser reports it. A p
 
 Past a point measured on the device, or sooner if the base primes don't fit, the sieve stops building them: it sieves each window with a small set, and every survivor it can't settle, those from (M + 1)² up for base primes up to M, is proven by a deterministic Miller–Rabin test in C (`wasm/primality.c`, on hand-written Montgomery arithmetic), shared across the threads, with small numbers' memory cached per thread because the allocator's lock otherwise made 9 threads slower than one. Proving a prime costs the same however large the sieve was, so this wins by a long way: near 2^63, about 2 ms a batch instead of 39 ms, and 4 MB of base primes instead of 150 MB.
 
-The worker measures rather than assumes: on the first batch past 2^32 it times real batches both ways up a ladder of sizes (`lib/primes/methodCalibration.ts`), stopping where partial sieving is clearly faster, then times a few caps and keeps the fastest; past 2^64 it times the caps again for the multi-limb path. Batches from the same place must hold identical primes, or the worker stops with an error, so calibrating also cross-checks the methods. That's a proof only below a(13) ≈ 3.3 × 10^24 (OEIS A014233), so the list stops at the first number past it the sieve can't cross off, and says so. Nothing is skipped or guessed. WebAssembly memory never shrinks, so a jump back from far away starts a fresh worker to give the memory back.
+The worker measures rather than assumes: on the first batch past 2^32 it times real batches both ways up a ladder of sizes (`lib/primes/methodCalibration.ts`), stopping where partial sieving is clearly faster, then times a few caps and keeps the fastest; past 2^64 it times the caps again for the multi-limb path. Batches from the same place must hold identical primes, or the worker stops with an error, so calibrating also cross-checks the methods. That's a proof only below a(13) ≈ 3.3 × 10^24 (OEIS A014233); past it, every survivor needs a primality proof (below). WebAssembly memory never shrinks, so a jump back from far away starts a fresh worker to give the memory back.
 
 ### Verification: an independent second opinion
 
-Every prime is checked again before it's shown, by a deterministic Miller–Rabin test written in TypeScript. It shares no code with the C sieve, so a bug in one is caught by the other. With the first 13 primes as bases, it's proven to have no false positives below about 3.3 × 10^24 (OEIS A014233), which is as far as the list goes. Every composite the C side's Miller–Rabin throws out comes with its evidence (a small factor or a witness base), checked again too, so a prime thrown out by mistake can't go missing silently.
+Every prime is checked again before it's shown, by a deterministic Miller–Rabin test written in TypeScript. It shares no code with the C sieve, so a bug in one is caught by the other. With the first 13 primes as bases, it's proven to have no false positives below about 3.3 × 10^24 (OEIS A014233); past that, each prime's certificate is checked instead. Every composite the C side's Miller–Rabin throws out comes with its evidence (a small factor or a witness base), checked again too, so a prime thrown out by mistake can't go missing silently.
 
 If the two ever disagree, the worker stops with an error and the disputed batch is never shown. Big batches are checked in parallel in plain workers, and the time is reported separately from sieving.
+
+### Proofs past 3.3 × 10^24
+
+Past a(13), the sieve's survivors go through BPSW in C (`bpsw()` in `wasm/primality.c`): a base-2 strong test and a strong Lucas test. A fail is proof of a composite, re-checked in TypeScript; a pass is only a probable prime. Each one is then proven by elliptic curve primality proving (`wasm/ecpp_prover.c`): a chain of curves, each showing a point of prime order q > (N^¼ + 1)², down to a number below a(13). Curves come from Hilbert class polynomials computed at run time (`wasm/classpoly.c`), so there's no table to run out. One prover runs per thread (`wasm/proof_slots.c`), each on a different prime.
+
+Every certificate is checked before the prime is shown by `lib/primes/primalityCertificate.ts`, a small checker that shares no code with the prover. A composite that passed BPSW never gets a proof, so it stays pending and the list waits rather than show it. Measured natively on one thread, a proof takes about 0.09 s at 100 digits, 2.5 s at 200 and 31 s at 300.
+
+Each prime is shown as soon as it and every prime before it are proven and checked: the worker sends a batch in pieces (`proven` messages, at most every 100 ms), after checking the batch's rejected composites first, since a wrong rejection would leave a gap. Meanwhile a "proving primality…" row shows how long the prime the list is waiting on has taken, and how far down its chain has got (`proof_slot_progress`). Stop pauses proving instead of ending the worker: unfinished chains stay in their slots, and a later request for the same numbers carries on from there. While the sieve itself is running, a Wasm call can't be interrupted, so Stop still ends the worker.
 
 ### Threads: splitting a window's base primes
 
@@ -76,15 +84,15 @@ If any of that fails, including a thread whose script doesn't load, the worker f
 
 Browsers round `performance.now()` (0.1 ms or coarser) to blunt timing attacks, and early batches finish faster than that. Two fixes:
 
-- **A window of batches.** The rate is total primes over total time across recent batches: at least 50 ms of them, at most 32.
+- **A window of batches.** The rate is total primes over total time across recent batches: at least 3 s of them, at most 32. Far out, where primes arrive a few at a time, that makes it an average rather than a reading of the last piece.
 - **Cross-origin isolation.** Already needed for threads, it also gives a finer timer: about 5 µs in Chrome.
 
-The counter measures the time spent finding primes, which includes Miller–Rabin proving past the full sieve. Building base primes, calibrating, timing thread splits and verification are measured separately and left out, so the counter shows steady speed and holds its value while you aren't scrolling. The CPU's heat follows the rate on a log scale, since the rate falls across orders of magnitude.
+The counter measures the time spent finding primes, which includes proving past the full sieve: Miller–Rabin, and past 3.3 × 10^24, ECPP. Primes kept from an earlier proof don't count, and below one prime a second it shows the time per prime instead (`lib/formatRate.ts`). Building base primes, calibrating, timing thread splits and verification are measured separately and left out, so the counter shows steady speed and holds its value while you aren't scrolling. The CPU's heat follows the rate on a log scale, since the rate falls across orders of magnitude.
 
 ## Roadmap
 
-- **A GPU path, if it pays.** Survivor tests on WebGPU (32-bit limbs), only if measurements show the CPU isn't enough.
-- **Proofs past 3.3 × 10^24.** Beyond the proven Miller–Rabin bound: BPSW as a fast filter, then a primality proof for every candidate before it's shown (trial division first, ECPP later), with certificates checked by an independent verifier.
+- **GPU factor-finding.** Sieve deeper on WebGPU (32-bit limbs, with a CPU fallback), each removed composite reported with a factor that the CPU checks with one division. Fewer survivors, and more usable curve orders for ECPP.
+- **Past WebAssembly's 4 GB.** 64-bit Wasm memory where browsers support it, with the 32-bit builds as the fallback.
 
 ## Setup
 

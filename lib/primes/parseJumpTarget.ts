@@ -28,7 +28,7 @@ export function parseJumpTarget(userInput: string): JumpTargetResult {
     return { valid: false, message: "That doesn't look like a number." };
   }
 
-  // Any size: a jump past what can be proven yet shows the proven-bound notice
-  // instead of primes, never a wrong answer.
+  // Any size: a jump far past what this device can reach just runs slowly
+  // (and Stop exists for that), never a wrong answer.
   return { valid: true, target: BigInt(digitsOnly) };
 }

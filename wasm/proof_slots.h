@@ -55,4 +55,9 @@ uint32_t *proof_output_buffer(void);
 // Back to idle, keeping the prover's tables for the next candidate.
 void proof_slot_clear(int slot);
 
+// How far the slot's proof has got (ecpp_prover_current_bit_length): the bit
+// length of the number its chain has reached. 0 unless it's proving. Like the
+// rest, for the calling thread between runs, when no thread is touching the slot.
+size_t proof_slot_progress(int slot);
+
 #endif

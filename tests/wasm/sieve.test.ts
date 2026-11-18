@@ -170,11 +170,11 @@ describe("partial sieving in the shipped sieve.wasm, cap 65,535", () => {
 
   it("past a(13) with probable primes allowed: BPSW passes reported, every rejection holds, a(13) by Lucas", () => {
     const bpswInstance = new WebAssembly.Instance(sieveModule, { env: { emscripten_notify_memory_growth: () => {} } });
-    const bpswRaw = bpswInstance.exports as unknown as RawSieveExports & { set_probable_primes_allowed(allowed: number): void };
+    const bpswRaw = bpswInstance.exports as unknown as RawSieveExports;
     bpswRaw._initialize?.();
     const bpsw = new WasmSieve(bpswRaw);
     bpsw.setSievePrimeCap(1000n);
-    bpswRaw.set_probable_primes_allowed(1);
+    bpsw.setProbablePrimesAllowed(true);
     for (const [direction, start] of [
       ["next", PROVEN_BOUND - 3_000n],
       ["prev", PROVEN_BOUND + 20_000n], // 500 primes span about 28,000 here, so this crosses a(13)
@@ -195,7 +195,7 @@ describe("partial sieving in the shipped sieve.wasm, cap 65,535", () => {
       );
     }
     // switched off again: back to stopping at a(13)
-    bpswRaw.set_probable_primes_allowed(0);
+    bpsw.setProbablePrimesAllowed(false);
     assert.equal(bpsw.findPrimes("next", PROVEN_BOUND - 3_000n, 500).reachedProvenBound, true);
   });
 

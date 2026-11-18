@@ -1,5 +1,5 @@
 // A Dune easter egg: now and then, a Mentat line instead of the counter's
-// "—" while calculating, or under the proven-bound notice. Purely cosmetic:
+// "—" while calculating, or in the “proving primality…” row. Purely cosmetic:
 // nothing here affects calculating, timing or stopping.
 //
 // The lines and the odds are all here, so they're easy to edit.
@@ -21,13 +21,13 @@ export const CALCULATING_LINES = [
   "A Mentat is judging your CPU.",
 ] as const;
 
-/** A second line under the proven-bound notice, where the proofs run out. */
-export const PROVEN_BOUND_LINES = [
+/** In the “proving primality…” row, while a prime past 3.3 × 10^24 is proven. */
+export const PROVING_LINES = [
   "A Mentat wouldn’t need a proof.",
   "A Mentat would simply know.",
-  "Past here, even a Mentat would check his work.",
-  "Even a thinking machine knows where its proofs end.",
   "A Mentat would remember every witness.",
+  "A Mentat would have found the curve by now.",
+  "Even a Mentat would check this certificate.",
 ] as const;
 
 /** A random number in [0, 1), like Math.random. */

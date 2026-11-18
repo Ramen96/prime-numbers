@@ -84,6 +84,37 @@ export function addBatch(
 }
 
 /**
+ * Grows the batch at one end with more of its primes, as they arrive streamed
+ * (step 5): "next" appends to the last batch, "prev" prepends to the first one,
+ * whose first prime then moves up. `morePrimes` is ascending and continues that
+ * batch with no gap. Nothing is dropped: the batch was already counted when
+ * addBatch started it.
+ */
+export function extendBatch(
+  heldBatches: Batch[],
+  morePrimes: readonly bigint[],
+  direction: Direction,
+): BufferUpdate {
+  if (heldBatches.length === 0 || morePrimes.length === 0) return { batches: heldBatches, rowsAddedAbove: 0 };
+  let batches: Batch[];
+  let rowsAddedAbove = 0;
+  if (direction === "next") {
+    const lastBatch = heldBatches[heldBatches.length - 1];
+    batches = [...heldBatches.slice(0, -1), { ...lastBatch, primes: [...lastBatch.primes, ...morePrimes] }];
+  } else {
+    const firstBatch = heldBatches[0];
+    const grown: Batch = {
+      ...firstBatch,
+      primes: [...morePrimes, ...firstBatch.primes],
+      ordinalOfFirstPrime: firstBatch.ordinalOfFirstPrime - BigInt(morePrimes.length),
+    };
+    batches = [grown, ...heldBatches.slice(1)];
+    rowsAddedAbove = morePrimes.length;
+  }
+  return { batches: numberExactlyIfBufferContainsTwo(batches), rowsAddedAbove };
+}
+
+/**
  * True while the buffer's position labels are estimates: after a jump, until
  * the buffer reaches 2. The "≈" on each label and the estimate banner both
  * use this, so they always agree.

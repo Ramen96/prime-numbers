@@ -94,6 +94,31 @@ test.describe("Stop button", () => {
     await expect.poll(async () => parseNumber(await statValue(page, "frontier"))).toBeGreaterThan(3571);
   });
 
+  test("while proving, Stop pauses instead of ending the worker, which goes on working afterwards", async ({ page }) => {
+    // A batch past 10^100 takes about a minute, nearly all of it proving; sieving it takes well under a second.
+    const workers = collectPrimeWorkers(page);
+    const primeListPage = new PrimeListPage(page);
+    await primeListPage.open();
+    await expect.poll(() => workers.length).toBe(1);
+    let workerClosed = false;
+    workers[0].once("close", () => (workerClosed = true));
+
+    await primeListPage.jumpTo("1" + "0".repeat(100), { waitForLanding: false });
+    const stopButton = page.getByRole("button", { name: "Stop calculating" });
+    await expect(stopButton).toBeVisible();
+    await expect(primeListPage.primeList.getByText(/^proving primality…/)).toBeVisible({ timeout: 20_000 });
+    await stopButton.click();
+    await expect(primeListPage.primeList).toHaveAttribute("data-status", "stopped");
+    await page.waitForTimeout(500);
+    expect(workerClosed, "the worker was paused, not terminated").toBe(false);
+
+    // The same worker takes the next request.
+    await primeListPage.jumpTo("1,000");
+    expect((await primeListPage.topVisibleRow()).prime).toBe(1009);
+    expect(workers.length).toBe(1);
+    expect(workerClosed).toBe(false);
+  });
+
   test("stopping while the worker's script loads isn't mistaken for a crash, and scrolling resumes", async ({ page }) => {
     // Terminating a worker part way through loading fails its import, which
     // reports an error a moment later. (By chunk name, so on the dev server.)
