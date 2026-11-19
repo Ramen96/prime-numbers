@@ -21,6 +21,14 @@ export function heatFromRate(primesPerSecond: number): number {
   return progressTowardSlow(primesPerSecond, COOL_RATE, HOT_RATE);
 }
 
+/** At this rate or slower (one prime a minute), the Stop button says “Give up”. */
+export const GIVE_UP_RATE = 1 / 60;
+
+/** Whether single primes take a minute or more: then Stop reads “Give up” (it does the same thing). */
+export function primesTakeMinutes(primesPerSecond: number): boolean {
+  return primesPerSecond > 0 && primesPerSecond <= GIVE_UP_RATE;
+}
+
 /**
  * Meltdown in 0..1, the scale after heat: 0 until heat is at its top, then up
  * to 1 at one prime every ten minutes. Heat stops changing near 10^24, while

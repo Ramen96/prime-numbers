@@ -48,6 +48,7 @@ export function InfinitePrimes({ intro, firstBatchFromServer }: Props) {
     primesPerSecond,
     heat,
     meltdown,
+    primesTakeMinutes,
     lastBatchDurationMs,
     lastSetupMs,
     lastVerificationMs,
@@ -153,14 +154,22 @@ export function InfinitePrimes({ intro, firstBatchFromServer }: Props) {
                   (rateReading?.unit ?? "primes per second")
                 )}
               </p>
-              {/* Always laid out, only shown during a slow calculation, so it never shifts the page. */}
+              {/* Always laid out, only shown during a slow calculation, so it never shifts the page.
+                  Once primes take minutes it reads “Give up” (same action). Both labels share one
+                  grid cell, the unused one hidden, so it's always as wide as the longer. */}
               <button
                 type="button"
                 onClick={stop}
-                aria-label="Stop calculating"
-                className={`h-11 shrink-0 rounded-md border border-rule px-4 text-sm font-medium hover:border-foreground focus-visible:outline-2 focus-visible:outline-(--heat-text) ${calculationIsSlow ? "" : "invisible"}`}
+                aria-label={primesTakeMinutes ? "Give up: stop calculating" : "Stop calculating"}
+                data-testid="stop-button"
+                className={`grid h-11 shrink-0 place-items-center rounded-md border border-rule px-4 text-sm font-medium hover:border-foreground focus-visible:outline-2 focus-visible:outline-(--heat-text) ${calculationIsSlow ? "" : "invisible"}`}
               >
-                Stop
+                <span className={`col-start-1 row-start-1 ${primesTakeMinutes ? "invisible" : ""}`} aria-hidden>
+                  Stop
+                </span>
+                <span className={`col-start-1 row-start-1 ${primesTakeMinutes ? "" : "invisible"}`} aria-hidden>
+                  Give up
+                </span>
               </button>
             </div>
             <dl className="mt-1 grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-0.5 text-[0.8rem] text-muted tabular-nums">

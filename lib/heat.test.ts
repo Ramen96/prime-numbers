@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { heatFromRate, MELTDOWN_FULL_RATE, meltdownFromRate } from "./heat.ts";
+import { GIVE_UP_RATE, heatFromRate, MELTDOWN_FULL_RATE, meltdownFromRate, primesTakeMinutes } from "./heat.ts";
 
 const close = (actual: number, expected: number) =>
   assert.ok(Math.abs(actual - expected) < 1e-9, `${actual} is not ${expected}`);
@@ -37,5 +37,22 @@ describe("meltdownFromRate", () => {
 
   it("is 0 without a rate", () => {
     for (const rate of [0, -1, Number.NaN]) close(meltdownFromRate(rate), 0);
+  });
+});
+
+describe("primesTakeMinutes", () => {
+  it("is true from one prime a minute down, and not a moment before", () => {
+    assert.equal(primesTakeMinutes(1 / 59), false);
+    assert.equal(primesTakeMinutes(GIVE_UP_RATE), true);
+    assert.equal(primesTakeMinutes(1 / 600), true);
+    assert.equal(primesTakeMinutes(1e5), false);
+  });
+
+  it("comes after the × eyes (meltdown 0.75)", () => {
+    assert.ok(meltdownFromRate(GIVE_UP_RATE) > 0.75);
+  });
+
+  it("is false without a rate", () => {
+    for (const rate of [0, -1, Number.NaN]) assert.equal(primesTakeMinutes(rate), false);
   });
 });

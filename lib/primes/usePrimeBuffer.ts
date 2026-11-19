@@ -17,7 +17,7 @@ import { estimatedBasePrimeBytes, shouldRestartWorkerToReleaseMemory } from "./m
 import { addBatch, extendBatch, MAX_BATCHES, type Batch } from "./rollingBuffer.ts";
 import { basePrimeLimitNeededFor } from "./wasmSieve.ts";
 import { PRIME_WORKER_NAME } from "./workerNames.ts";
-import { heatFromRate, meltdownFromRate } from "../heat.ts";
+import { heatFromRate, meltdownFromRate, primesTakeMinutes } from "../heat.ts";
 import type { ProvingStatus } from "../provingStatus.ts";
 
 export type { Batch };
@@ -70,6 +70,11 @@ export interface PrimeBuffer {
    * prime every ten minutes. Keeps its last value while primesPerSecond is null.
    */
   meltdown: number;
+  /**
+   * True once single primes take a minute or more (lib/heat.ts): Stop then reads
+   * “Give up”. Keeps its last value while primesPerSecond is null.
+   */
+  primesTakeMinutes: boolean;
   /** Sieving time of the last batch; null until the worker has computed one. */
   lastBatchDurationMs: number | null;
   /** How long building base primes took the last time it was needed; null before then. */
@@ -139,6 +144,7 @@ export function usePrimeBuffer(firstBatchFromServer: readonly string[]): PrimeBu
   const [primesPerSecond, setPrimesPerSecond] = useState<number | null>(null);
   const [heat, setHeat] = useState(0);
   const [meltdown, setMeltdown] = useState(0);
+  const [slowerThanAMinute, setSlowerThanAMinute] = useState(false);
   const [lastBatchDurationMs, setLastBatchDurationMs] = useState<number | null>(null);
   const [proving, setProving] = useState<PrimeBuffer["proving"]>(null);
   const [lastSetupMs, setLastSetupMs] = useState<number | null>(null);
@@ -413,6 +419,7 @@ export function usePrimeBuffer(firstBatchFromServer: readonly string[]): PrimeBu
         if (measuredRate !== null) {
           setHeat(heatFromRate(measuredRate));
           setMeltdown(meltdownFromRate(measuredRate));
+          setSlowerThanAMinute(primesTakeMinutes(measuredRate));
         }
       };
       /** Puts this request's primes in the buffer: a new batch, or more of the one already streaming in. */
@@ -636,6 +643,7 @@ export function usePrimeBuffer(firstBatchFromServer: readonly string[]): PrimeBu
     primesPerSecond,
     heat,
     meltdown,
+    primesTakeMinutes: slowerThanAMinute,
     lastBatchDurationMs,
     lastSetupMs,
     lastVerificationMs,

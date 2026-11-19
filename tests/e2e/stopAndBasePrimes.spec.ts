@@ -50,6 +50,26 @@ test.describe("base-prime memory", () => {
 });
 
 test.describe("Stop button", () => {
+  test("reads “Stop” until primes take minutes, then “Give up”, at the same width either way", async ({ page }) => {
+    const primeListPage = new PrimeListPage(page);
+    await primeListPage.open();
+    const button = page.getByTestId("stop-button");
+    // every test runs far faster than a prime a minute: the name is Stop's (an attribute
+    // here, since the button stays hidden until a calculation is slow)
+    await expect(button).toHaveAttribute("aria-label", "Stop calculating");
+    // both labels are laid out in one cell and kept out of the accessible name
+    const labels = button.locator("span");
+    await expect(labels).toHaveText(["Stop", "Give up"]);
+    for (const label of await labels.all()) await expect(label).toHaveAttribute("aria-hidden", "true");
+    await expect(labels.nth(0)).not.toHaveClass(/\binvisible\b/);
+    await expect(labels.nth(1)).toHaveClass(/\binvisible\b/);
+
+    // what primesTakeMinutes switches (lib/heat.ts): which label is hidden. The button must not change size.
+    const stopBox = await button.boundingBox();
+    await labels.evaluateAll((spans) => spans.forEach((span) => span.classList.toggle("invisible")));
+    expect(await button.boundingBox()).toEqual(stopBox);
+  });
+
   test("stops the calculation, keeps the visible primes, and scrolling resumes", async ({
     page,
   }) => {

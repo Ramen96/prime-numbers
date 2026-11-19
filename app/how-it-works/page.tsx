@@ -865,7 +865,8 @@ for (size_t index = limb_count; index-- > 0;)
         soon as it and every prime before it are proven and checked. Meanwhile the row at that
         end of the list says “proving primality…”, with how long the prime has taken and how far
         down its chain has got. Stop pauses a proof instead of throwing it away: scroll on, or jump back, and it
-        carries on where it was.
+        carries on where it was. Once primes take a minute or more each, the button says “Give
+        up” instead. It does the same thing.
       </p>
 
       {/* 12 */}
