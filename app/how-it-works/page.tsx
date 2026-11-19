@@ -577,7 +577,8 @@ return EULER_MASCHERONI + Math.log(lnX) + Math.sqrt(x) * sum;`}
         <code>2**53 + 1</code> comes out as 9,007,199,254,740,992. A prime finder that silently
         rounds would show wrong primes, which is worse than showing none. So the site never
         uses ordinary numbers for the primes the worker finds: from the C sieve to the page,
-        each one is a JavaScript <code>BigInt</code>, exact at any size.
+        each one is a JavaScript <code>BigInt</code>, exact at any size the browser can hold
+        (in Chrome, about 323 million digits).
       </p>
       <p>
         Past 2⁶⁴, even C’s largest built-in integers run out, so the sieve builds its own big

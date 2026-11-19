@@ -73,7 +73,8 @@ const FREQUENTLY_ASKED_QUESTIONS = [
     question: "Is there a largest number I can jump to?",
     answer: (
       <>
-        No: the jump box takes a number of any size. How far the list can actually go depends
+        No, not in the site’s code: the jump box takes any number your browser can hold, which
+        in Chrome is over 300 million digits. How far the list can actually go depends
         on what can be proven. To sieve near a number <em>x</em> completely, the site needs
         every prime up to √<em>x</em>; near 2⁶⁴ (about 18 quintillion) that’s 203,280,221 of
         them. Past a point it measures on your device, it sieves with far fewer and proves each

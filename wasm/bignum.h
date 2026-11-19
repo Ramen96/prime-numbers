@@ -132,6 +132,11 @@ int big_number_inverse_mod(big_number *result, const big_number *value, const bi
 // The Jacobi symbol (top / bottom) for odd bottom: 1, -1 or 0, or -2 if memory runs out.
 int big_number_jacobi(const big_number *top, const big_number *bottom);
 
+// result = the first number from 2 up whose Jacobi symbol mod an odd modulus is −1.
+// Returns 1, or -1 if there's none (the modulus is a perfect square), or 0 if memory
+// runs out.
+int big_number_first_non_residue(big_number *result, const big_number *modulus);
+
 // result = a square root of value mod an odd modulus above 2, by Tonelli–Shanks.
 // Returns 1 with a result that's been squared to check it, or -1 if none was
 // found (always the case for a non-residue of a prime), or 0 if memory runs out.

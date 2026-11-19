@@ -11,6 +11,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+#include "../../wasm/ecpp.h"
 #include "../../wasm/ecpp_prover.h"
 #include "../../wasm/primality.h"
 
@@ -93,7 +94,115 @@ static int same_certificate(const ecpp_prover *first, const ecpp_prover *second)
   return 1;
 }
 
+int ecpp_prover_test_discriminant_root(ecpp_prover *prover, const big_number *n, int64_t discriminant, big_number *root);
+size_t ecpp_prover_test_allow_more_effort(ecpp_prover *prover);
+
+// Fundamental discriminants, as the prover lists them (written again here).
+static int is_square_free_size(int64_t value) {
+  for (int64_t divisor = 2; divisor * divisor <= value; divisor++)
+    if (value % (divisor * divisor) == 0)
+      return 0;
+  return 1;
+}
+static int is_fundamental_size(int64_t size) {
+  if (size % 4 == 3)
+    return is_square_free_size(size);
+  if (size % 4 == 0)
+    return (size / 4 % 4 == 1 || size / 4 % 4 == 2) && is_square_free_size(size / 4);
+  return 0;
+}
+
+// Whether a and b give the same orders, in the same order.
+static int same_orders(const big_number *a, size_t a_count, const big_number *b, size_t b_count) {
+  if (a_count != b_count)
+    return 0;
+  for (size_t index = 0; index < a_count; index++)
+    if (big_number_compare(&a[index], &b[index]) != 0)
+      return 0;
+  return 1;
+}
+
+// The genus check and square roots by multiplication (discriminant_root): for
+// primes n, a skipped discriminant never has orders (so skipping loses nothing),
+// and a root it gives squares to D mod n and finds exactly the orders the plain
+// search finds.
+static void check_discriminant_roots(void) {
+  ecpp_prover prover;
+  expect(ecpp_prover_init(&prover, 0), "a prover starts", 0);
+  big_number n, root, square, remainder, d_mod;
+  big_number plain[ECPP_MOST_ORDERS], from_root[ECPP_MOST_ORDERS];
+  big_number *numbers[] = {&n, &root, &square, &remainder, &d_mod};
+  for (size_t index = 0; index < 5; index++)
+    big_number_init(numbers[index]);
+  for (size_t index = 0; index < ECPP_MOST_ORDERS; index++) {
+    big_number_init(&plain[index]);
+    big_number_init(&from_root[index]);
+  }
+  size_t skipped = 0, rooted = 0, with_orders = 0;
+  for (int digits = 30; digits <= 60; digits += 15) {
+    for (uint64_t offset = 0; offset < 2; offset++) {
+      probable_prime_near(&n, digits, offset * 999983);
+      for (int64_t size = 3; size < 3000; size++) {
+        if (!is_fundamental_size(size))
+          continue;
+        int64_t d = -size;
+        size_t plain_count = 0, root_count = 0;
+        ecpp_status plain_status = ecpp_find_orders(&n, d, plain, &plain_count);
+        int result = ecpp_prover_test_discriminant_root(&prover, &n, d, &root);
+        expect(result >= 0, "no memory trouble", (size_t)size);
+        if (result == 0) {
+          skipped++;
+          expect(plain_status == ECPP_NOT_FOUND, "a skipped discriminant never has orders", (size_t)size);
+          continue;
+        }
+        rooted++;
+        // root² ≡ D (mod n)
+        big_number_set_u64(&d_mod, (uint64_t)size);
+        big_number_subtract(&d_mod, &n, &d_mod);
+        big_number_multiply(&square, &root, &root);
+        big_number_divide(NULL, &remainder, &square, &n);
+        expect(big_number_compare(&remainder, &d_mod) == 0, "the root squares to D mod n", (size_t)size);
+        ecpp_status root_status = ecpp_find_orders_from_root(&n, d, &root, from_root, &root_count);
+        expect(root_status == plain_status && same_orders(plain, plain_count, from_root, root_count),
+               "the root finds exactly the plain search's orders", (size_t)size);
+        with_orders += plain_status == ECPP_FOUND;
+      }
+    }
+  }
+  // the check is doing something: many skipped, many kept, some with orders
+  expect(skipped > 1000 && rooted > 1000 && with_orders > 50, "skips and roots both happen", skipped);
+  for (size_t index = 0; index < 5; index++)
+    big_number_free(numbers[index]);
+  for (size_t index = 0; index < ECPP_MOST_ORDERS; index++) {
+    big_number_free(&plain[index]);
+    big_number_free(&from_root[index]);
+  }
+  ecpp_prover_free(&prover);
+}
+
+// The effort limit doubles when the search is stuck, but never wraps to 0 (which
+// would let no step examine anything) and never gets smaller. Written with SIZE_MAX,
+// so it means the same here as in wasm32.
+static void check_effort_never_wraps(void) {
+  ecpp_prover prover;
+  expect(ecpp_prover_init(&prover, 2048), "a prover starts", 0);
+  for (size_t expected = 4096; expected <= 2048u * 1024; expected *= 2)
+    expect(ecpp_prover_test_allow_more_effort(&prover) == expected, "the effort limit doubles", expected);
+  ecpp_prover_free(&prover);
+
+  expect(ecpp_prover_init(&prover, SIZE_MAX / 4 + 1), "a prover starts", 0);
+  size_t top = SIZE_MAX / 2 + 1;
+  expect(ecpp_prover_test_allow_more_effort(&prover) == top, "the effort limit doubles to the top", top);
+  for (int call = 0; call < 100; call++) {
+    size_t limit = ecpp_prover_test_allow_more_effort(&prover);
+    expect(limit == top, "the effort limit stays at the top, never wrapping to 0", limit);
+  }
+  ecpp_prover_free(&prover);
+}
+
 int main(void) {
+  check_discriminant_roots();
+  check_effort_never_wraps();
   ecpp_prover whole, pieces, tiny;
   expect(ecpp_prover_init(&whole, 0) && ecpp_prover_init(&pieces, 0) && ecpp_prover_init(&tiny, 1), "provers start", 0);
   big_number candidate;

@@ -634,9 +634,72 @@ static void check_ecpp_arithmetic(void) {
   }
 }
 
+// big_number_first_non_residue for a prime: the first value from 2 up that fails
+// Euler's criterion. The reference just counts up, so it can take any prime below 2^64.
+static void check_first_non_residue_of_prime(uint64_t prime) {
+  uint64_t expected = 2;
+  while (reference_power_mod(expected % prime, (prime - 1) / 2, prime) != prime - 1)
+    expected++;
+  big_number modulus, found;
+  big_number_init(&modulus);
+  big_number_init(&found);
+  big_number_set_u64(&modulus, prime);
+  int status = big_number_first_non_residue(&found, &modulus);
+  expect_equal("first non-residue found for a prime", prime, 2, (u128)(status + 1));
+  expect_equal("first non-residue of a prime", prime, expected, big_number_to_u64(&found));
+  big_number_free(&modulus);
+  big_number_free(&found);
+}
+
+// A perfect square has no non-residue (its Jacobi symbols are 0 or 1), so without
+// the square check the search would never end: both functions must say "none".
+static void check_perfect_square_modulus(const big_number *root) {
+  big_number modulus, found, value;
+  big_number_init(&modulus);
+  big_number_init(&found);
+  big_number_init(&value);
+  big_number_multiply(&modulus, root, root);
+  expect_equal("no non-residue mod a perfect square", big_number_to_u64(root), 0,
+               (u128)(big_number_first_non_residue(&found, &modulus) + 1));
+  big_number_set_u64(&value, 2);
+  expect_equal("no square root found mod a perfect square", big_number_to_u64(root), 0,
+               (u128)(big_number_square_root_mod(&found, &value, &modulus) + 1));
+  big_number_free(&modulus);
+  big_number_free(&found);
+  big_number_free(&value);
+}
+
+static void check_non_residue_search(void) {
+  for (uint64_t candidate = 3; candidate < 100000; candidate += 2) {
+    int is_prime = 1;
+    for (uint64_t divisor = 3; divisor * divisor <= candidate && is_prime; divisor += 2)
+      is_prime = candidate % divisor != 0;
+    if (is_prime)
+      check_first_non_residue_of_prime(candidate);
+  }
+  static const uint64_t large_primes[] = {2305843009213693951ULL, 998244353ULL, 18446744073709551557ULL};
+  for (size_t index = 0; index < sizeof large_primes / sizeof *large_primes; index++)
+    check_first_non_residue_of_prime(large_primes[index]);
+
+  big_number root;
+  big_number_init(&root);
+  static const uint64_t square_roots[] = {3, 9973, 2305843009213693951ULL};
+  for (size_t index = 0; index < sizeof square_roots / sizeof *square_roots; index++) {
+    big_number_set_u64(&root, square_roots[index]);
+    check_perfect_square_modulus(&root);
+  }
+  // a 300-bit odd root: 2^299 + 1
+  big_number_set_u64(&root, 1);
+  big_number_shift_left(&root, &root, 299);
+  big_number_add_small(&root, 1);
+  check_perfect_square_modulus(&root);
+  big_number_free(&root);
+}
+
 int main(void) {
   check_block_cache();
   check_ecpp_arithmetic();
+  check_non_residue_search();
   for (size_t first = 0; first < EDGE_VALUE_COUNT; first++) {
     u128 value = EDGE_VALUES[first];
     check_conversions(value);

@@ -19,8 +19,16 @@
 #define OPTIONS_WANTED 4
 
 // Small factors stripped from each curve order, by trial division with the primes
-// below this. What's left must be prime for the order to be usable.
-#define STRIP_BOUND 100000
+// below a bound. What's left must be prime for the order to be usable. The bound
+// grows with the number: stripping deeper makes more orders usable, so a step
+// needs fewer discriminants, but costs more per order. Measured natively (step 6,
+// with the genus check in), s per proof at bound 10^5 / 10^6: 100 digits 0.11 /
+// 0.15, 200 digits 1.67 / 2.30, 300 digits 14.7 / 12.1. So 10^5 below about 250
+// digits, and 10^6 from there. A fixed switch point, not measured on the device,
+// since measuring it there would take minutes of proofs.
+#define STRIP_BOUND 1000000 // the small primes are built up to this, once
+#define SMALL_STRIP_BOUND 100000
+#define DEEPER_STRIP_FROM_BITS 830 // about 250 digits
 
 // The first band of discriminants is |D| below this; each band after it is twice
 // as wide as the one before.
@@ -203,14 +211,14 @@ static size_t untried_options(const ecpp_proof_node *node) {
 
 // ── one discriminant ──────────────────────────────────────────────────────
 
-// Divides out every small prime factor of value.
-static int strip_small_factors(ecpp_prover *prover, big_number *value) {
+// Divides out every prime factor of value below `bound` (at most STRIP_BOUND).
+static int strip_small_factors(ecpp_prover *prover, big_number *value, uint32_t bound) {
   big_number divisor;
   big_number_init(&divisor);
   int ok = 1;
   for (size_t index = 0; ok && index < prover->small_prime_count; index++) {
     uint32_t prime = prover->small_primes[index];
-    if (big_number_compare_u64(value, prime) <= 0)
+    if (prime >= bound || big_number_compare_u64(value, prime) <= 0)
       break;
     if (big_number_mod_small(value, prime) != 0)
       continue;
@@ -250,6 +258,185 @@ static int is_usable_prime(const big_number *q, const big_number *proven_bound) 
   return verdict == PRIMALITY_PRIME || verdict == PRIMALITY_PROBABLE_PRIME;
 }
 
+// ── the genus check, and square roots by multiplication ───────────────────
+//
+// Finding a discriminant's orders needs √D mod n, a full modular exponentiation,
+// and was most of a proof's time (60% to 78% from 100 to 300 digits). Two facts
+// make most of that unnecessary. A fundamental discriminant is a product of prime
+// discriminants, so √D is the product of their roots: each is computed once per
+// number, and every D after that costs a few multiplications. And for a prime n,
+// 4n = t² + |D|v² needs n in the principal genus, which means every prime
+// discriminant of D is a square mod n: a D with one that isn't can't give a curve,
+// so it's skipped without a root or Cornacchia. Measured natively: proofs 1.6×,
+// 2.1× and 2.3× faster at 100, 200 and 300 digits, with identical certificates.
+// (For a composite n nothing here has to hold: the checker decides, as always.)
+
+// Splits a fundamental discriminant into prime discriminants, whose product it is:
+// −d (d ≡ 3 mod 4) is the product of p* = ±p, the sign making p* ≡ 1 mod 4; −4m adds
+// −4 (m ≡ 1 mod 4) or ±8 (m = 2m′). Returns how many: at most 16, since a number
+// below 2^63 has at most 15 distinct prime factors.
+static size_t prime_discriminants(int64_t discriminant, int64_t factors[16]) {
+  size_t count = 0;
+  int64_t odd = -discriminant;
+  if (odd % 4 == 0) {
+    int64_t quarter = odd / 4;
+    if (quarter % 4 == 1) {
+      factors[count++] = -4;
+      odd = quarter;
+    } else {
+      odd = quarter / 2;
+      factors[count++] = odd % 4 == 1 ? -8 : 8;
+    }
+  }
+  for (int64_t prime = 3; prime <= odd / prime; prime += 2)
+    if (odd % prime == 0) {
+      factors[count++] = prime % 4 == 1 ? prime : -prime;
+      odd /= prime;
+    }
+  if (odd > 1)
+    factors[count++] = odd % 4 == 1 ? odd : -odd;
+  return count;
+}
+
+// Empties the table, for a new number.
+static void genus_clear(ecpp_prover *prover) {
+  for (size_t index = 0; index < prover->genus_capacity; index++)
+    if (prover->genus_entries[index].prime_discriminant != 0 && prover->genus_entries[index].has_root)
+      big_number_free(&prover->genus_entries[index].root);
+  free(prover->genus_entries);
+  prover->genus_entries = NULL;
+  prover->genus_capacity = prover->genus_used = 0;
+}
+
+// Where `key` goes in a table of `capacity` slots (a power of 2): open addressing.
+static size_t genus_home(int64_t key, size_t capacity) {
+  return (size_t)((uint64_t)key * 0x9E3779B97F4A7C15ull >> 32) & (capacity - 1);
+}
+
+// The table's slot for `key`, empty if it isn't there yet. The table grows at half
+// full. NULL if memory runs out (the table is left as it was).
+static ecpp_genus_entry *genus_slot(ecpp_prover *prover, int64_t key) {
+  if (2 * (prover->genus_used + 1) > prover->genus_capacity) {
+    size_t larger = prover->genus_capacity == 0 ? 256 : 2 * prover->genus_capacity;
+    ecpp_genus_entry *grown = calloc(larger, sizeof *grown);
+    if (grown == NULL)
+      return NULL;
+    for (size_t index = 0; index < prover->genus_capacity; index++) {
+      const ecpp_genus_entry *entry = &prover->genus_entries[index];
+      if (entry->prime_discriminant == 0)
+        continue;
+      size_t slot = genus_home(entry->prime_discriminant, larger);
+      while (grown[slot].prime_discriminant != 0)
+        slot = (slot + 1) & (larger - 1);
+      grown[slot] = *entry;
+    }
+    free(prover->genus_entries);
+    prover->genus_entries = grown;
+    prover->genus_capacity = larger;
+  }
+  size_t slot = genus_home(key, prover->genus_capacity);
+  while (prover->genus_entries[slot].prime_discriminant != 0 && prover->genus_entries[slot].prime_discriminant != key)
+    slot = (slot + 1) & (prover->genus_capacity - 1);
+  return &prover->genus_entries[slot];
+}
+
+// value = key mod n, for |key| < n (n is past a(13), keys are below 2^63).
+static int prime_discriminant_mod(big_number *value, int64_t key, const big_number *n) {
+  if (!big_number_set_u64(value, key < 0 ? (uint64_t)0 - (uint64_t)key : (uint64_t)key))
+    return 0;
+  return key > 0 || big_number_subtract(value, n, value);
+}
+
+// 1 with root² ≡ D (mod n), the product of D's prime discriminants' cached roots;
+// 0 if one of them isn't a square mod n (D can't work for a prime n, so nothing is
+// spent on it); −1 if memory runs out.
+static int discriminant_root(ecpp_prover *prover, const big_number *n, int64_t discriminant, big_number *root) {
+  if (big_number_compare(&prover->genus_number, n) != 0) {
+    genus_clear(prover);
+    if (!big_number_copy(&prover->genus_number, n)) {
+      big_number_set_u64(&prover->genus_number, 0); // never equal to a number being examined
+      return -1;
+    }
+  }
+  int64_t factors[16];
+  size_t factor_count = prime_discriminants(discriminant, factors);
+  big_number value, product;
+  big_number_init(&value);
+  big_number_init(&product);
+  int result = 1;
+  for (size_t index = 0; index < factor_count && result == 1; index++) {
+    ecpp_genus_entry *entry = genus_slot(prover, factors[index]);
+    if (entry == NULL) {
+      result = -1;
+      break;
+    }
+    if (entry->prime_discriminant == 0) {
+      if (!prime_discriminant_mod(&value, factors[index], n)) {
+        result = -1;
+        break;
+      }
+      int symbol = big_number_jacobi(&value, n);
+      if (symbol == -2) {
+        result = -1;
+        break;
+      }
+      *entry = (ecpp_genus_entry){.prime_discriminant = factors[index], .is_square = symbol == 1};
+      prover->genus_used++;
+    }
+    if (!entry->is_square) {
+      result = 0;
+      break;
+    }
+    if (!entry->has_root) {
+      big_number_init(&entry->root);
+      int found = prime_discriminant_mod(&value, factors[index], n) ? big_number_square_root_mod(&entry->root, &value, n) : 0;
+      if (found != 1) {
+        big_number_free(&entry->root);
+        if (found < 0)
+          entry->is_square = 0; // no root after all: only possible for a composite n
+        result = found < 0 ? 0 : -1;
+        break;
+      }
+      entry->has_root = 1;
+    }
+    if (index == 0)
+      result = big_number_copy(&product, &entry->root) ? 1 : -1;
+    else
+      result = big_number_multiply(&value, &product, &entry->root) && big_number_divide(NULL, &product, &value, n) ? 1 : -1;
+  }
+  if (result == 1 && !big_number_copy(root, &product))
+    result = -1;
+  big_number_free(&value);
+  big_number_free(&product);
+  return result;
+}
+
+// Allows every step more effort when the whole search is stuck: the limit doubles,
+// but stops at SIZE_MAX / 2 + 1 instead of wrapping to 0, which would let no step
+// examine anything and leave the prime pending forever. In wasm32 that's 2^31,
+// reached after 20 doublings from 2,048. It can't be reached first anyway: a step
+// examining 2^31 discriminants needs |D| up to about 2^33 (about 3 in 10 numbers
+// give a fundamental discriminant), and listing a band's forms takes about
+// |D|² / 2 steps, some 10^19. The cap only makes sure of it.
+static void allow_more_effort(ecpp_prover *prover) {
+  if (prover->effort_limit <= SIZE_MAX / 2)
+    prover->effort_limit *= 2;
+}
+
+#ifdef ECPP_TEST_HOOKS
+// For the native tests only (never in the shipped builds): discriminant_root on a
+// prover's table, so a wrong skip, which no proof would notice, can be caught.
+int ecpp_prover_test_discriminant_root(ecpp_prover *prover, const big_number *n, int64_t discriminant, big_number *root) {
+  return discriminant_root(prover, n, discriminant, root);
+}
+
+// allow_more_effort, which a test can't reach by getting a search stuck 20 times.
+size_t ecpp_prover_test_allow_more_effort(ecpp_prover *prover) {
+  allow_more_effort(prover);
+  return prover->effort_limit;
+}
+#endif
+
 // Examines the node's next discriminant, adding an option for each usable order.
 // Returns 1, or 0 if memory runs out (the node can try the same one again).
 static int examine_next_discriminant(ecpp_prover *prover, ecpp_proof_node *node, const big_number *proven_bound) {
@@ -257,17 +444,23 @@ static int examine_next_discriminant(ecpp_prover *prover, ecpp_proof_node *node,
     if (!add_band(prover))
       return 0;
   int64_t discriminant = prover->discriminants[node->next_discriminant].discriminant;
-  big_number orders[ECPP_MOST_ORDERS], q;
+  big_number orders[ECPP_MOST_ORDERS], q, root;
   for (size_t index = 0; index < ECPP_MOST_ORDERS; index++)
     big_number_init(&orders[index]);
   big_number_init(&q);
+  big_number_init(&root);
   size_t count = 0;
   int ok = 1;
-  ecpp_status status = ecpp_find_orders(&node->n, discriminant, orders, &count);
+  int rooted = discriminant_root(prover, &node->n, discriminant, &root);
+  ecpp_status status = rooted == 1   ? ecpp_find_orders_from_root(&node->n, discriminant, &root, orders, &count)
+                       : rooted == 0 ? ECPP_NOT_FOUND
+                                     : ECPP_OUT_OF_MEMORY;
+  big_number_free(&root);
   if (status == ECPP_OUT_OF_MEMORY)
     ok = 0;
+  uint32_t strip_bound = big_number_bit_length(&node->n) >= DEEPER_STRIP_FROM_BITS ? STRIP_BOUND : SMALL_STRIP_BOUND;
   for (size_t index = 0; ok && status == ECPP_FOUND && index < count; index++) {
-    if (!big_number_copy(&q, &orders[index]) || !strip_small_factors(prover, &q)) {
+    if (!big_number_copy(&q, &orders[index]) || !strip_small_factors(prover, &q, strip_bound)) {
       ok = 0;
       break;
     }
@@ -332,11 +525,14 @@ void ecpp_prover_free(ecpp_prover *prover) {
   free(prover->polynomials);
   free(prover->discriminants);
   free(prover->small_primes);
+  genus_clear(prover);
+  big_number_free(&prover->genus_number);
   memset(prover, 0, sizeof *prover);
 }
 
 int ecpp_prover_init(ecpp_prover *prover, size_t effort_limit) {
   memset(prover, 0, sizeof *prover);
+  big_number_init(&prover->genus_number);
   prover->next_band_start = 3;
   prover->initial_effort_limit = effort_limit > 0 ? effort_limit : DEFAULT_EFFORT_LIMIT;
   prover->effort_limit = prover->initial_effort_limit;
@@ -443,7 +639,7 @@ ecpp_proof_status ecpp_prover_run(ecpp_prover *prover, size_t work) {
       ok = 1;
     } else {
       // the whole search is stuck: allow every step more, and retry the top's options
-      prover->effort_limit *= 2;
+      allow_more_effort(prover);
       for (size_t index = 0; index < node->option_count; index++)
         node->options[index].tried = 0;
       ok = 1;

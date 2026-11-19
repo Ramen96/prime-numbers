@@ -238,28 +238,34 @@ static int signed_to_mod(big_number *result, int64_t value, const big_number *n)
 // (Cohen, A Course in Computational Algebraic Number Theory, 1.5.3): start from a
 // square root of D with the same parity as D, and run Euclid's algorithm on
 // (2n, root) until the remainder is at most √(4n). That remainder is t.
-static ecpp_status solve_for_t_and_v(const big_number *n, int64_t discriminant, big_number *t, big_number *v) {
+static ecpp_status solve_for_t_and_v(const big_number *n, int64_t discriminant, const big_number *given_root, big_number *t,
+                                     big_number *v) {
   big_number d_mod, root, a, b, remainder, four_n, limit, rest, divisor, quotient, leftover, check;
   big_number *numbers[] = {&d_mod, &root, &a, &b, &remainder, &four_n, &limit, &rest, &divisor, &quotient, &leftover, &check};
   for (size_t index = 0; index < sizeof numbers / sizeof *numbers; index++)
     big_number_init(numbers[index]);
   ecpp_status status = ECPP_OUT_OF_MEMORY;
 
-  if (!signed_to_mod(&d_mod, discriminant, n))
-    goto done;
-  int symbol = big_number_jacobi(&d_mod, n);
-  if (symbol == -2)
-    goto done;
-  if (symbol != 1) {
-    status = ECPP_NOT_FOUND;
-    goto done;
-  }
-  int found = big_number_square_root_mod(&root, &d_mod, n);
-  if (found == 0)
-    goto done;
-  if (found < 0) {
-    status = ECPP_NOT_FOUND;
-    goto done;
+  if (given_root != NULL) {
+    if (!big_number_copy(&root, given_root))
+      goto done;
+  } else {
+    if (!signed_to_mod(&d_mod, discriminant, n))
+      goto done;
+    int symbol = big_number_jacobi(&d_mod, n);
+    if (symbol == -2)
+      goto done;
+    if (symbol != 1) {
+      status = ECPP_NOT_FOUND;
+      goto done;
+    }
+    int found = big_number_square_root_mod(&root, &d_mod, n);
+    if (found == 0)
+      goto done;
+    if (found < 0) {
+      status = ECPP_NOT_FOUND;
+      goto done;
+    }
   }
   // the root's parity must match D's: n − root has the other parity, n being odd
   int d_is_odd = (int)(discriminant & 1);
@@ -305,6 +311,11 @@ static int add_order_pair(const big_number *n_plus_one, const big_number *trace,
 }
 
 ecpp_status ecpp_find_orders(const big_number *n, int64_t discriminant, big_number orders[ECPP_MOST_ORDERS], size_t *count) {
+  return ecpp_find_orders_from_root(n, discriminant, NULL, orders, count);
+}
+
+ecpp_status ecpp_find_orders_from_root(const big_number *n, int64_t discriminant, const big_number *root,
+                                       big_number orders[ECPP_MOST_ORDERS], size_t *count) {
   big_number t, v, n_plus_one, three_v, trace;
   big_number_init(&t);
   big_number_init(&v);
@@ -312,7 +323,7 @@ ecpp_status ecpp_find_orders(const big_number *n, int64_t discriminant, big_numb
   big_number_init(&three_v);
   big_number_init(&trace);
   *count = 0;
-  ecpp_status status = solve_for_t_and_v(n, discriminant, &t, &v);
+  ecpp_status status = solve_for_t_and_v(n, discriminant, root, &t, &v);
   if (status != ECPP_FOUND)
     goto done;
   status = ECPP_OUT_OF_MEMORY;
@@ -426,22 +437,17 @@ static ecpp_status curve_from_j(const big_number *n, const big_number *j, const 
   return status;
 }
 
-// Non-residues to look through for a twist. Half of all numbers are, so a prime n
-// finds one almost at once; running out just means this D isn't used.
-#define NON_RESIDUE_TRIES 1000
+// Values to try for D = −3 and −4's generator w (family_generator). A prime needs
+// few: about half of all values aren't squares, and for D = −3 a third of those
+// are cubes. Running out only skips these two D for this number; every other D is
+// still tried, so it can't block a proof.
+#define GENERATOR_TRIES 1000
 
-// c = the first non-residue of n from 2 up: ECPP_NOT_FOUND if none turned up.
+// c = the first non-residue of n from 2 up, with no cap (big_number_first_non_residue):
+// ECPP_NOT_FOUND only if n is a perfect square, which a prime never is.
 static ecpp_status first_non_residue(const big_number *n, big_number *c) {
-  for (uint64_t value = 2; value < NON_RESIDUE_TRIES; value++) {
-    if (!big_number_set_u64(c, value))
-      return ECPP_OUT_OF_MEMORY;
-    int symbol = big_number_jacobi(c, n);
-    if (symbol == -2)
-      return ECPP_OUT_OF_MEMORY;
-    if (symbol == -1)
-      return ECPP_FOUND;
-  }
-  return ECPP_NOT_FOUND;
+  int found = big_number_first_non_residue(c, n);
+  return found > 0 ? ECPP_FOUND : found < 0 ? ECPP_NOT_FOUND : ECPP_OUT_OF_MEMORY;
 }
 
 // For D = −3 the curves y² = x³ + b fall into 6 twists, by b's class modulo sixth
@@ -469,7 +475,7 @@ static ecpp_status family_generator(const big_number *n, int64_t discriminant, b
   }
   if (need_cube_test && remainder.limb_count > 0)
     goto done;
-  for (uint64_t value = 2; value < NON_RESIDUE_TRIES; value++) {
+  for (uint64_t value = 2; value < GENERATOR_TRIES; value++) {
     if (!big_number_set_u64(w, value)) {
       status = ECPP_OUT_OF_MEMORY;
       break;

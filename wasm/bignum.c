@@ -924,10 +924,47 @@ done:
   return symbol;
 }
 
-// How many small numbers to try as a non-residue. Half of all numbers are one
-// for a prime, so a prime never gets near this: only a composite that's nearly
-// a square can, and then "none found" is the right answer for a prover to move on.
-#define NON_RESIDUE_TRIES 100000
+// How many numbers to try as a non-residue before checking whether the modulus is
+// a perfect square, which has none (its Jacobi symbols are all 0 or 1). A prime's
+// first non-residue is almost always below 20, so the check is rare.
+#define TRIES_BEFORE_SQUARE_CHECK 20
+
+// 1 if number is a perfect square, 0 if not, −1 if memory runs out.
+static int is_perfect_square(const big_number *number) {
+  big_number root, square;
+  big_number_init(&root);
+  big_number_init(&square);
+  int result = -1;
+  if (big_number_floor_square_root(&root, number) && big_number_multiply(&square, &root, &root))
+    result = big_number_compare(&square, number) == 0;
+  big_number_free(&root);
+  big_number_free(&square);
+  return result;
+}
+
+// No cap. Every odd modulus that isn't a perfect square has a non-residue below
+// it: some prime p divides it to an odd power, and a number that's a non-residue
+// mod p and 1 mod the rest has symbol −1. So the search ends. A cap would be a
+// code limit: a prime with no non-residue below the cap has no square roots here,
+// so no curve orders and no points, and it would block the list forever. Such
+// primes exist (one with none below 100,000 can be built at about 43,000 digits).
+// The counter is uint64_t: 2^64 Jacobi symbols for one number can't be reached first.
+int big_number_first_non_residue(big_number *result, const big_number *modulus) {
+  for (uint64_t value = 2;; value++) {
+    if (!big_number_set_u64(result, value))
+      return 0;
+    int symbol = big_number_jacobi(result, modulus);
+    if (symbol == -2)
+      return 0;
+    if (symbol == -1)
+      return 1;
+    if (value - 1 == TRIES_BEFORE_SQUARE_CHECK) {
+      int square = is_perfect_square(modulus);
+      if (square != 0)
+        return square < 0 ? 0 : -1;
+    }
+  }
+}
 
 // Tonelli–Shanks. Write modulus − 1 = odd · 2^twos. With z a non-residue, keep
 //   t = value^odd   (its order divides 2^twos)
@@ -959,20 +996,12 @@ int big_number_square_root_mod(big_number *result, const big_number *value, cons
   if (!big_number_shift_right(&odd_part, &odd_part, twos))
     goto done;
 
-  // the first small number whose symbol is −1
-  uint64_t non_residue = 2;
-  for (;; non_residue++) {
-    if (non_residue > NON_RESIDUE_TRIES) {
-      status = -1;
-      goto done;
-    }
-    if (!big_number_set_u64(&probe, non_residue))
-      goto done;
-    int symbol = big_number_jacobi(&probe, modulus);
-    if (symbol == -2)
-      goto done;
-    if (symbol == -1)
-      break;
+  // the first number whose symbol is −1. A perfect square has none, and then no
+  // root is found here (never the case for a prime modulus)
+  int found_non_residue = big_number_first_non_residue(&probe, modulus);
+  if (found_non_residue <= 0) {
+    status = found_non_residue; // −1 none, 0 out of memory
+    goto done;
   }
 
   if (!big_number_set_u64(&one, 1) || !montgomery_to_form(&context, &one, &one) ||

@@ -33,7 +33,7 @@ test.describe("shareable jump links", () => {
   test("an invalid ?jump= shows the normal validation message", async ({ page }) => {
     const primeListPage = new PrimeListPage(page);
     await primeListPage.open("/?jump=banana");
-    await expect(primeListPage.jumpFeedback).toHaveText("That doesn't look like a number.");
+    await expect(primeListPage.jumpFeedback).toHaveText("That doesn’t look like a number.");
     expect((await primeListPage.topVisibleRow()).prime).toBe(2);
   });
 

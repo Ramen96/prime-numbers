@@ -30,7 +30,7 @@ Every 65,536th base prime also gets a saved read position (a checkpoint), so sev
 
 ### Numbers of any size
 
-JavaScript numbers are exact only up to 2^53, so primes are `BigInt` everywhere outside the C code. Inside it, a window below 2^64 uses `uint64_t` (the fast path), and anything bigger becomes an array of 32-bit limbs, least significant first. There's no maximum.
+JavaScript numbers are exact only up to 2^53, so primes are `BigInt` everywhere outside the C code. Inside it, a window below 2^64 uses `uint64_t` (the fast path), and anything bigger becomes an array of 32-bit limbs, least significant first. There's no maximum in the code; the browser's own BigInt limit (2^30 bits, about 323 million digits in Chromium) is the only one.
 
 The sieve needs only a few big-number operations, and one does the real work: **big mod small**, the remainder that says where a base prime's first multiple lands in a window. After that, everything inside a window is a small offset, so the inner marking loop never touches a big number.
 
@@ -92,7 +92,6 @@ The counter measures the time spent finding primes, which includes proving past 
 ## Roadmap
 
 - **GPU factor-finding.** Sieve deeper on WebGPU (32-bit limbs, with a CPU fallback), each removed composite reported with a factor that the CPU checks with one division. Fewer survivors, and more usable curve orders for ECPP.
-- **Past WebAssembly's 4 GB.** 64-bit Wasm memory where browsers support it, with the 32-bit builds as the fallback.
 
 ## Setup
 

@@ -62,6 +62,12 @@ ecpp_status ecpp_find_point(ecpp_curve *curve, big_number *out_x, big_number *ou
 // isn't of that form.
 ecpp_status ecpp_find_orders(const big_number *n, int64_t discriminant, big_number orders[ECPP_MOST_ORDERS], size_t *count);
 
+// The same, given root with root² ≡ discriminant (mod n), as the prover builds it
+// from cached roots of the discriminant's prime factors. A wrong root can't give a
+// wrong order: Cornacchia's result is checked exactly, so it only finds nothing.
+ecpp_status ecpp_find_orders_from_root(const big_number *n, int64_t discriminant, const big_number *root,
+                                       big_number orders[ECPP_MOST_ORDERS], size_t *count);
+
 // A curve for D and a point on it with order q, where q divides `order`. j is a
 // root of `polynomial`, H_D, built once by the caller (class_polynomial_build) and
 // reused across numbers; it may be NULL for D = −3 and −4, which have their own

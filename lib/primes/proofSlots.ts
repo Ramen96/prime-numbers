@@ -26,7 +26,10 @@ export interface RawProofSlotExports {
 /** proof_slot_state in proof_slots.h. */
 const SLOT_DONE = 2;
 const SLOT_OUT_OF_MEMORY = 3;
-/** proof_slot_value's SIZE_MAX in wasm32: memory ran out copying the value. */
+/**
+ * proof_slot_value's SIZE_MAX in wasm32: memory ran out copying the value. Never a
+ * real limb count: 2^32 − 1 limbs would be 16 GiB, and wasm32 addresses 4 GiB.
+ */
 const VALUE_OUT_OF_MEMORY = 0xffff_ffff;
 
 /**

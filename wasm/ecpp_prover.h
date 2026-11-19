@@ -57,6 +57,15 @@ typedef struct {
 
 typedef struct ecpp_proof_node ecpp_proof_node;
 
+// One prime discriminant (−4, 8, −8, or ±p, the sign making it 1 mod 4) and what's
+// known about it modulo the number being examined. Private to ecpp_prover.c.
+typedef struct {
+  int64_t prime_discriminant; // 0 for an empty slot
+  int is_square;              // a square modulo the number
+  int has_root;               // root holds one of its square roots
+  big_number root;
+} ecpp_genus_entry;
+
 typedef struct {
   // Discriminants in the order they're tried, built a band at a time.
   ecpp_discriminant *discriminants;
@@ -75,6 +84,11 @@ typedef struct {
   // whenever the whole search is stuck.
   size_t effort_limit;
   size_t initial_effort_limit;
+  // For the number being examined (genus_number): which prime discriminants are
+  // squares modulo it, and their roots once needed. Rebuilt when the number changes.
+  ecpp_genus_entry *genus_entries;
+  size_t genus_capacity, genus_used;
+  big_number genus_number;
   // The finished certificate, once ECPP_PROOF_DONE.
   ecpp_certificate_step *steps;
   size_t step_count;

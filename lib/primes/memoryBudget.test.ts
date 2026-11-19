@@ -88,6 +88,11 @@ describe("base-prime size bounds against published π(10^n)", () => {
     });
   });
 
+  it("gives Infinity for the fewest bytes from 2^64 up, at any size, and the same values below", () => {
+    for (const limit of [2n ** 64n, 10n ** 309n, 10n ** 1000n]) assert.equal(fewestBasePrimeBytes(limit), Infinity);
+    assert.ok(Number.isFinite(fewestBasePrimeBytes(2n ** 64n - 1n)));
+  });
+
   it("reserves at least what's needed, without much overshoot", () => {
     PRIMES_BELOW_POWERS_OF_TEN.forEach((primeCount, index) => {
       const estimate = estimatedBasePrimeBytes(10n ** BigInt(index + 3));

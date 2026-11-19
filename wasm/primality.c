@@ -390,9 +390,15 @@ static int is_perfect_square(const big_number *number) {
 // Selfridge's D tries before checking for a perfect square, which has no D at
 // all. A non-square reaches this about once in a million, so the check is rare.
 #define SELFRIDGE_TRIES_BEFORE_SQUARE_CHECK 20
-// Far more than any non-square needs: about half of all D work, so needing a
-// billion tries has odds of about 2^-(10^9). Squares are caught long before. If
-// this fixed width were ever reached, the candidate would just stay pending.
+// A fixed width that can't be reached first. Every D tried is 1 mod 4, so for each
+// odd prime p below 2^31, ±p is among them, and by quadratic reciprocity
+// (±p / candidate) = (candidate / p). Getting past the end needs that to be 1 for
+// every such p (0 is a factor, and stops the search): a non-square that's a square
+// modulo all of about 10^8 primes. A random number does that with odds of about
+// 2^-(10^8). And the only known way to build one, by the Chinese remainder theorem,
+// gives about 10^9 digits, more than a browser's BigInt can hold, so it can't be a
+// jump target either. Squares are caught long before. If it were ever reached, the
+// candidate would just stay pending.
 #define SELFRIDGE_LARGEST_D 2147483647
 
 typedef enum { LUCAS_FOUND_D, LUCAS_FOUND_FACTOR, LUCAS_IS_SQUARE, LUCAS_UNSETTLED } lucas_parameter_result;

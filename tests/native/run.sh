@@ -37,7 +37,7 @@ fast)
   .cache/ecpp_test
   cc -O2 $warnings -o .cache/classpoly_test tests/native/classpoly_test.c wasm/classpoly.c wasm/bignum.c -lm
   .cache/classpoly_test
-  cc -O2 $warnings -o .cache/ecpp_prover_test tests/native/ecpp_prover_test.c $prover_sources
+  cc -O2 $warnings -DECPP_TEST_HOOKS -o .cache/ecpp_prover_test tests/native/ecpp_prover_test.c $prover_sources
   .cache/ecpp_prover_test
   cc -O2 $warnings -o .cache/proof_slots_test tests/native/proof_slots_test.c $slot_sources
   .cache/proof_slots_test
@@ -69,7 +69,7 @@ asan)
   .cache/ecpp_test_asan
   cc $sanitizers $warnings -o .cache/classpoly_test_asan tests/native/classpoly_test.c wasm/classpoly.c wasm/bignum.c -lm
   .cache/classpoly_test_asan
-  cc $sanitizers $warnings -o .cache/ecpp_prover_test_asan tests/native/ecpp_prover_test.c $prover_sources
+  cc $sanitizers $warnings -DECPP_TEST_HOOKS -o .cache/ecpp_prover_test_asan tests/native/ecpp_prover_test.c $prover_sources
   .cache/ecpp_prover_test_asan
   cc $sanitizers $warnings -DSIEVE_THREADS -pthread -o .cache/proof_slots_test_asan tests/native/proof_slots_test.c $slot_sources
   PROOF_TEST_HELPERS=8 .cache/proof_slots_test_asan

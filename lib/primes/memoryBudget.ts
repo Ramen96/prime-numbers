@@ -13,7 +13,21 @@
 
 import { logarithmicIntegral } from "./logarithmicIntegral.ts";
 
-/** All a wasm32 module can address (and what `npm run build:wasm` allows). */
+/**
+ * All a wasm32 module can address (and what `npm run build:wasm` allows).
+ *
+ * Why 32-bit Wasm's 4 GiB is never what stops the list (step 7, measured
+ * 2026-11-17, native, one prover): a prover's memory barely grows with the
+ * numbers (about 3 MB at 100 digits, 3.6 MB at 1,000), and what does grow, its
+ * certificate and chain, grows with the square of the digits. Nine of them would
+ * need 4 GiB only near 40,000 digits, where one proof would take centuries (a
+ * 1,000-digit proof takes about an hour, and time grows with about the fifth
+ * power of the digits). Its class-polynomial cache holds at most one polynomial
+ * per discriminant in its table (2,490 at every size measured; about 150 KB
+ * after 200 proofs). Base primes are only fully built below 2^64 (about 200 MB
+ * there); the proven-prime cache is 16 MB. So time runs out first, and 64-bit
+ * Wasm memory isn't needed.
+ */
 export const WASM_ADDRESS_SPACE_BYTES = 2 ** 32;
 
 /** Wasm memory comes in pages of 64 KiB. */
@@ -86,6 +100,9 @@ export function sharedMemoryMaximumsToTry(moduleBudget: number | null): number[]
  */
 export function fewestBasePrimeBytes(limit: bigint): number {
   if (limit < 599n) return 0;
+  // From 2^64 up base primes can never be stored (basePrimesCouldFit), and past
+  // about 10^308 Number(limit) is Infinity, which would make the bound NaN.
+  if (limit >= 2n ** 64n) return Infinity;
   const logarithm = Math.log(Number(limit));
   return Math.floor((Number(limit) / logarithm) * (1 + 1 / logarithm)) - 2;
 }
