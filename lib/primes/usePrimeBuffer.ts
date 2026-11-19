@@ -17,6 +17,7 @@ import { estimatedBasePrimeBytes, shouldRestartWorkerToReleaseMemory } from "./m
 import { addBatch, extendBatch, MAX_BATCHES, type Batch } from "./rollingBuffer.ts";
 import { basePrimeLimitNeededFor } from "./wasmSieve.ts";
 import { PRIME_WORKER_NAME } from "./workerNames.ts";
+import { heatFromRate, meltdownFromRate } from "../heat.ts";
 import type { ProvingStatus } from "../provingStatus.ts";
 
 export type { Batch };
@@ -51,24 +52,6 @@ const FETCH_THRESHOLD = 0.6;
 /** Show the Stop button only once a calculation has run this long, so it doesn't flash. */
 const STOP_BUTTON_DELAY_MS = 300;
 
-/** Primes/sec at which heat is 0 (cool). */
-const COOL_RATE = 1e7;
-/** Primes/sec at which heat is 1 (overheating). */
-const HOT_RATE = 1e5; // about where the sieve ends up just below 2^53
-
-/**
- * Maps primes/sec to heat in 0..1 on a log scale, because the rate falls
- * across orders of magnitude. Fast = cool (0), slow = hot (1).
- */
-export function heatFromRate(primesPerSecond: number): number {
-  if (!(primesPerSecond > 0)) return 0;
-  const coolExponent = Math.log10(COOL_RATE);
-  const hotExponent = Math.log10(HOT_RATE);
-  const progressTowardHot =
-    (coolExponent - Math.log10(primesPerSecond)) / (coolExponent - hotExponent);
-  return Math.min(1, Math.max(0, progressTowardHot));
-}
-
 export interface PrimeBuffer {
   batches: Batch[];
   status: BufferStatus;
@@ -82,6 +65,11 @@ export interface PrimeBuffer {
    * while primesPerSecond is null, so the CPU doesn't flash cool after a jump.
    */
   heat: number;
+  /**
+   * 0 to 1, the scale after heat (lib/heat.ts): 0 until heat is at its top, 1 at one
+   * prime every ten minutes. Keeps its last value while primesPerSecond is null.
+   */
+  meltdown: number;
   /** Sieving time of the last batch; null until the worker has computed one. */
   lastBatchDurationMs: number | null;
   /** How long building base primes took the last time it was needed; null before then. */
@@ -150,6 +138,7 @@ export function usePrimeBuffer(firstBatchFromServer: readonly string[]): PrimeBu
   const [status, setStatus] = useState<BufferStatus>("idle");
   const [primesPerSecond, setPrimesPerSecond] = useState<number | null>(null);
   const [heat, setHeat] = useState(0);
+  const [meltdown, setMeltdown] = useState(0);
   const [lastBatchDurationMs, setLastBatchDurationMs] = useState<number | null>(null);
   const [proving, setProving] = useState<PrimeBuffer["proving"]>(null);
   const [lastSetupMs, setLastSetupMs] = useState<number | null>(null);
@@ -421,7 +410,10 @@ export function usePrimeBuffer(firstBatchFromServer: readonly string[]): PrimeBu
         });
         const measuredRate = measurePrimesPerSecond(rateWindowRef.current);
         setPrimesPerSecond(measuredRate);
-        if (measuredRate !== null) setHeat(heatFromRate(measuredRate));
+        if (measuredRate !== null) {
+          setHeat(heatFromRate(measuredRate));
+          setMeltdown(meltdownFromRate(measuredRate));
+        }
       };
       /** Puts this request's primes in the buffer: a new batch, or more of the one already streaming in. */
       const showPrimes = (primes: readonly bigint[], direction: Direction) => {
@@ -643,6 +635,7 @@ export function usePrimeBuffer(firstBatchFromServer: readonly string[]): PrimeBu
     status,
     primesPerSecond,
     heat,
+    meltdown,
     lastBatchDurationMs,
     lastSetupMs,
     lastVerificationMs,

@@ -3,9 +3,12 @@ $warm: #ff9a3c;
 $hot: #ff2d2d;
 
 // On the root element so the whole site (nav included) shares one heat.
-// The home page updates --heat as the counter changes; elsewhere it stays 0.
+// The home page updates --heat and --meltdown as the counter changes; elsewhere
+// they stay 0. --meltdown is the scale after heat (lib/heat.ts): it starts where
+// heat reaches 1, near 10^24, and is 1 at one prime every ten minutes.
 :root {
   --heat: 0;
+  --meltdown: 0;
   --hot: #{$hot};
   --heat-color: color-mix(in oklch,
     color-mix(in oklch, #{$cool}, #{$warm} calc(min(var(--heat) * 2, 1) * 100%)),

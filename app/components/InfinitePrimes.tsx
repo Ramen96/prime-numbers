@@ -47,6 +47,7 @@ export function InfinitePrimes({ intro, firstBatchFromServer }: Props) {
     status,
     primesPerSecond,
     heat,
+    meltdown,
     lastBatchDurationMs,
     lastSetupMs,
     lastVerificationMs,
@@ -63,14 +64,18 @@ export function InfinitePrimes({ intro, firstBatchFromServer }: Props) {
     takeScrollInstruction,
   } = usePrimeBuffer(firstBatchFromServer);
 
-  // --heat lives on the root element (see app/heat.scss) so the site nav
-  // follows the counter too. Back to cool when leaving the page.
+  // --heat and --meltdown live on the root element (see app/heat.scss) so the
+  // site nav follows the counter too. Back to cool when leaving the page.
   useEffect(() => {
     document.documentElement.style.setProperty("--heat", String(heat));
   }, [heat]);
   useEffect(() => {
+    document.documentElement.style.setProperty("--meltdown", String(meltdown));
+  }, [meltdown]);
+  useEffect(() => {
     return () => {
       document.documentElement.style.removeProperty("--heat");
+      document.documentElement.style.removeProperty("--meltdown");
     };
   }, []);
 

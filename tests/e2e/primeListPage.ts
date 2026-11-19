@@ -1,4 +1,4 @@
-import { expect, type Locator, type Page, type Worker } from "@playwright/test";
+import { expect, type Locator, type Page, type Route, type Worker } from "@playwright/test";
 import { PRIME_WORKER_NAME } from "../../lib/primes/workerNames.ts";
 
 export const ROW_HEIGHT_PX = 44;
@@ -67,6 +67,28 @@ export function collectSieveThreads(page: Page): Worker[] {
 }
 
 /** Helpers for driving the Infinite Primes page the way a user would. */
+/** Where Emscripten's loader starts each sieve thread (public/sieve-threads/sieve.mjs). */
+const THREAD_START = 'new Worker(new URL("sieve.mjs",import.meta.url),';
+
+/**
+ * Serves the threaded build's loader with `replacement` for the line that
+ * starts each thread: a way to make thread start-up fail the ways browsers
+ * can, with no test-only code in the app.
+ */
+export async function serveLoaderStartingThreadsWith(page: Page, replacement: string) {
+  await page.route("**/sieve-threads/sieve.mjs", async (route: Route) => {
+    const response = await route.fetch();
+    const loader = await response.text();
+    expect(loader).toContain(THREAD_START);
+    await route.fulfill({ response, body: loader.replace(THREAD_START, replacement) });
+  });
+}
+
+/** Makes nested workers fail to start, so the worker falls back to the single-threaded build. */
+export async function forceSingleThreadedBuild(page: Page) {
+  await serveLoaderStartingThreadsWith(page, 'new (void 0)(new URL("sieve.mjs",import.meta.url),');
+}
+
 export class PrimeListPage {
   readonly primeList: Locator;
   readonly estimateBanner: Locator;

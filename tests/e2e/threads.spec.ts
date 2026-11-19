@@ -1,29 +1,12 @@
-import { expect, test, type Page, type Route, type Worker } from "@playwright/test";
+import { expect, test, type Page, type Worker } from "@playwright/test";
 import { nextPrimeAfter } from "../support/primality";
-import { collectPrimeWorkers, collectSieveThreads, PrimeListPage } from "./primeListPage";
+import { collectPrimeWorkers, collectSieveThreads, PrimeListPage, serveLoaderStartingThreadsWith } from "./primeListPage";
 
 async function statValue(page: Page, label: string): Promise<string> {
   return page.locator("dt", { hasText: label }).locator("xpath=following-sibling::dd[1]").innerText();
 }
 
 const workerClosed = (worker: Worker) => new Promise<void>((resolve) => worker.once("close", () => resolve()));
-
-/** Where Emscripten's loader starts each sieve thread (public/sieve-threads/sieve.mjs). */
-const THREAD_START = 'new Worker(new URL("sieve.mjs",import.meta.url),';
-
-/**
- * Serves the threaded build's loader with `replacement` for the line that
- * starts each thread: a way to make thread start-up fail the ways browsers
- * can, with no test-only code in the app.
- */
-async function serveLoaderStartingThreadsWith(page: Page, replacement: string) {
-  await page.route("**/sieve-threads/sieve.mjs", async (route: Route) => {
-    const response = await route.fetch();
-    const loader = await response.text();
-    expect(loader).toContain(THREAD_START);
-    await route.fulfill({ response, body: loader.replace(THREAD_START, replacement) });
-  });
-}
 
 /** After a fallback: one thread, no error, and the list still right past 2^53. */
 async function expectSingleThreadedListToWork(page: Page) {
