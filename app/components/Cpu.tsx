@@ -2,7 +2,7 @@ import styles from "./Cpu.module.scss";
 
 export function Cpu() {
   return (
-    <div className={styles.wrap} aria-hidden>
+    <div className={styles.wrap} aria-hidden data-testid="cpu">
       <div className={styles.shimmer}>
         <span />
         <span />
@@ -28,6 +28,7 @@ export function Cpu() {
         <span />
         <span />
       </div>
+      <div className={styles.puddle} />
     </div>
   );
 }

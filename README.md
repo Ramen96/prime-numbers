@@ -87,7 +87,7 @@ Browsers round `performance.now()` (0.1 ms or coarser) to blunt timing attacks, 
 - **A window of batches.** The rate is total primes over total time across recent batches: at least 3 s of them, at most 32. Far out, where primes arrive a few at a time, that makes it an average rather than a reading of the last piece.
 - **Cross-origin isolation.** Already needed for threads, it also gives a finer timer: about 5 µs in Chrome.
 
-The counter measures the time spent finding primes, which includes proving past the full sieve: Miller–Rabin, and past 3.3 × 10^24, ECPP. Primes kept from an earlier proof don't count, and below one prime a second it shows the time per prime instead (`lib/formatRate.ts`). Building base primes, calibrating, timing thread splits and verification are measured separately and left out, so the counter shows steady speed and holds its value while you aren't scrolling. The CPU's heat follows the rate on a log scale, since the rate falls across orders of magnitude.
+The counter measures the time spent finding primes, which includes proving past the full sieve: Miller–Rabin, and past 3.3 × 10^24, ECPP. Primes kept from an earlier proof don't count, and below one prime a second it shows the time per prime instead (`lib/formatRate.ts`). Building base primes, calibrating, timing thread splits and verification are measured separately and left out, so the counter shows steady speed and holds its value while you aren't scrolling. The CPU's heat follows the rate on a log scale, since the rate falls across orders of magnitude. Once heat is at its top (about 10^24), the chip starts melting, and it's a puddle at one prime every ten minutes (`lib/heat.ts`).
 
 ## Roadmap
 

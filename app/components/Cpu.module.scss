@@ -1,4 +1,11 @@
-// Inputs (inherited from app/heat.scss): --heat (0..1), --heat-color, --anim, --hot.
+// Inputs (inherited from app/heat.scss): --heat (0..1), --heat-color, --anim, --hot,
+// and --meltdown (0..1, the scale after heat: it starts where heat reaches 1).
+//
+// The meltdown, in three stages of --meltdown (each stage's progress is 0..1):
+//   softening  0 – 0.4    the chip sags and rounds at the bottom; sweat turns molten
+//   melting    0.4 – 0.75 a puddle spreads under it; the shimmer turns to smoke
+//   meltdown   0.75 – 1   most of the chip is puddle; eyes become ×, the mouth goes flat
+// Everything stays inside .wrap's 120 × 150 px, so the layout never moves.
 
 $chip-size: 80px;
 $chip-top: 40px;
@@ -19,6 +26,17 @@ $pin-length: 10px;
 }
 
 .wrap {
+  --softening: clamp(0, var(--meltdown) / 0.4, 1);
+  --melting: clamp(0, (var(--meltdown) - 0.4) / 0.35, 1);
+  --melted: clamp(0, (var(--meltdown) - 0.75) / 0.25, 1);
+  // 0 or 1: past 0.75, for the face's last change
+  --gone: clamp(0, (var(--meltdown) - 0.75) * 10000, 1);
+  // the chip's sag, shared with the glow around it
+  --sag-x: calc(1 + var(--melting) * 0.08 + var(--melted) * 0.1);
+  --sag-y: calc(1 - var(--softening) * 0.15 - var(--melting) * 0.2 - var(--melted) * 0.2);
+  --slump-left: calc(var(--softening) * 14px + var(--melting) * 16px);
+  --slump-right: calc(var(--softening) * 10px + var(--melting) * 20px);
+
   position: relative;
   width: 120px;
   height: 150px;
@@ -36,10 +54,16 @@ $pin-length: 10px;
 .chip {
   @include chip-box;
   border-radius: 10px;
+  // the bottom corners round out as it softens, and slump as it melts
+  border-bottom-left-radius: calc(10px + var(--slump-left));
+  border-bottom-right-radius: calc(10px + var(--slump-right));
   background: var(--heat-color);
   box-shadow: inset 0 0 0 4px rgb(0 0 0 / 0.25);
   animation: buzz var(--anim) linear infinite;
   transition: background 0.6s;
+  // sags from the bottom (scale composes with buzz's transform): shorter and a little wider
+  transform-origin: 50% 100%;
+  scale: var(--sag-x) var(--sag-y);
 }
 
 @keyframes buzz {
@@ -85,21 +109,42 @@ $pin-length: 10px;
   gap: 18px;
 
   span {
+    position: relative;
     width: 8px;
     // eyes squint shut as it overheats
     height: calc(10px - var(--heat) * 7px);
     margin-top: calc(var(--heat) * 3px);
     border-radius: 4px;
-    background: #111;
+    // gone in the last stage, for the ×
+    background: rgb(17 17 17 / calc(1 - var(--gone)));
+
+    // × eyes, in the last stage of the meltdown
+    &::before,
+    &::after {
+      content: "";
+      position: absolute;
+      left: -2px;
+      top: calc(50% - 1.5px);
+      width: 12px;
+      height: 3px;
+      border-radius: 2px;
+      background: #111;
+      opacity: var(--gone);
+      rotate: 45deg;
+    }
+    &::after {
+      rotate: -45deg;
+    }
   }
 }
 
 .mouth {
   width: 26px;
-  height: 12px;
+  // flat in the last stage of the meltdown
+  height: calc(12px - var(--gone) * 12px);
   border: 3px solid #111;
   border-top-color: transparent;
-  border-radius: 0 0 14px 14px;
+  border-radius: 0 0 calc((1 - var(--gone)) * 14px) calc((1 - var(--gone)) * 14px);
   // smile flips to a grimace past the halfway point
   transform: rotate(calc(round(var(--heat)) * 180deg));
   transition: transform 0.4s;
@@ -116,12 +161,16 @@ $pin-length: 10px;
   display: flex;
   justify-content: space-between;
   opacity: calc(var(--heat) * 1.4 - 0.1);
+  // follows the chip's top down as it sags, so the smoke still rises from it
+  translate: 0 calc((1 - var(--sag-y)) * 72px);
 
   span {
-    width: 4px;
+    // heat shimmer, turning into thicker grey smoke as the chip melts
+    width: calc(4px + var(--melting) * 4px + var(--melted) * 4px);
     height: 100%;
-    border-radius: 2px;
-    background: var(--heat-color);
+    border-radius: 6px;
+    background: color-mix(in oklch, var(--heat-color), #8c8c8c calc(var(--melting) * 100%));
+    filter: blur(calc(var(--melting) * 1.5px));
     animation: rise var(--anim) ease-in infinite;
 
     @for $i from 2 through 3 {
@@ -143,11 +192,16 @@ $pin-length: 10px;
 .glow {
   @include chip-box;
   opacity: calc((var(--heat) - 0.66) * 3);
+  // sags with the chip, or its empty middle would show where the chip was
+  transform-origin: 50% 100%;
+  scale: var(--sag-x) var(--sag-y);
 
   div {
     width: 100%;
     height: 100%;
     border-radius: 14px;
+    border-bottom-left-radius: calc(14px + var(--slump-left));
+    border-bottom-right-radius: calc(14px + var(--slump-right));
     box-shadow: 0 0 24px 10px var(--hot);
     animation: pulse var(--anim) ease-in-out infinite;
   }
@@ -170,7 +224,9 @@ $pin-length: 10px;
     top: 6px;
     width: 9px;
     height: 13px;
-    background: #7fd0ff;
+    // sweat, turning into molten drips early in the softening (quickly: a slow mix
+    // from blue to red would pass through pink)
+    background: color-mix(in oklch, #7fd0ff, var(--hot) calc(min(var(--softening) * 4, 1) * 100%));
     border-radius: 50% 50% 50% 50% / 65% 65% 35% 35%;
     animation: drip calc(var(--anim) * 1.5) ease-in infinite;
 
@@ -186,6 +242,22 @@ $pin-length: 10px;
   0% { transform: translateY(0); opacity: 0; }
   15% { opacity: 1; }
   100% { transform: translateY(70px); opacity: 0; }
+}
+
+// ── puddle (from the melting stage) ────────────────
+
+.puddle {
+  position: absolute;
+  left: 50%;
+  // over the bottom pins, below the chip's bottom edge
+  top: 114px;
+  width: calc(var(--melting) * 90px + var(--melted) * 26px);
+  height: calc(var(--melting) * 14px + var(--melted) * 8px);
+  translate: -50% 0;
+  border-radius: 50%;
+  background: var(--heat-color);
+  box-shadow: inset 0 -3px 0 rgb(0 0 0 / 0.25);
+  transition: background 0.6s;
 }
 
 @media (prefers-reduced-motion: reduce) {
