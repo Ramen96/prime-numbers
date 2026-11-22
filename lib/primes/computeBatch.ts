@@ -81,7 +81,7 @@ export interface ComputeBatchOptions {
 
 export async function computeBatch(
   sieve: Sieve,
-  { id, generation, direction, from, count }: BatchRequest,
+  { id, generation, direction, from, count, includeCertificates = false }: BatchRequest,
   send: (response: WorkerResponse) => void,
   {
     memoryBudgetBytes,
@@ -181,7 +181,8 @@ export async function computeBatch(
     return verification;
   };
   const isPastBound = (prime: bigint) => prime >= DETERMINISTIC_VERIFICATION_LIMIT;
-  const alreadyProven = (prime: bigint) => provenPrimes?.has(prime) ?? false;
+  // the cache keeps no certificates, so a request that wants them proves every prime again
+  const alreadyProven = (prime: bigint) => !includeCertificates && (provenPrimes?.has(prime) ?? false);
   const upFront = await timedVerify(
     primes.filter((prime) => !isPastBound(prime)),
     rejected,
@@ -204,6 +205,8 @@ export async function computeBatch(
   const needsProof = (prime: bigint) => isPastBound(prime) && !alreadyProven(prime);
   const toProve = inListOrder.filter(needsProof);
   const checked = new Set<bigint>();
+  /** With includeCertificates: each checked prime's certificate, sent along with it. */
+  const checkedCertificates = new Map<bigint, readonly CertificateStep[]>();
   let settledCount = 0; // inListOrder[0 .. settledCount) can be shown
   let sentCount = 0; // and inListOrder[0 .. sentCount) have been
   let foundSinceSent = 0;
@@ -220,20 +223,37 @@ export async function computeBatch(
       settledCount++;
     }
   };
-  /** The settled primes not yet sent, ascending, and how many of them were found now. */
+  /**
+   * The settled primes not yet sent, ascending, how many of them were found now,
+   * and with includeCertificates, the certificates of those past a(13).
+   */
   const takeUnsent = () => {
     const unsent = inListOrder.slice(sentCount, settledCount);
     sentCount = settledCount;
     const foundCount = foundSinceSent;
     foundSinceSent = 0;
-    return { primes: direction === "next" ? unsent : unsent.reverse(), foundCount };
+    const ascending = direction === "next" ? unsent : unsent.reverse();
+    if (!includeCertificates) return { primes: ascending, foundCount };
+    const certificates = ascending
+      .filter((prime) => checkedCertificates.has(prime))
+      .map((prime) => ({ prime, steps: checkedCertificates.get(prime)! }));
+    return { primes: ascending, foundCount, certificates };
   };
   const streamIfDue = () => {
     if (!proving || settledCount === sentCount || now() - lastSentTime < STREAM_INTERVAL_MS) return;
     const time = now();
-    const { primes: shown, foundCount } = takeUnsent();
+    const { primes: shown, foundCount, certificates } = takeUnsent();
     const findingDurationMs = time - findingMark;
-    send({ type: "proven", id, generation, direction, primes: shown, foundCount, findingDurationMs });
+    send({
+      type: "proven",
+      id,
+      generation,
+      direction,
+      primes: shown,
+      foundCount,
+      findingDurationMs,
+      ...(certificates && { certificates }),
+    });
     findingMark = time;
     lastSentTime = time;
   };
@@ -258,9 +278,10 @@ export async function computeBatch(
       dispute = verification;
       return;
     }
-    for (const { prime } of group) {
+    for (const { prime, certificate } of group) {
       checked.add(prime);
       provenPrimes?.add(prime); // proven and checked: never proven again
+      if (includeCertificates) checkedCertificates.set(prime, certificate);
     }
     settle();
     streamIfDue();
@@ -333,7 +354,7 @@ export async function computeBatch(
   // out of memory are still sent; the next request in this direction then
   // reports why it stopped.
   const finalTime = now();
-  const { primes: rest, foundCount } = takeUnsent();
+  const { primes: rest, foundCount, certificates } = takeUnsent();
   send({
     type: "batch",
     id,
@@ -341,6 +362,7 @@ export async function computeBatch(
     direction,
     primes: rest,
     foundCount,
+    ...(certificates && { certificates }),
     reachedMemoryLimit,
     sievingDurationMs: finalFindingMs ?? finalTime - findingMark,
     setupDurationMs,

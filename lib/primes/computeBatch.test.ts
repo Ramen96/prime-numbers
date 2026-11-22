@@ -9,7 +9,7 @@ import {
   type ComputeBatchOptions,
   type Sieve,
 } from "./computeBatch.ts";
-import type { CertificateStep } from "./primalityCertificate.ts";
+import { checkCertificate, type CertificateStep } from "./primalityCertificate.ts";
 import type { ProveOptions, ProvenInOrder } from "./proofSlots.ts";
 import { ProvenPrimeCache } from "./provenPrimeCache.ts";
 import { PARTIAL_SIEVE_PRIME_CAP } from "./sieveCalibrator.ts";
@@ -517,6 +517,59 @@ describe("computeBatch streaming primes past a(13) as they're proven (step 5c)",
     assert.deepEqual(primesOf(sent), [BELOW_BOUND, FIRST]);
     assert.equal(cache.has(SECOND), false);
     assert.deepEqual(asked, [FIRST, SECOND], "proving stopped there");
+  });
+
+  describe("with includeCertificates (the random-prime page)", () => {
+    const WITH_CERTIFICATES: BatchRequest = { ...REQUEST, includeCertificates: true };
+    const certificatesOf = (sent: WorkerResponse[]) =>
+      sent.flatMap((response) => (response.type === "proven" || response.type === "batch" ? (response.certificates ?? []) : []));
+
+    it("sends each prime past a(13) with the certificate that was checked, in order", async () => {
+      const clock = { now: 0 };
+      const sent = await run(standInSieve(BATCH), WITH_CERTIFICATES, null, { now: () => clock.now, prove: slowProver(clock, 150) });
+      assert.deepEqual(primesOf(sent), BATCH);
+      const certificates = certificatesOf(sent);
+      assert.deepEqual(certificates.map(({ prime }) => prime), [FIRST, SECOND, THIRD], "none for the prime below a(13)");
+      for (const { prime, steps } of certificates) {
+        assert.deepEqual(steps, CERTIFICATE_OF.get(prime));
+        assert.deepEqual(checkCertificate(prime, steps), { valid: true });
+      }
+      // each certificate travels in the same message as its prime
+      for (const response of sent)
+        if (response.type === "proven" || response.type === "batch")
+          assert.deepEqual((response.certificates ?? []).map(({ prime }) => prime), response.primes.filter((prime) => CERTIFICATE_OF.has(prime)));
+    });
+
+    it("sends no certificates at all without it, as for the list", async () => {
+      const clock = { now: 0 };
+      const sent = await run(standInSieve(BATCH), REQUEST, null, { now: () => clock.now, prove: slowProver(clock, 150) });
+      for (const response of sent) assert.equal("certificates" in response, false);
+    });
+
+    it("proves again a prime kept from an earlier proof, since the cache keeps no certificates", async () => {
+      const clock = { now: 0 };
+      const cache = new ProvenPrimeCache();
+      cache.add(FIRST);
+      const asked: bigint[] = [];
+      const sent = await run(standInSieve(BATCH), WITH_CERTIFICATES, null, {
+        now: () => clock.now,
+        prove: slowProver(clock, 150, (prime) => (asked.push(prime), CERTIFICATE_OF.get(prime)!)),
+        provenPrimes: cache,
+      });
+      assert.deepEqual(asked, [FIRST, SECOND, THIRD]);
+      assert.deepEqual(certificatesOf(sent).map(({ prime }) => prime), [FIRST, SECOND, THIRD]);
+    });
+
+    it("never sends a certificate that failed its check, nor anything after it", async () => {
+      const clock = { now: 0 };
+      const broken = (prime: bigint) => {
+        const [first, ...rest] = CERTIFICATE_OF.get(prime)!;
+        return prime === SECOND ? [{ ...first, pointX: first.pointX + 1n }, ...rest] : [first, ...rest];
+      };
+      const sent = await run(standInSieve(BATCH), WITH_CERTIFICATES, null, { now: () => clock.now, prove: slowProver(clock, 150, broken) });
+      assert.deepEqual(sent.map((response) => response.type), ["proving", "proven", "error"]);
+      assert.deepEqual(certificatesOf(sent).map(({ prime }) => prime), [FIRST]);
+    });
   });
 
   it("doesn't count primes kept from an earlier proof as found", async () => {

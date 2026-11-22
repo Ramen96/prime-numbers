@@ -3,6 +3,8 @@
 // Prime values are BigInt throughout, of any size: the Wasm sieve hands them
 // over as limbs and offsets (see wasmSieve.ts), never as JS numbers.
 
+import type { CertificateStep } from "./primalityCertificate.ts";
+
 export type Direction = "next" | "prev";
 
 /** Number of primes per batch. The rolling buffer holds 3 of these. */
@@ -30,6 +32,18 @@ export interface BatchRequest extends RequestTags {
    */
   from: bigint;
   count: number;
+  /**
+   * Send each prime's certificate with it (`certificates` on `proven` and `batch`),
+   * for the random-prime page. Primes kept from an earlier proof are proven again,
+   * since the proven-prime cache keeps no certificates. Off for the list.
+   */
+  includeCertificates?: boolean;
+}
+
+/** A prime past a(13) and the certificate it was shown with, already checked by checkCertificate. */
+export interface ProvenPrimeCertificate {
+  prime: bigint;
+  steps: readonly CertificateStep[];
 }
 
 /**
@@ -92,6 +106,8 @@ export interface BatchResponse extends RequestTags {
   primes: bigint[];
   /** How many of `primes` were found now, rather than kept from an earlier proof. */
   foundCount: number;
+  /** With `includeCertificates`: the certificate of each of `primes` past a(13), in the same order. */
+  certificates?: ProvenPrimeCertificate[];
   /** Memory ran out before the next number could be settled: sieved, or past a(13), proven. */
   reachedMemoryLimit: boolean;
   /**
@@ -139,6 +155,8 @@ export interface ProvenPrimesResponse extends RequestTags {
   foundCount: number;
   /** Time spent finding them, since the previous piece (sieving, for the first). */
   findingDurationMs: number;
+  /** With `includeCertificates`: the certificate of each of `primes`, in the same order. */
+  certificates?: ProvenPrimeCertificate[];
 }
 
 /** Proving stopped for a pause request: nothing from this batch is sent, and no proof is lost. */
