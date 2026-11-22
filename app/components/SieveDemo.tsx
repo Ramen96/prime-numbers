@@ -9,7 +9,7 @@ import {
   sieveDemoCells,
   type SieveDemoCell,
 } from "@/lib/sieveDemo";
-import styles from "./SieveDemo.module.scss";
+import styles from "./sieveDemos.module.scss";
 
 /** How long Play waits between steps. */
 const PLAY_STEP_MS = 2200;

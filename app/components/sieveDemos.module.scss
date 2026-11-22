@@ -1,16 +1,21 @@
-// The interactive sieve on /how-it-works (SieveDemo.tsx). Selectors sit under
-// .demo so they outrank the article's own list styles (.prose ol, li + li).
+// The interactive sieves on /how-it-works: the sieve of Eratosthenes
+// (SieveDemo.tsx) and the segmented sieve's window (SegmentDemo.tsx, which adds
+// SegmentDemo.module.scss). Selectors sit under .demo so they outrank the
+// article's own list styles (.prose ol, li + li).
 
 $strike-duration: 0.3s;
 $stagger: 45ms;
 
 .demo {
-  // One colour per sieving prime (2, 3, 5, 7): text-safe (4.5:1) on the page background.
-  // None is blue, which is what the primes left at the end get (the heat colour, cool here).
+  // One colour per sieving prime (2, 3, 5, 7, then 11 and 13; the window demo repeats
+  // them from 17): text-safe (4.5:1) on the page background. None is blue, which is
+  // what the primes left at the end get (the heat colour, cool here).
   --sieve-prime-0: #be123c;
   --sieve-prime-1: #b45309;
   --sieve-prime-2: #7c3aed;
   --sieve-prime-3: #047857;
+  --sieve-prime-4: #0f766e;
+  --sieve-prime-5: #c2410c;
 
   margin: 1.5rem 0;
 
@@ -19,6 +24,8 @@ $stagger: 45ms;
     --sieve-prime-1: #fbbf24;
     --sieve-prime-2: #a78bfa;
     --sieve-prime-3: #34d399;
+    --sieve-prime-4: #2dd4bf;
+    --sieve-prime-5: #fb923c;
   }
 
   .controls {

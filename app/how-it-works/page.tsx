@@ -5,6 +5,7 @@ import { Article } from "../components/Article";
 import { CodeBlock } from "../components/CodeBlock";
 import { JsonLd } from "../components/JsonLd";
 import { ScrollableTable } from "../components/ScrollableTable";
+import { SegmentDemo } from "../components/SegmentDemo";
 import { SieveDemo } from "../components/SieveDemo";
 import { UlamSpiral } from "../components/UlamSpiral";
 
@@ -176,6 +177,8 @@ export default function HowItWorksPage() {
           that range.
         </li>
       </ul>
+      <p>Try it: slide a 20-number window along, starting at 100.</p>
+      <SegmentDemo />
       <p>In code, one segment looks roughly like this:</p>
       <CodeBlock
         language="javascript"

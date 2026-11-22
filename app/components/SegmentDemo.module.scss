@@ -1,0 +1,77 @@
+// What the segmented sieve's window demo adds to sieveDemos.module.scss: a strike
+// for every base prime that marks a number (the real sieve doesn't check whether
+// one already did), and the row of base primes. Under .demo, like the shared styles.
+
+$strike-duration: 0.3s;
+$stagger: 60ms;
+$most-strikes-colors: 6;
+
+.demo {
+  .marked {
+    color: var(--muted);
+  }
+
+  // one strike per marking base prime, each at its own angle so they don't hide each other
+  .strike {
+    position: absolute;
+    left: 18%;
+    right: 18%;
+    top: 50%;
+    height: 2px;
+    background: var(--prime-color);
+    rotate: calc(-28deg + var(--strike-index) * 22deg);
+  }
+
+  // drawn in, in order, as this step's prime marks it
+  .newStrike {
+    animation: draw-strike $strike-duration ease-out both;
+    animation-delay: calc(var(--order) * #{$stagger});
+  }
+
+  .basePrimes {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.375rem;
+    margin: 0 0 0.75rem;
+    padding: 0;
+    list-style: none;
+    font-size: 0.85rem;
+    color: var(--muted);
+
+    li {
+      margin: 0;
+    }
+  }
+
+  .basePrime {
+    display: inline-flex;
+    min-width: 2rem;
+    justify-content: center;
+    padding: 0.125rem 0.5rem;
+    border: 1px solid var(--rule);
+    border-radius: 999px;
+    font-family: var(--font-geist-mono), ui-monospace, monospace;
+    color: var(--prime-color);
+  }
+
+  .currentBasePrime {
+    border: 2px solid var(--prime-color);
+    font-weight: 700;
+  }
+}
+
+@keyframes draw-strike {
+  from {
+    scale: 0 1;
+  }
+  to {
+    scale: 1 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .demo .newStrike {
+    animation: none;
+  }
+}
