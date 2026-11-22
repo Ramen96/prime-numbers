@@ -68,7 +68,7 @@ Each prime is shown as soon as it and every prime before it are proven and check
 
 ### A random prime, with its certificate
 
-`/random-prime` asks the same prime worker for one prime from a uniformly random start (`lib/randomStart.ts`, `crypto.getRandomValues`), with `includeCertificates`: the worker sends the certificate `checkCertificate` accepted along with the prime. The page shows each step and offers it as JSON (`lib/certificateExport.ts`, numbers as decimal strings) or text. At least 26 digits, so every prime has a certificate; no maximum. A proof runs on one thread. Its "Check a certificate" section reads either format back (`readCertificate`) and checks it with `checkCertificate` in a worker of its own (`certificateCheck.worker.ts`), naming the step that fails if one does.
+`/random-prime` asks the same prime worker for one prime from a uniformly random start (`lib/randomStart.ts`, `crypto.getRandomValues`), with `includeCertificates`: the worker sends the certificate `checkCertificate` accepted along with the prime. The page shows each step and offers it as JSON (`lib/certificateExport.ts`, numbers as decimal strings) or text, or copies the text to the clipboard. At least 26 digits, so every prime has a certificate; no maximum. A proof runs on one thread. Its "Check a certificate" section reads either format back (`readCertificate`) and checks it with `checkCertificate` in a worker of its own (`certificateCheck.worker.ts`), naming the step that fails if one does.
 
 ### Threads: splitting a window's base primes
 

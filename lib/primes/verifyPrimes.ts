@@ -157,6 +157,14 @@ export function failsStrongLucas(candidate: bigint): boolean {
   return true;
 }
 
+/**
+ * The bases deterministic Miller–Rabin needs for `candidate` (below a(13)): the
+ * first k primes, for the smallest k whose first passing composite is above it.
+ */
+export function millerRabinBasesFor(candidate: bigint): readonly bigint[] {
+  return PRIME_BASES.slice(0, FIRST_COMPOSITE_PASSING_K_BASES.findIndex((bound) => candidate < bound) + 1);
+}
+
 /** Deterministic Miller–Rabin, with only as many bases as `candidate` needs. */
 export function millerRabinVerdict(candidate: bigint): Verdict {
   if (candidate < 2n) return "composite";
@@ -166,8 +174,7 @@ export function millerRabinVerdict(candidate: bigint): Verdict {
   }
   if (candidate >= DETERMINISTIC_VERIFICATION_LIMIT) return "beyond-proven-bound";
 
-  const basesNeeded = FIRST_COMPOSITE_PASSING_K_BASES.findIndex((bound) => candidate < bound) + 1;
-  for (const base of PRIME_BASES.slice(0, basesNeeded)) {
+  for (const base of millerRabinBasesFor(candidate)) {
     if (isWitness(candidate, base)) return "composite"; // proof that candidate is composite
   }
   return "prime";
