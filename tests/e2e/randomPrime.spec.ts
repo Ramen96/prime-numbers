@@ -61,6 +61,35 @@ test.describe("random prime", () => {
     });
   }
 
+  test("Copy as text puts the text download on the clipboard, and says so", async ({ page, context }) => {
+    await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+    await page.goto("/random-prime");
+    await findRandomPrime(page, "30");
+    const [textDownload] = await Promise.all([page.waitForEvent("download"), page.getByRole("link", { name: "Download as text" }).click()]);
+    const downloaded = await readFile((await textDownload.path())!, "utf8");
+
+    const copyButton = page.getByRole("button", { name: "Copy as text" });
+    const box = await copyButton.boundingBox();
+    await copyButton.click();
+    await expect(page.getByTestId("certificate-copy-status")).toHaveText("Copied the certificate as text.");
+    await expect(copyButton).toContainText("Copied");
+    expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(downloaded);
+    expect(await copyButton.boundingBox()).toEqual(box); // the labels share one cell
+    await expect(page.getByTestId("certificate-copy-status")).toHaveText("", { timeout: 5_000 });
+  });
+
+  test("Copy as text says when the browser won’t allow it", async ({ page }) => {
+    await page.addInitScript(() => {
+      navigator.clipboard.writeText = () => Promise.reject(new DOMException("Write permission denied.", "NotAllowedError"));
+    });
+    await page.goto("/random-prime");
+    await findRandomPrime(page, "30");
+    await page.getByRole("button", { name: "Copy as text" }).click();
+    await expect(page.getByTestId("certificate-copy-status")).toHaveText(
+      "Couldn’t copy: the browser didn’t allow it. Download it as text instead.",
+    );
+  });
+
   test("Give up stops a long proof, and the next find works", async ({ page }) => {
     test.setTimeout(90_000);
     await page.goto("/random-prime");
