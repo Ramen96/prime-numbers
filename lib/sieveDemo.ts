@@ -2,6 +2,7 @@
 // looks like after a given number of steps, and what the caption says. Plain
 // numbers, not BigInt: the range is fixed in code, 1 to 120.
 
+import { andList, shortList } from "./listText.ts";
 import { sieveAnimation } from "./sieveAnimation.ts";
 
 /** Twelve rows of ten, ending just below 11² = 121, so the stopping rule shows itself. */
@@ -69,17 +70,6 @@ export function sieveDemoCells(step: number): SieveDemoCell[] {
       };
     }),
   ];
-}
-
-/** "4, 6, 8, 10, 12, …, 120": the first few and the last, for long lists. */
-function shortList(values: readonly number[]): string {
-  if (values.length <= 8) return values.join(", ");
-  return `${values.slice(0, 5).join(", ")}, …, ${values[values.length - 1]}`;
-}
-
-/** "2 and 3", "2, 3 and 5". */
-function andList(values: readonly number[]): string {
-  return values.length <= 1 ? values.join("") : `${values.slice(0, -1).join(", ")} and ${values[values.length - 1]}`;
 }
 
 /** What the caption says after `step` steps. */
