@@ -6,12 +6,13 @@ import { formatDuration } from "@/lib/formatRate";
 import { useRandomPrime } from "@/lib/primes/useRandomPrime";
 import { describeProving } from "@/lib/provingStatus";
 import { parseDigits, RANDOM_PRIME_DEFAULT_DIGITS } from "@/lib/randomPrime";
+import { CertificateSteps } from "./CertificateSteps";
 import { WrappableNumber } from "./WrappableNumber";
 
 /**
  * The random-prime page's working part: how many digits, Find, Give up while it
- * works, and the prime once it's proven and its certificate checked. (The
- * certificate's steps and downloads come in step c2.)
+ * works, and the prime once it's proven and its certificate checked, with the
+ * certificate itself (CertificateSteps).
  */
 export function RandomPrime() {
   const { state, find, giveUp } = useRandomPrime();
@@ -89,6 +90,7 @@ export function RandomPrime() {
             {formatWholeNumber(BigInt(state.digits))} digits, found and proven in{" "}
             {state.elapsedMs < 100 ? "under 0.1 s" : formatDuration(state.elapsedMs / 1000)}.
           </p>
+          <CertificateSteps prime={state.prime} steps={state.certificate} />
         </div>
       )}
     </section>
