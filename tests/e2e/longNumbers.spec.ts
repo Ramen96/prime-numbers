@@ -204,8 +204,11 @@ test.describe("the full-number popup", () => {
     await expect(popup).toBeVisible();
 
     // Light dismiss doesn't restore focus by itself (Escape and Close do), so
-    // this is the case NumberPopover's own focus handling is there for.
-    await page.mouse.click(4, 4);
+    // this is the case NumberPopover's own focus handling is there for. The click
+    // lands on plain text outside the popup: a fixed corner can be a nav link at
+    // some widths, and clicking a link would rightly take the focus.
+    const outside = (await page.getByText("primes per second").boundingBox())!;
+    await page.mouse.click(outside.x + 4, outside.y + outside.height / 2);
     await expect(popup).toBeHidden();
     await expect(button).toBeFocused();
   });

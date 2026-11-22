@@ -66,6 +66,10 @@ Every certificate is checked before the prime is shown by `lib/primes/primalityC
 
 Each prime is shown as soon as it and every prime before it are proven and checked: the worker sends a batch in pieces (`proven` messages, at most every 100 ms), after checking the batch's rejected composites first, since a wrong rejection would leave a gap. Meanwhile a "proving primality…" row shows how long the prime the list is waiting on has taken, and how far down its chain has got (`proof_slot_progress`). Stop pauses proving instead of ending the worker: unfinished chains stay in their slots, and a later request for the same numbers carries on from there. Once primes take a minute or more each (`primesTakeMinutes` in `lib/heat.ts`), the button reads "Give up"; it does the same thing. While the sieve itself is running, a Wasm call can't be interrupted, so Stop still ends the worker.
 
+### A random prime, with its certificate
+
+`/random-prime` asks the same prime worker for one prime from a uniformly random start (`lib/randomStart.ts`, `crypto.getRandomValues`), with `includeCertificates`: the worker sends the certificate `checkCertificate` accepted along with the prime. The page shows each step and offers it as JSON (`lib/certificateExport.ts`, numbers as decimal strings) or text. At least 26 digits, so every prime has a certificate; no maximum. A proof runs on one thread.
+
 ### Threads: splitting a window's base primes
 
 A batch of 500 primes almost always fits in one window, so giving each thread its own window would mostly sieve windows nobody asked for. Instead, all threads share one window, each crossing off with its own slice of the base primes (starting at a checkpoint), and their marks are merged.

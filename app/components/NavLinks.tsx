@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { GITHUB_URL } from "@/lib/site";
+import { DieIcon } from "./DieIcon";
 import { StarIcon } from "./StarIcon";
 
 const PAGES = [
@@ -11,8 +12,9 @@ const PAGES = [
   { href: "/about", label: "About" },
 ] as const;
 
+// Below 300 px (a Galaxy Fold's cover screen is 280), a little tighter, so the row still fits.
 const LINK_CLASSES =
-  "flex h-11 items-center rounded-md px-2.5 text-sm text-muted transition-colors hover:text-foreground focus-visible:outline-2 focus-visible:outline-(--heat-text) sm:px-3 desktop:h-auto desktop:px-0 desktop:py-1.5 desktop:text-[0.95rem]";
+  "flex h-11 items-center rounded-md px-2.5 text-sm max-[299px]:px-1 max-[299px]:text-[0.8125rem] text-muted transition-colors hover:text-foreground focus-visible:outline-2 focus-visible:outline-(--heat-text) sm:px-3 desktop:h-auto desktop:px-0 desktop:py-1.5 desktop:text-[0.95rem]";
 // The heat accent marks the current page: a bar under it on mobile, beside it on desktop.
 const CURRENT_PAGE_CLASSES =
   "font-semibold text-foreground! shadow-[inset_0_-2px_0_var(--heat-color)] desktop:pl-3 desktop:shadow-[inset_2px_0_0_var(--heat-color)]";
@@ -39,10 +41,23 @@ export function NavLinks() {
         );
       })}
       {/*
-        Favorites: a star icon in the phone nav bar (five words don't fit in one
-        row at 360px), the word in the desktop sidebar. Named "Favorites" either way.
+        Random prime and Favorites: icons in the phone nav bar (a die and a star;
+        their words don't fit in one row at 320 px), words in the desktop sidebar.
+        Named by their words either way.
       */}
       <li className="ml-auto desktop:ml-0">
+        <Link
+          href="/random-prime"
+          aria-current={currentPath === "/random-prime" ? "page" : undefined}
+          className={`${LINK_CLASSES} w-11 justify-center desktop:w-auto desktop:justify-start ${currentPath === "/random-prime" ? CURRENT_PAGE_CLASSES : ""}`}
+        >
+          <span aria-hidden className="desktop:hidden">
+            <DieIcon />
+          </span>
+          <span className="sr-only desktop:not-sr-only">Random prime</span>
+        </Link>
+      </li>
+      <li>
         <Link
           href="/favorites"
           aria-current={currentPath === "/favorites" ? "page" : undefined}

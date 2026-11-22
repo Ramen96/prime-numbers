@@ -874,6 +874,9 @@ for (size_t index = limb_count; index-- > 0;)
         carries on where it was. Once primes take a minute or more each, the button says “Give
         up” instead. It does the same thing.
       </p>
+      <p>
+        <Link href="/random-prime">Want to see one? Get a random prime, with its certificate →</Link>
+      </p>
 
       {/* 12 */}
       <SectionHeading id="displaying-long-primes" />

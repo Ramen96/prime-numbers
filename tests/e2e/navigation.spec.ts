@@ -6,6 +6,7 @@ const PAGES = [
   { path: "/how-it-works", linkName: "How it works" },
   { path: "/about", linkName: "About" },
   { path: "/favorites", linkName: "Favorites" },
+  { path: "/random-prime", linkName: "Random prime" },
 ] as const;
 
 test.describe("site navigation", () => {
@@ -16,7 +17,7 @@ test.describe("site navigation", () => {
       for (const otherPage of PAGES) expect(html).toContain(`href="${otherPage.path}"`);
       expect(html).toContain(`href="${GITHUB_URL}"`);
       expect(html).toMatch(
-        // The Favorites link holds a star icon and a label, so match up to the label.
+        // The Favorites and Random prime links hold an icon and a label, so match up to the label.
         new RegExp(`<a[^>]*aria-current="page"[^>]*href="${path}"[^>]*>[\\s\\S]*?${linkName}[\\s\\S]*?</a>`),
       );
     });
@@ -88,17 +89,19 @@ test.describe("site navigation", () => {
   });
 });
 
-test.describe("site navigation on a 360px phone", () => {
-  test.use({ viewport: { width: 360, height: 740 } });
+for (const width of [360, 320]) {
+  test.describe(`site navigation on a ${width}px phone`, () => {
+    test.use({ viewport: { width, height: 740 } });
 
-  test("fits every link on one row", async ({ page }) => {
-    await page.goto("/");
-    const navLinks = page.getByRole("navigation", { name: "Site" }).getByRole("link");
-    const visibleLinkTops = new Set<number>();
-    for (const navLink of await navLinks.all()) {
-      if (await navLink.isVisible()) visibleLinkTops.add(Math.round((await navLink.boundingBox())!.y));
-    }
-    expect(visibleLinkTops.size).toBe(1);
-    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(360);
+    test("fits every link on one row", async ({ page }) => {
+      await page.goto("/");
+      const navLinks = page.getByRole("navigation", { name: "Site" }).getByRole("link");
+      const visibleLinkTops = new Set<number>();
+      for (const navLink of await navLinks.all()) {
+        if (await navLink.isVisible()) visibleLinkTops.add(Math.round((await navLink.boundingBox())!.y));
+      }
+      expect(visibleLinkTops.size).toBe(1);
+      expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
+    });
   });
-});
+}
