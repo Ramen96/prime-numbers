@@ -1,5 +1,6 @@
 import { pageMetadata } from "@/lib/pageMetadata";
 import { Article } from "../components/Article";
+import { CertificateCheck } from "../components/CertificateCheck";
 import { RandomPrime } from "../components/RandomPrime";
 
 export const metadata = pageMetadata({
@@ -45,6 +46,8 @@ export default function RandomPrimePage() {
         fixed bases), which leaves no certificate to show. There’s no largest: the page will try any length you’re
         patient enough for.
       </p>
+
+      <CertificateCheck />
     </Article>
   );
 }

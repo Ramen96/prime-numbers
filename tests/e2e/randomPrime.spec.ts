@@ -1,5 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { expect, test, type Page } from "@playwright/test";
+import { shortNumber } from "../../lib/certificateCheck.ts";
 import { certificateFromJson } from "../../lib/certificateExport.ts";
 import { checkCertificate } from "../../lib/primes/primalityCertificate.ts";
 import { DETERMINISTIC_BELOW, nextPrimeAfter } from "../support/primality";
@@ -99,6 +100,50 @@ test.describe("random prime", () => {
       viewport: document.documentElement.clientWidth,
     }));
     expect(content).toBeLessThanOrEqual(viewport);
+  });
+
+  test("checks a pasted or uploaded certificate: valid, tampered, or unreadable", async ({ page }) => {
+    const errors = collectErrors(page);
+    await page.goto("/random-prime");
+    const prime = await findRandomPrime(page, "30");
+    const box = page.getByRole("textbox", { name: "Certificate (JSON or text)" });
+    const checkButton = page.getByRole("button", { name: "Check certificate" });
+    const result = page.getByTestId("certificate-check-result");
+    const download = async (name: string) => {
+      const [file] = await Promise.all([page.waitForEvent("download"), page.getByRole("link", { name }).click()]);
+      const path = (await file.path())!;
+      return { path, text: await readFile(path, "utf8") };
+    };
+    const json = await download("Download as JSON");
+    const text = await download("Download as text");
+    const validLine = `Valid: this certificate proves the 30-digit number ${shortNumber(prime)} prime.`;
+
+    for (const certificate of [json.text, text.text]) {
+      await box.fill(certificate);
+      await checkButton.click();
+      await expect(result).toHaveText(validLine);
+      await expect(result).toHaveAttribute("data-valid", "true");
+    }
+
+    // one digit of step 1's y changed: the checker says which step, and why
+    const steps = certificateFromJson(json.text).steps;
+    const y = steps[0].pointY;
+    await box.fill(text.text.replace(`y = ${y}`, `y = ${y + 1n}`));
+    await checkButton.click();
+    await expect(result).toHaveText(`Not valid: step 1 of ${steps.length} doesn’t hold (the point isn’t on the curve).`);
+    await expect(result).toHaveAttribute("data-valid", "false");
+
+    await box.fill("my favourite prime is 7");
+    await checkButton.click();
+    await expect(result).toHaveText(
+      "That isn’t a certificate this page can read: it’s in neither of this page’s formats (JSON or text).",
+    );
+
+    // a downloaded file, chosen from disk: read and checked at once
+    await page.locator('input[type="file"]').setInputFiles(json.path);
+    await expect(result).toHaveText(validLine);
+    await expect(box).toHaveValue(json.text);
+    expect(errors).toEqual([]);
   });
 
   test("finds a 200-digit prime too @slow", async ({ page }) => {

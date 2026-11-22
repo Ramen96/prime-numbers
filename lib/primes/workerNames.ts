@@ -9,3 +9,6 @@ export const PRIME_WORKER_NAME = "primes";
 
 /** A Miller–Rabin worker, started inside the prime worker (verificationPool.ts). */
 export const VERIFICATION_WORKER_NAME = "verification";
+
+/** The random-prime page's certificate checker (useCertificateCheck.ts): one per check. */
+export const CERTIFICATE_CHECK_WORKER_NAME = "certificate-check";
