@@ -1,5 +1,6 @@
-// The small sieve of Eratosthenes animated on the 404 page. Plain numbers,
-// not BigInt: the range is a few fixed numbers near 404, chosen in code.
+// The small sieves of Eratosthenes on the 404 page (400–409) and in the
+// interactive demo on /how-it-works (lib/sieveDemo.ts, 2–120). Plain numbers,
+// not BigInt: both ranges are small and fixed in code.
 
 /** One number in the animated range. */
 export interface SieveCell {

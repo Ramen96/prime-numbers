@@ -1,0 +1,146 @@
+// The interactive sieve on /how-it-works (SieveDemo.tsx). Selectors sit under
+// .demo so they outrank the article's own list styles (.prose ol, li + li).
+
+$strike-duration: 0.3s;
+$stagger: 45ms;
+
+.demo {
+  // One colour per sieving prime (2, 3, 5, 7): text-safe (4.5:1) on the page background.
+  // None is blue, which is what the primes left at the end get (the heat colour, cool here).
+  --sieve-prime-0: #be123c;
+  --sieve-prime-1: #b45309;
+  --sieve-prime-2: #7c3aed;
+  --sieve-prime-3: #047857;
+
+  margin: 1.5rem 0;
+
+  @media (prefers-color-scheme: dark) {
+    --sieve-prime-0: #fb7185;
+    --sieve-prime-1: #fbbf24;
+    --sieve-prime-2: #a78bfa;
+    --sieve-prime-3: #34d399;
+  }
+
+  .controls {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin-bottom: 0.75rem;
+  }
+
+  .button {
+    min-height: 44px;
+    padding: 0 1rem;
+    border: 1px solid var(--rule);
+    border-radius: 6px;
+    font-size: 0.9rem;
+    font-weight: 500;
+
+    &:hover:not(:disabled) {
+      border-color: var(--foreground);
+    }
+    &:focus-visible {
+      outline: 2px solid var(--heat-text);
+      outline-offset: 2px;
+    }
+    &:disabled {
+      color: var(--muted);
+      cursor: default;
+    }
+  }
+
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(10, minmax(0, 1fr));
+    gap: 3px;
+    max-width: 30rem;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .cell {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    aspect-ratio: 1;
+    margin: 0;
+    border: 1px solid var(--rule);
+    border-radius: 4px;
+    font-family: var(--font-geist-mono), ui-monospace, monospace;
+    font-size: clamp(0.7rem, 2.6vw, 0.95rem);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .not-prime {
+    color: var(--muted);
+    border-style: dashed;
+  }
+
+  .crossed {
+    color: var(--muted);
+
+    // the strike, in the colour of the prime that crossed it off
+    &::after {
+      content: "";
+      position: absolute;
+      left: 18%;
+      right: 18%;
+      top: 50%;
+      height: 2px;
+      background: var(--prime-color);
+      rotate: -20deg;
+    }
+  }
+
+  // crossed off in this step: the strike draws in, one number after another
+  .justCrossed::after {
+    animation: strike $strike-duration ease-out both;
+    animation-delay: calc(var(--order) * #{$stagger});
+  }
+
+  .sieving-prime {
+    border: 2px solid var(--prime-color);
+    color: var(--prime-color);
+    font-weight: 700;
+  }
+
+  .prime {
+    border-color: var(--heat-color);
+    color: var(--heat-text);
+    font-weight: 700;
+  }
+
+  .captionArea {
+    display: grid;
+    margin-top: 0.75rem;
+    font-size: 0.9rem;
+    color: var(--muted);
+
+    > * {
+      grid-area: 1 / 1;
+      margin: 0; // the article gives every <p> a bottom margin
+    }
+  }
+
+  .survivors {
+    margin: 0.25rem 0 0;
+    font-size: 0.9rem;
+  }
+}
+
+@keyframes strike {
+  from {
+    scale: 0 1;
+  }
+  to {
+    scale: 1 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .demo .justCrossed::after {
+    animation: none;
+  }
+}

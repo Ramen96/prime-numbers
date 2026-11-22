@@ -4,6 +4,8 @@ import { AUTHOR_NAME, AUTHOR_URL, SITE_URL } from "@/lib/site";
 import { Article } from "../components/Article";
 import { CodeBlock } from "../components/CodeBlock";
 import { JsonLd } from "../components/JsonLd";
+import { ScrollableTable } from "../components/ScrollableTable";
+import { SieveDemo } from "../components/SieveDemo";
 import { UlamSpiral } from "../components/UlamSpiral";
 
 const PAGE_PATH = "/how-it-works";
@@ -137,6 +139,8 @@ export default function HowItWorksPage() {
         </li>
         <li>Repeat until the next prime squared is past the limit. Everything left is prime.</li>
       </ol>
+      <p>Try it: step through the sieve up to 120.</p>
+      <SieveDemo />
       <p>
         The catch is memory: you need one slot for every number up to the limit. Sieving to a
         trillion that way would take a trillion slots.
@@ -321,32 +325,34 @@ function sieveSegment(low, high, basePrimes, isComposite) {
         <code>ln t</code> is prime. Add up those chances from 0 to <code>x</code> and you get
         the expected count. It’s remarkably close. At a trillion:
       </p>
-      <table>
-        <thead>
-          <tr>
-            <th scope="col">Up to 10¹²</th>
-            <th scope="col">Value</th>
-            <th scope="col">Off by</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr>
-            <td>π(10¹²), the real count</td>
-            <td>37,607,912,018</td>
-            <td>—</td>
-          </tr>
-          <tr>
-            <td>li(10¹²)</td>
-            <td>37,607,950,280.8</td>
-            <td>38,263 (0.0001%)</td>
-          </tr>
-          <tr>
-            <td>10¹² / ln 10¹²</td>
-            <td>36,191,206,825</td>
-            <td>1,416,705,193 (3.8%)</td>
-          </tr>
-        </tbody>
-      </table>
+      <ScrollableTable label="Counting primes up to 10¹²">
+        <table>
+          <thead>
+            <tr>
+              <th scope="col">Up to 10¹²</th>
+              <th scope="col">Value</th>
+              <th scope="col">Off by</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>π(10¹²), the real count</td>
+              <td>37,607,912,018</td>
+              <td>—</td>
+            </tr>
+            <tr>
+              <td>li(10¹²)</td>
+              <td>37,607,950,280.8</td>
+              <td>38,263 (0.0001%)</td>
+            </tr>
+            <tr>
+              <td>10¹² / ln 10¹²</td>
+              <td>36,191,206,825</td>
+              <td>1,416,705,193 (3.8%)</td>
+            </tr>
+          </tbody>
+        </table>
+      </ScrollableTable>
       <p>
         The simpler <code>x / ln x</code> is what you often see quoted, but it’s about 37,000
         times further off here.

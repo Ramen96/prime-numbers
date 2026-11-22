@@ -55,6 +55,28 @@ test.describe("layout", () => {
   });
 });
 
+test.describe("content pages on narrow screens", () => {
+  for (const width of [320, 280]) {
+    test(`/how-it-works and /about never scroll sideways at ${width} px`, async ({ page }) => {
+      await page.setViewportSize({ width, height: 800 });
+      for (const path of ["/how-it-works", "/about"]) {
+        await page.goto(path);
+        await expectNoHorizontalScrolling(page);
+      }
+    });
+  }
+
+  test("the wide table on /how-it-works scrolls inside its own box, and the keyboard can reach it", async ({ page }) => {
+    await page.setViewportSize({ width: 320, height: 800 });
+    await page.goto("/how-it-works");
+    const region = page.getByRole("region", { name: "Counting primes up to 10¹²" });
+    await expect(region.getByRole("table")).toBeVisible();
+    await expect(region).toHaveAttribute("tabindex", "0");
+    const { content, visible } = await region.evaluate((box) => ({ content: box.scrollWidth, visible: box.clientWidth }));
+    expect(content).toBeGreaterThan(visible); // it really is too wide here, and scrolls instead
+  });
+});
+
 test.describe("layout on a 360px phone", () => {
   test.use({ viewport: { width: 360, height: 740 } });
 
