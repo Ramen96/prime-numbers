@@ -12,3 +12,6 @@ export const VERIFICATION_WORKER_NAME = "verification";
 
 /** The random-prime page's certificate checker (useCertificateCheck.ts): one per check. */
 export const CERTIFICATE_CHECK_WORKER_NAME = "certificate-check";
+
+/** The prime checker's worker (/is-prime, usePrimeCheck.ts), started on the first check. */
+export const PRIME_CHECK_WORKER_NAME = "prime-check";
