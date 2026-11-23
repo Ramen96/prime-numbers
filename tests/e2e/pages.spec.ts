@@ -163,6 +163,57 @@ test.describe("/how-to-tell-if-a-number-is-prime", () => {
   });
 });
 
+test.describe("/mersenne-primes", () => {
+  test("is server-rendered with its headings, table, questions and the demo's first answer", async ({ request }) => {
+    const response = await request.get("/mersenne-primes");
+    expect(response.status()).toBe(200);
+    const html = await response.text();
+    expect(html).toMatch(/<h1[^>]*>What is a Mersenne prime\?<\/h1>/);
+    for (const heading of ["Powers of two, minus one", "The Lucas–Lehmer test", "A short history", "The largest known prime", "Perfect numbers", "Common questions"])
+      expect(html).toContain(`>${heading}</h2>`);
+    for (const question of ["Are there infinitely many Mersenne primes?", "Is 2ᵖ − 1 prime whenever p is prime?", "Can I help find the next one?"])
+      expect(html).toContain(`>${question}</h3>`);
+    for (const factors of ["23 × 89", "47 × 178,481", "233 × 1,103 × 2,089"]) expect(html).toContain(`<td>${factors}</td>`);
+    expect(html).toContain('href="/is-prime/2047"');
+    expect(html).toContain('href="/is-prime?n=8191"');
+    expect(html).toContain(`href="/?jump=${2n ** 127n - 1n}"`);
+    // the demo is built with p = 7's answer
+    expect(html).toContain("s₅ = (111² − 2) mod 127 = 0");
+    expect(html).toContain("After 5 steps the remainder is 0, so 2⁷ − 1 = 127 is prime.");
+  });
+
+  test("the table marks the eight Mersenne primes up to 2³¹ − 1", async ({ page }) => {
+    await page.goto("/mersenne-primes");
+    const rows = page.getByTestId("mersenne-table").locator("tbody tr");
+    await expect(rows).toHaveCount(11);
+    await expect(rows.filter({ hasText: "prime" })).toHaveCount(8); // 2 to 31, all but 11, 23 and 29
+  });
+
+  test("the demo runs the Lucas–Lehmer test for the chosen exponent", async ({ page }) => {
+    await page.goto("/mersenne-primes");
+    const demo = page.getByTestId("lucas-lehmer-demo");
+    const exponent = demo.getByRole("combobox", { name: "The exponent p" });
+    const terms = demo.getByTestId("lucas-lehmer-terms").getByRole("listitem");
+    const result = demo.getByRole("status");
+    expect((await exponent.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+    await expect(terms).toHaveCount(6);
+
+    await exponent.selectOption("11");
+    await expect(terms).toHaveCount(10);
+    await expect(terms.last()).toHaveText("s₉ = (282² − 2) mod 2,047 = 1,736");
+    await expect(result).toHaveText(
+      "After 9 steps the remainder is 1,736, not 0, so 2¹¹ − 1 = 2,047 isn’t prime. The test doesn’t say what its factors are: they’re 23 × 89.",
+    );
+
+    await exponent.selectOption("31");
+    await expect(terms).toHaveCount(30);
+    await expect(result).toHaveText("After 29 steps the remainder is 0, so 2³¹ − 1 = 2,147,483,647 is prime.");
+
+    await exponent.selectOption("3");
+    await expect(result).toHaveText("After 1 step the remainder is 0, so 2³ − 1 = 7 is prime.");
+  });
+});
+
 test("sitemap.xml lists every page", async ({ request }) => {
   const sitemapXml = await (await request.get("/sitemap.xml")).text();
   for (const pageUrl of [
@@ -174,6 +225,7 @@ test("sitemap.xml lists every page", async ({ request }) => {
     "https://everyprimenumber.com/fun-facts",
     "https://everyprimenumber.com/what-is-a-prime-number",
     "https://everyprimenumber.com/how-to-tell-if-a-number-is-prime",
+    "https://everyprimenumber.com/mersenne-primes",
   ]) {
     expect(sitemapXml).toContain(`<loc>${pageUrl}</loc>`);
   }

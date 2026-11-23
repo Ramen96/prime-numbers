@@ -128,6 +128,9 @@ export default function WhatIsAPrimeNumberPage() {
           <Link href="/how-to-tell-if-a-number-is-prime">How to tell if a number is prime →</Link>
         </li>
         <li>
+          <Link href="/mersenne-primes">What is a Mersenne prime? →</Link>
+        </li>
+        <li>
           <Link href="/fun-facts">Fun facts about prime numbers →</Link>
         </li>
         <li>

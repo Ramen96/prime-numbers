@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { LISTED_MAX_DIGITS, listedNeighbours, listedNumber, listedNumbers } from "./listedNumbers.ts";
+import { LISTED_MAX_DIGITS, isPrimeHref, listedNeighbours, listedNumber, listedNumbers } from "./listedNumbers.ts";
 
 describe("the listed numbers", () => {
   const all = listedNumbers();
@@ -30,5 +30,13 @@ describe("the listed numbers", () => {
     const notes = all.flatMap(({ note }) => (note ? [note] : []));
     assert.ok(notes.length >= 25);
     for (const note of notes) assert.doesNotMatch(note, /['"]/, note);
+  });
+});
+
+describe("isPrimeHref", () => {
+  it("sends a listed number to its page and any other to the checker", () => {
+    assert.equal(isPrimeHref(127n), "/is-prime/127");
+    assert.equal(isPrimeHref(2n ** 127n - 1n), "/is-prime/170141183460469231731687303715884105727");
+    assert.equal(isPrimeHref(8_191n), "/is-prime?n=8191");
   });
 });

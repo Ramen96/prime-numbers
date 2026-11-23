@@ -12,6 +12,7 @@ export default function sitemap(): MetadataRoute.Sitemap {
     { url: `${SITE_URL}/fun-facts`, changeFrequency: "monthly", priority: 0.6 },
     { url: `${SITE_URL}/what-is-a-prime-number`, changeFrequency: "monthly", priority: 0.7 },
     { url: `${SITE_URL}/how-to-tell-if-a-number-is-prime`, changeFrequency: "monthly", priority: 0.7 },
+    { url: `${SITE_URL}/mersenne-primes`, changeFrequency: "monthly", priority: 0.7 },
     // each listed number's own page: its answer never changes
     ...listedNumbers().map(({ value }) => ({ url: `${SITE_URL}/is-prime/${value}`, changeFrequency: "yearly" as const, priority: 0.3 })),
   ];

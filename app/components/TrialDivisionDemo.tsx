@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useId, useState, type FormEvent } from "react";
-import { listedNumber } from "@/lib/listedNumbers";
+import { isPrimeHref } from "@/lib/listedNumbers";
 import {
   TRIAL_DIVISION_DEMO_MAX,
   TRIAL_DIVISION_DEMO_START,
@@ -22,10 +22,7 @@ const LIST_STYLE = { listStyle: "none", paddingLeft: 0 } as const;
 
 type Shown = { kind: "division"; division: TrialDivision } | { kind: "too-big"; digits: string } | { kind: "invalid" };
 
-/** A listed number has a page of its own; any other goes to the checker's ?n=. */
-function checkerHref(digits: string): string {
-  return listedNumber(BigInt(digits)) ? `/is-prime/${digits}` : `/is-prime?n=${digits}`;
-}
+const checkerHref = (digits: string) => isPrimeHref(BigInt(digits));
 
 /**
  * Type a number up to 10,000 and watch it divided by each prime up to its square

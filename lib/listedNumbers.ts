@@ -104,3 +104,8 @@ export function listedNeighbours(value: bigint): { previous: bigint | null; next
   if (index === -1) return { previous: null, next: null };
   return { previous: index > 0 ? values[index - 1] : null, next: index + 1 < values.length ? values[index + 1] : null };
 }
+
+/** Where to send someone asking about `value`: its own page if it's listed, otherwise the checker's ?n=. */
+export function isPrimeHref(value: bigint): string {
+  return listedNumber(value) ? `/is-prime/${value}` : `/is-prime?n=${value}`;
+}

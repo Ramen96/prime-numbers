@@ -169,7 +169,7 @@ export default function HowToTellIfANumberIsPrimePage() {
       </p>
       <h3 id="largest-known-primes">How are the largest known primes found?</h3>
       <p>
-        They’re <Link href="/fun-facts#mersenne-primes">Mersenne primes</Link>, numbers of the form 2ⁿ − 1, and those
+        They’re <Link href="/mersenne-primes">Mersenne primes</Link>, numbers of the form 2ⁿ − 1, and those
         have a special test of their own, the Lucas–Lehmer test. It’s much faster than any test for numbers in general.
       </p>
 
@@ -180,6 +180,9 @@ export default function HowToTellIfANumberIsPrimePage() {
         </li>
         <li>
           <Link href="/what-is-a-prime-number">What is a prime number? →</Link>
+        </li>
+        <li>
+          <Link href="/mersenne-primes">What is a Mersenne prime? →</Link>
         </li>
         <li>
           <Link href="/fun-facts">Fun facts about prime numbers →</Link>

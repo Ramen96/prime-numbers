@@ -244,6 +244,9 @@ export default function FunFactsPage() {
         </a>
         . It would take this site a little longer to scroll there.
       </p>
+      <p>
+        More about them: <Link href="/mersenne-primes">What is a Mersenne prime? →</Link>
+      </p>
 
       <h3 id="rsa-encryption">Where are prime numbers used? RSA encryption</h3>
       <p>
