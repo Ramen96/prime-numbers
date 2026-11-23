@@ -12,6 +12,8 @@ import {
   describeProofTime,
   estimatedProofSeconds,
   exactSquareRoot,
+  listedPageDescription,
+  listedPageTitle,
   parseNumberToCheck,
   proofBelowProvenBound,
   SMALL_FACTOR_LIMIT,
@@ -246,5 +248,23 @@ describe("powerOfTen", () => {
     assert.equal(powerOfTen(9_999_999_999_999_999n), "1.000 × 10¹⁶");
     assert.equal(powerOfTen(10n ** 999_999n), "1.000 × 10⁹⁹⁹⁹⁹⁹");
     assert.equal(powerOfTen(43_619_719_871_000n), "4.362 × 10¹³");
+  });
+});
+
+describe("a listed number's page title and description", () => {
+  it("put the answer in the title", () => {
+    assert.equal(listedPageTitle({ kind: "composite", value: 91n, evidence: { by: "factor", factor: 7n } }), "Is 91 prime? No: 91 = 7 × 13 | Every Prime Number");
+    assert.equal(listedPageTitle({ kind: "prime", value: 97n, proof: { by: "trial-division" } }), "Is 97 prime? Yes, with a proof | Every Prime Number");
+    assert.equal(listedPageTitle({ kind: "neither", value: 1n }), "Is 1 prime? No | Every Prime Number");
+    assert.equal(listedPageTitle({ kind: "composite", value: 10n ** 100n, evidence: { by: "factor", factor: 2n } }).includes(",…,"), true);
+  });
+
+  it("cut the description at a word, to fit a search result", () => {
+    assert.equal(
+      listedPageDescription({ kind: "composite", value: 91n, evidence: { by: "factor", factor: 7n } }),
+      "91 isn’t prime: it’s divisible by 7. 91 = 7 × 13.",
+    );
+    const long = listedPageDescription({ kind: "prime", value: 2n ** 61n - 1n, proof: proofBelowProvenBound(2n ** 61n - 1n) });
+    assert.ok(long.length <= 160 && long.endsWith("…") && !long.endsWith(" …"), long);
   });
 });

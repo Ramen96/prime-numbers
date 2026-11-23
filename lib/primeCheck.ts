@@ -398,3 +398,29 @@ export function powerOfTen(value: bigint): string {
   const superscript = [...String(exponent)].map((digit) => SUPERSCRIPT_DIGITS[Number(digit)]).join("");
   return `${mantissa} × 10${superscript}`;
 }
+
+/** A search result's description is cut at about this many characters. */
+const DESCRIPTION_LENGTH = 160;
+
+/** A listed number's page title: the question, and the answer in brief. “Is 91 prime? No: 91 = 7 × 13 | Every Prime Number” */
+export function listedPageTitle(answer: PrimeCheckAnswer): string {
+  const shown = shortNumber(answer.value);
+  const brief =
+    answer.kind === "prime"
+      ? "Yes, with a proof"
+      : answer.kind === "composite" && answer.evidence.by === "factor"
+        ? `No: ${shown} = ${shortNumber(answer.evidence.factor)} × ${shortNumber(answer.value / answer.evidence.factor)}`
+        : answer.kind === "composite" && answer.evidence.by === "square"
+          ? `No: ${shown} = ${shortNumber(answer.evidence.root)}²`
+          : "No";
+  return `Is ${shown} prime? ${brief} | Every Prime Number`;
+}
+
+/** A listed number's page description: the answer and why, cut at a word to fit a search result. */
+export function listedPageDescription(answer: PrimeCheckAnswer): string {
+  const { headline, explanation } = describeAnswer(answer);
+  const full = `${headline} ${explanation}`;
+  if (full.length <= DESCRIPTION_LENGTH) return full;
+  const cut = full.slice(0, DESCRIPTION_LENGTH - 1);
+  return `${cut.slice(0, cut.lastIndexOf(" "))}…`;
+}
