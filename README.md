@@ -62,13 +62,17 @@ If the two ever disagree, the worker stops with an error and the disputed batch 
 
 Past a(13), the sieve's survivors go through BPSW in C (`bpsw()` in `wasm/primality.c`): a base-2 strong test and a strong Lucas test. A fail is proof of a composite, re-checked in TypeScript; a pass is only a probable prime. Each one is then proven by elliptic curve primality proving (`wasm/ecpp_prover.c`): a chain of curves, each showing a point of prime order q > (N^¼ + 1)², down to a number below a(13). Curves come from Hilbert class polynomials computed at run time (`wasm/classpoly.c`), so there's no table to run out. One prover runs per thread (`wasm/proof_slots.c`), each on a different prime.
 
-Every certificate is checked before the prime is shown by `lib/primes/primalityCertificate.ts`, a small checker that shares no code with the prover. A composite that passed BPSW never gets a proof, so it stays pending and the list waits rather than show it. Measured natively on one thread, a proof takes about 0.09 s at 100 digits, 2.5 s at 200 and 31 s at 300.
+Every certificate is checked before the prime is shown by `lib/primes/primalityCertificate.ts`, a small checker that shares no code with the prover. A composite that passed BPSW never gets a proof, so it stays pending and the list waits rather than show it. Measured natively on one thread, a proof takes about 0.07 s at 100 digits, 1.1 s at 200 and 8.5 s at 300.
 
 Each prime is shown as soon as it and every prime before it are proven and checked: the worker sends a batch in pieces (`proven` messages, at most every 100 ms), after checking the batch's rejected composites first, since a wrong rejection would leave a gap. Meanwhile a "proving primality…" row shows how long the prime the list is waiting on has taken, and how far down its chain has got (`proof_slot_progress`). Stop pauses proving instead of ending the worker: unfinished chains stay in their slots, and a later request for the same numbers carries on from there. Once primes take a minute or more each (`primesTakeMinutes` in `lib/heat.ts`), the button reads "Give up"; it does the same thing. While the sieve itself is running, a Wasm call can't be interrupted, so Stop still ends the worker.
 
 ### A random prime, with its certificate
 
 `/random-prime` asks the same prime worker for one prime from a uniformly random start (`lib/randomStart.ts`, `crypto.getRandomValues`), with `includeCertificates`: the worker sends the certificate `checkCertificate` accepted along with the prime. The page shows each step and offers it as JSON (`lib/certificateExport.ts`, numbers as decimal strings) or text, or copies the text to the clipboard. At least 26 digits, so every prime has a certificate; no maximum. A proof runs on one thread. Its "Check a certificate" section reads either format back (`readCertificate`) and checks it with `checkCertificate` in a worker of its own (`certificateCheck.worker.ts`), naming the step that fails if one does.
+
+### Is it prime?
+
+`/is-prime` checks any number in a worker of its own (`primeCheck.worker.ts`, the single-threaded build): a factor below 65,536 found in BigInt, then `check_number` (`wasm/number_check.c`: deterministic Miller–Rabin below a(13), BPSW above). Every answer's evidence is checked again in BigInt (`answerHolds` in `lib/primeCheck.ts`) before it's shown. A BPSW pass is shown as almost certainly prime, and "Prove it" proves it with a proof slot, its certificate checked by `checkCertificate`. The number goes in `?n=`.
 
 ### Threads: splitting a window's base primes
 

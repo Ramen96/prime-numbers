@@ -8,6 +8,7 @@ import {
   describeAnswer,
   describePosition,
   ordinalSuffix,
+  powerOfTen,
   describeProofTime,
   estimatedProofSeconds,
   exactSquareRoot,
@@ -227,11 +228,23 @@ describe("a prime's place in the list", () => {
 
   it("estimates it from 10 million up, as the list does after a jump", () => {
     assert.equal(describePosition(10_000_019n), "It’s about the 664,920th prime: estimated with li(x), not counted.");
-    assert.match(describePosition(10n ** 100n + 267n), /^It’s about the 43,619,719,871,…,\d{3},\d{3},\d{3}(st|nd|rd|th) prime: estimated with li\(x\), not counted\.$/);
+    assert.equal(describePosition(10n ** 100n + 267n), "It’s roughly the 4.362 × 10⁹⁷th prime: estimated with li(x), not counted.");
+    // 10^17 + 3 is prime; li(10^17) ≈ 2.6 × 10^15, sixteen digits
+    assert.equal(describePosition(10n ** 17n + 3n), "It’s roughly the 2.624 × 10¹⁵th prime: estimated with li(x), not counted.");
+    assert.equal(describePosition(10n ** 16n + 61n), "It’s about the 279,238,344,248,560th prime: estimated with li(x), not counted.");
   });
 
   it("knows its ordinals", () => {
     for (const [count, suffix] of [[1n, "st"], [2n, "nd"], [3n, "rd"], [4n, "th"], [11n, "th"], [12n, "th"], [13n, "th"], [21n, "st"], [111n, "th"], [112n, "th"], [122n, "nd"], [1_003n, "rd"]] as const)
       assert.equal(ordinalSuffix(count), suffix, String(count));
+  });
+});
+
+describe("powerOfTen", () => {
+  it("rounds to 4 significant figures, carrying into the exponent", () => {
+    assert.equal(powerOfTen(1_126_262_619_405n), "1.126 × 10¹²");
+    assert.equal(powerOfTen(9_999_999_999_999_999n), "1.000 × 10¹⁶");
+    assert.equal(powerOfTen(10n ** 999_999n), "1.000 × 10⁹⁹⁹⁹⁹⁹");
+    assert.equal(powerOfTen(43_619_719_871_000n), "4.362 × 10¹³");
   });
 });

@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { pageMetadata } from "@/lib/pageMetadata";
 import { Article } from "../components/Article";
 import { CertificateCheck } from "../components/CertificateCheck";
@@ -48,6 +49,10 @@ export default function RandomPrimePage() {
       </p>
 
       <CertificateCheck />
+
+      <p>
+        <Link href="/is-prime">Got a number of your own? Check whether it’s prime →</Link>
+      </p>
     </Article>
   );
 }

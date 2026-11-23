@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, type ReactNode } from "react";
 import { describeRate } from "@/lib/formatRate";
 import { urlForJump } from "@/lib/jumpUrl";
@@ -225,6 +226,12 @@ export function InfinitePrimes({ intro, firstBatchFromServer }: Props) {
 
         <div className="desktop:col-start-1 desktop:row-start-3">
           <JumpForm onJump={handleJump} lastJump={lastJump} />
+          {/* desktop only: on phones every line here takes height from the list */}
+          <p className="hidden py-3 text-sm desktop:block">
+            <Link href="/is-prime" className="text-(--heat-text) underline underline-offset-2">
+              Is your number prime? Check it, with a proof →
+            </Link>
+          </p>
         </div>
 
         <section

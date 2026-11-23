@@ -297,6 +297,10 @@ const MEASURED_PROOF_SECONDS: readonly [digits: number, seconds: number][] = [
   [500, 112],
   [1000, 3334],
 ];
+// Measured in Chromium (2026-11-22, dev server, the checker's single-threaded
+// worker): 100 digits under 0.1 s; 200 digits 3.3 and 3.6 s (3× native); 300
+// digits 7.9 and 20 s (0.9× to 2.4×). Two primes of one size differ by more than
+// the browser does, so 2 is as good as any.
 const BROWSER_SLOWDOWN = 2;
 /** Past the last measurement, time grows about as digits^5 (step 7a: ×30 from 500 to 1,000 digits). */
 const PROOF_TIME_EXPONENT = 5;
@@ -369,5 +373,28 @@ export function describePosition(prime: bigint): string {
     return `It’s the ${formatWholeNumber(count)}${ordinalSuffix(count)} prime.`;
   }
   const estimate = estimatePrimeOrdinal(prime);
-  return `It’s about the ${shortNumber(estimate)}${ordinalSuffix(estimate)} prime: estimated with li(x), not counted.`;
+  if (estimate.toString().length < POWER_OF_TEN_FROM_DIGITS)
+    return `It’s about the ${formatWholeNumber(estimate)}${ordinalSuffix(estimate)} prime: estimated with li(x), not counted.`;
+  return `It’s roughly the ${powerOfTen(estimate)}th prime: estimated with li(x), not counted.`;
+}
+
+/**
+ * From this many digits an estimate is written as a power of ten: li(x) is off
+ * by about √x, so only the first half of its digits mean anything, and past
+ * about 15 the rest would be shown as if they did.
+ */
+const POWER_OF_TEN_FROM_DIGITS = 16;
+const SUPERSCRIPT_DIGITS = "⁰¹²³⁴⁵⁶⁷⁸⁹";
+
+/** “1.126 × 10³⁸”: `value` to 4 significant figures, any size. */
+export function powerOfTen(value: bigint): string {
+  const digits = value.toString();
+  let exponent = digits.length - 1;
+  let mantissa = (Number(digits.slice(0, 6)) / 10 ** (Math.min(digits.length, 6) - 1)).toFixed(3);
+  if (mantissa === "10.000") {
+    mantissa = "1.000";
+    exponent++;
+  }
+  const superscript = [...String(exponent)].map((digit) => SUPERSCRIPT_DIGITS[Number(digit)]).join("");
+  return `${mantissa} × 10${superscript}`;
 }

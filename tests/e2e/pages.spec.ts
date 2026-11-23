@@ -57,6 +57,8 @@ test("sitemap.xml lists every page", async ({ request }) => {
     "https://everyprimenumber.com",
     "https://everyprimenumber.com/how-it-works",
     "https://everyprimenumber.com/about",
+    "https://everyprimenumber.com/random-prime",
+    "https://everyprimenumber.com/is-prime",
   ]) {
     expect(sitemapXml).toContain(`<loc>${pageUrl}</loc>`);
   }
