@@ -12,6 +12,7 @@ import {
   describeProofTime,
   estimatedProofSeconds,
   exactSquareRoot,
+  listedCardAnswer,
   listedPageDescription,
   listedPageTitle,
   parseNumberToCheck,
@@ -272,5 +273,14 @@ describe("a listed number's page title and description", () => {
     );
     const long = listedPageDescription({ kind: "prime", value: 2n ** 61n - 1n, proof: proofBelowProvenBound(2n ** 61n - 1n) });
     assert.ok(long.length <= 160 && long.endsWith("…") && !long.endsWith(" …"), long);
+  });
+});
+
+describe("a listed number's link preview card", () => {
+  it("says the answer in a few words", () => {
+    assert.equal(listedCardAnswer({ kind: "composite", value: 91n, evidence: { by: "factor", factor: 7n } }), "Not prime: 7 × 13");
+    assert.equal(listedCardAnswer({ kind: "prime", value: 97n, proof: { by: "trial-division" } }), "Prime, with a proof");
+    assert.equal(listedCardAnswer({ kind: "neither", value: 1n }), "Neither prime nor composite");
+    assert.equal(listedCardAnswer({ kind: "composite", value: 3_317_044_064_679_887_385_961_981n, evidence: { by: "lucas" } }), "Not prime");
   });
 });

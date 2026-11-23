@@ -57,6 +57,25 @@ test.describe("a listed number's page, without JavaScript", () => {
 });
 
 test.describe("listed number pages", () => {
+  test("have a link preview card of their own, built ahead of time", async ({ page, request }) => {
+    await page.goto("/is-prime/91");
+    const image = await page.locator('meta[property="og:image"]').getAttribute("content");
+    expect(image).toMatch(/\/is-prime\/91\/opengraph-image$/);
+    expect(await page.locator('meta[name="twitter:image"]').getAttribute("content")).toBe(image);
+    expect(await page.locator('meta[property="og:image:alt"]').getAttribute("content")).toBe("Is it prime? 91. Not prime: 7 × 13.");
+
+    const card = await request.get("/is-prime/91/opengraph-image");
+    expect(card.status()).toBe(200);
+    expect(card.headers()["content-type"]).toBe("image/png");
+    const png = await card.body();
+    // a PNG's width and height are big-endian at bytes 16 and 20
+    expect([png.readUInt32BE(16), png.readUInt32BE(20)]).toEqual([1200, 630]);
+    expect((await request.get("/is-prime/1001/opengraph-image")).status()).toBe(404);
+
+    await page.goto("/is-prime");
+    expect(await page.locator('meta[property="og:image"]').getAttribute("content")).toMatch(/\/share-image\.png$/);
+  });
+
   test("exist only for listed numbers, and all of them are in the sitemap", async ({ request }) => {
     expect((await request.get("/is-prime/1001")).status()).toBe(404);
     expect((await request.get("/is-prime/91")).status()).toBe(200);

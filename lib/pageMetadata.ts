@@ -21,6 +21,8 @@ interface PageMetadataOptions {
   path: string;
   /** Ask search engines not to index the page (e.g. personal pages with no public content). */
   noIndex?: boolean;
+  /** A link preview image of the page's own (1200 × 630 PNG), instead of the site's share image. */
+  image?: { url: string; alt: string };
 }
 
 /**
@@ -28,7 +30,8 @@ interface PageMetadataOptions {
  * Next.js replaces (rather than merges) a parent layout's `openGraph` and
  * `twitter` objects, so each page sets them in full.
  */
-export function pageMetadata({ title, description, path, noIndex = false }: PageMetadataOptions): Metadata {
+export function pageMetadata({ title, description, path, noIndex = false, image }: PageMetadataOptions): Metadata {
+  const shareImage = image ? { ...SHARE_IMAGE, ...image } : SHARE_IMAGE;
   return {
     title,
     description,
@@ -40,8 +43,8 @@ export function pageMetadata({ title, description, path, noIndex = false }: Page
       siteName: SITE_NAME,
       title,
       description,
-      images: [SHARE_IMAGE],
+      images: [shareImage],
     },
-    twitter: { card: "summary_large_image", title, description, images: [SHARE_IMAGE] },
+    twitter: { card: "summary_large_image", title, description, images: [shareImage] },
   };
 }

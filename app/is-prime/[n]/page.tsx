@@ -3,7 +3,7 @@ import { shortNumber } from "@/lib/certificateCheck";
 import { listedAnswers } from "@/lib/listedAnswers";
 import { listedNeighbours, listedNumber, listedNumbers } from "@/lib/listedNumbers";
 import { pageMetadata } from "@/lib/pageMetadata";
-import { listedPageDescription, listedPageTitle } from "@/lib/primeCheck";
+import { listedCardAnswer, listedPageDescription, listedPageTitle } from "@/lib/primeCheck";
 import { Article } from "../../components/Article";
 import { PrimeCheckAnswer } from "../../components/PrimeCheckAnswer";
 import { PrimeChecker } from "../../components/PrimeChecker";
@@ -33,7 +33,13 @@ function answerFor(n: string) {
 export async function generateMetadata({ params }: Params) {
   const { n } = await params;
   const { answer } = answerFor(n);
-  return pageMetadata({ title: listedPageTitle(answer), description: listedPageDescription(answer), path: `/is-prime/${n}` });
+  return pageMetadata({
+    title: listedPageTitle(answer),
+    description: listedPageDescription(answer),
+    path: `/is-prime/${n}`,
+    // its own card (opengraph-image.tsx): set here, since a page's openGraph replaces the convention's image
+    image: { url: `/is-prime/${n}/opengraph-image`, alt: `Is it prime? ${shortNumber(answer.value)}. ${listedCardAnswer(answer)}.` },
+  });
 }
 
 export default async function ListedNumberPage({ params }: Params) {

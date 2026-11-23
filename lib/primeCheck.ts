@@ -429,3 +429,13 @@ export function listedPageDescription(answer: PrimeCheckAnswer): string {
   const cut = full.slice(0, DESCRIPTION_LENGTH - 1);
   return `${cut.slice(0, cut.lastIndexOf(" "))}…`;
 }
+
+/** A listed number's link preview card: the answer in a few words. “Not prime: 7 × 13” */
+export function listedCardAnswer(answer: PrimeCheckAnswer): string {
+  if (answer.kind === "prime") return "Prime, with a proof";
+  if (answer.kind === "neither") return "Neither prime nor composite";
+  if (answer.kind === "composite" && answer.evidence.by === "factor")
+    return `Not prime: ${shortNumber(answer.evidence.factor)} × ${shortNumber(answer.value / answer.evidence.factor)}`;
+  if (answer.kind === "composite" && answer.evidence.by === "square") return `Not prime: ${shortNumber(answer.evidence.root)}²`;
+  return "Not prime";
+}
