@@ -1,7 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-const INTRO_TEXT =
-  "Every Prime Number is an infinite list of prime numbers, calculated live in your browser.";
+const INTRO_TEXT = "An endless list of prime numbers, worked out by your own computer as you scroll.";
 
 // `request` fetches over HTTP without a browser, so nothing here comes from
 // JavaScript: it's exactly what a search engine crawler receives.
