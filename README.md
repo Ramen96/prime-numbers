@@ -74,6 +74,8 @@ Each prime is shown as soon as it and every prime before it are proven and check
 
 `/is-prime` checks any number in a worker of its own (`primeCheck.worker.ts`, the single-threaded build): a factor below 65,536 found in BigInt, then `check_number` (`wasm/number_check.c`: deterministic Miller–Rabin below a(13), BPSW above). Every answer's evidence is checked again in BigInt (`answerHolds` in `lib/primeCheck.ts`) before it's shown. A BPSW pass is shown as almost certainly prime, and "Prove it" proves it with a proof slot, its certificate checked by `checkCertificate`. The number goes in `?n=`.
 
+The numbers in `lib/listedNumbers.ts` (0 to 1,000, the years 1900 to 2100, and some notable ones) also have a page of their own, `/is-prime/<n>`, built ahead of time with the answer in the HTML. The build settles each one with `public/sieve.wasm` in Node and the same re-check (`lib/listedAnswers.ts`). A listed prime past a(13) is proven by its committed certificate in `data/listed-certificates/`, written by `npm run prove:listed` and checked by the build: a missing or wrong one fails it.
+
 ### Threads: splitting a window's base primes
 
 A batch of 500 primes almost always fits in one window, so giving each thread its own window would mostly sieve windows nobody asked for. Instead, all threads share one window, each crossing off with its own slice of the base primes (starting at a checkpoint), and their marks are merged.

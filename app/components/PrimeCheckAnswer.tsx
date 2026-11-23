@@ -34,6 +34,8 @@ interface Props {
   elapsedMs: number | null;
   /** A listed number's note (lib/listedNumbers.ts). */
   note?: string;
+  /** Rendered at build time (a listed number's page): its certificate was checked then, not in this browser. */
+  builtAhead?: boolean;
 }
 
 /**
@@ -42,8 +44,8 @@ interface Props {
  * the checker (PrimeChecker) and, rendered at build time, by a listed number's
  * own page (app/is-prime/[n]).
  */
-export function PrimeCheckAnswer({ answer, elapsedMs, note }: Props) {
-  const { headline, explanation } = describeAnswer(answer);
+export function PrimeCheckAnswer({ answer, elapsedMs, note, builtAhead = false }: Props) {
+  const { headline, explanation } = describeAnswer(answer, { builtAhead });
   const digits = answer.value.toString().length;
   const certificate = answer.kind === "prime" && answer.proof.by === "certificate" ? answer.proof.steps : null;
   return (

@@ -42,7 +42,7 @@ export default async function ListedNumberPage({ params }: Params) {
   const { previous, next } = listedNeighbours(value);
   return (
     <Article title={`Is ${shortNumber(value)} prime?`}>
-      <PrimeCheckAnswer answer={answer} elapsedMs={null} note={listedNumber(value)?.note} />
+      <PrimeCheckAnswer answer={answer} elapsedMs={null} note={listedNumber(value)?.note} builtAhead />
       <p className="text-sm text-muted">
         Settled when this page was built, the same way the checker below works, and checked again before it went in.
       </p>

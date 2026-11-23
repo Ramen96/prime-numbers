@@ -215,7 +215,7 @@ export interface AnswerText {
 }
 
 /** What the page says for an answer. Long numbers are shortened (the page shows them in full too). */
-export function describeAnswer(answer: PrimeCheckAnswer): AnswerText {
+export function describeAnswer(answer: PrimeCheckAnswer, { builtAhead = false }: { builtAhead?: boolean } = {}): AnswerText {
   const { value } = answer;
   const shown = shortNumber(value);
   switch (answer.kind) {
@@ -254,7 +254,12 @@ export function describeAnswer(answer: PrimeCheckAnswer): AnswerText {
           explanation: `Proven by Miller–Rabin with ${bases}. For a number this size that’s a proof, not a probability: the smallest composite that passes all of them is known (OEIS A014233), and ${shown} is below it.`,
         };
       }
-      return { headline, explanation: "Proven by the elliptic curve certificate below, which this page checked step by step." };
+      return {
+        headline,
+        explanation: builtAhead
+          ? "Proven by the elliptic curve certificate below, checked step by step when this page was built."
+          : "Proven by the elliptic curve certificate below, which this page checked step by step.",
+      };
     }
     case "composite": {
       const { evidence } = answer;

@@ -155,6 +155,12 @@ describe("describeAnswer", () => {
     assert.match(text({ kind: "composite", value: 4_295_229_443n, evidence: { by: "witness", base: 2 } }).explanation, /no factor below 65,536/);
     assert.equal(text({ kind: "probably-prime", value: 10n ** 20n + 39n }).headline, "100,000,000,000,000,000,039 is almost certainly prime.");
     assert.match(text({ kind: "probably-prime", value: 10n ** 30n + 57n }).explanation, /isn’t a proof yet/);
+    const certified = { kind: "prime", value: 10n ** 30n + 57n, proof: { by: "certificate", steps: [] } } as const;
+    assert.equal(text(certified).explanation, "Proven by the elliptic curve certificate below, which this page checked step by step.");
+    assert.equal(
+      describeAnswer(certified, { builtAhead: true }).explanation,
+      "Proven by the elliptic curve certificate below, checked step by step when this page was built.",
+    );
   });
 
   it("shortens a long number in the middle", () => {
