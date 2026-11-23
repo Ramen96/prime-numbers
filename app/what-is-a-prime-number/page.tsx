@@ -107,6 +107,9 @@ export default function WhatIsAPrimeNumberPage() {
         mathematician who is said to have offered it as an example of one. For 3 there’s a shortcut: add up the digits,
         and if the total divides by 3, so does the number. 5 + 1 = 6, so 3 divides 51.
       </p>
+      <p>
+        More shortcuts like this: <Link href="/how-to-tell-if-a-number-is-prime">How to tell if a number is prime →</Link>
+      </p>
 
       <h2 id="how-many-primes">How many prime numbers are there?</h2>
       <p>
@@ -120,6 +123,9 @@ export default function WhatIsAPrimeNumberPage() {
       <ul>
         <li>
           <Link href="/is-prime">Is your number prime? Check it →</Link>
+        </li>
+        <li>
+          <Link href="/how-to-tell-if-a-number-is-prime">How to tell if a number is prime →</Link>
         </li>
         <li>
           <Link href="/fun-facts">Fun facts about prime numbers →</Link>

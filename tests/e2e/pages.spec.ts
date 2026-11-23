@@ -96,6 +96,73 @@ test.describe("/what-is-a-prime-number", () => {
   });
 });
 
+test.describe("/how-to-tell-if-a-number-is-prime", () => {
+  test("is server-rendered with its headings, rules, figure, questions and the demo's first answer", async ({ request }) => {
+    const response = await request.get("/how-to-tell-if-a-number-is-prime");
+    expect(response.status()).toBe(200);
+    const html = await response.text();
+    expect(html).toMatch(/<h1[^>]*>How to tell if a number is prime<\/h1>/);
+    for (const heading of ["Quick checks first: divisibility rules", "Trial division, and why you can stop at the square root", "Try it", "Worked examples", "Why big numbers need something cleverer", "Common questions"])
+      expect(html).toContain(`>${heading}</h2>`);
+    for (const question of ["Is there a formula that gives every prime?", "Is a number ending in 1, 3, 7 or 9 always prime?", "Do I need to try dividing by 4, 6, 8 or 9?", "How are the largest known primes found?"])
+      expect(html).toContain(`>${question}</h3>`);
+    for (const example of ["358 ends in 8", "51: 5 + 1 = 6", "203: 20 − 2 × 3 = 14", "1,001: 1 − 0 + 0 − 1 = 0"]) expect(html).toContain(`<td>${example}</td>`);
+    expect(html).toContain('<title id="factor-pairs-title">The factor pairs of 36</title>');
+    // the demo is built with 97's answer
+    expect(html).toContain("97 ÷ 7 = 13, remainder 6");
+    expect(html).toMatch(/None of the primes up to √97 ≈ 9.8 divides it, so <a href="\/is-prime\/97">97<\/a> is prime./);
+  });
+
+  test("the demo divides by each prime up to the square root, and stops at a factor", async ({ page }) => {
+    await page.goto("/how-to-tell-if-a-number-is-prime");
+    const demo = page.getByTestId("trial-division-demo");
+    const field = demo.getByRole("textbox", { name: "A number from 2 to 10,000" });
+    const divide = demo.getByRole("button", { name: "Divide" });
+    const steps = demo.getByTestId("trial-division-steps").getByRole("listitem");
+    const result = demo.getByRole("status");
+    expect((await divide.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+    expect((await field.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+
+    await field.fill("91");
+    await divide.click();
+    await expect(steps).toHaveText(["91 ÷ 2 = 45, remainder 1", "91 ÷ 3 = 30, remainder 1", "91 ÷ 5 = 18, remainder 1", "91 ÷ 7 = 13, remainder 0"]);
+    await expect(steps.last()).toHaveAttribute("data-divides", "true");
+    await expect(result).toHaveText("7 divides 91 evenly: 91 = 7 × 13, so 91 isn’t prime.");
+
+    await field.fill("9,973"); // the largest prime below 10,000: all 25 primes below 100
+    await divide.click();
+    await expect(steps).toHaveCount(25);
+    await expect(result).toHaveText("None of the primes up to √9,973 ≈ 99.8 divides it, so 9,973 is prime.");
+    await expect(result.getByRole("link", { name: "9,973" })).toHaveAttribute("href", "/is-prime?n=9973"); // not a listed number
+
+    await field.fill("3");
+    await divide.click();
+    await expect(steps).toHaveCount(0);
+    await expect(result).toHaveText("No prime is at or below √3 ≈ 1.7, so there’s nothing to try: 3 is prime.");
+
+    await field.fill("-7");
+    await divide.click();
+    await expect(result).toHaveText("Type a whole number, like 97.");
+    await expect(field).toHaveAttribute("aria-invalid", "true");
+
+    await field.fill("10001");
+    await divide.click();
+    await expect(result).toHaveText("That’s more than this demo divides. Check it with the prime checker →");
+    await result.getByRole("link", { name: "Check it with the prime checker →" }).click();
+    await expect(page).toHaveURL(/\/is-prime\?n=10001$/);
+    await expect(page.getByTestId("prime-check-headline")).toHaveText("10,001 isn’t prime: it’s divisible by 73.", { timeout: 15_000 });
+  });
+
+  test("a listed number in the demo's answer opens its own page", async ({ page }) => {
+    await page.goto("/how-to-tell-if-a-number-is-prime");
+    const demo = page.getByTestId("trial-division-demo");
+    await demo.getByRole("textbox").fill("221");
+    await demo.getByRole("button", { name: "Divide" }).click();
+    await demo.getByRole("status").getByRole("link", { name: "221" }).click();
+    await expect(page).toHaveURL(/\/is-prime\/221$/);
+  });
+});
+
 test("sitemap.xml lists every page", async ({ request }) => {
   const sitemapXml = await (await request.get("/sitemap.xml")).text();
   for (const pageUrl of [
@@ -106,6 +173,7 @@ test("sitemap.xml lists every page", async ({ request }) => {
     "https://everyprimenumber.com/is-prime",
     "https://everyprimenumber.com/fun-facts",
     "https://everyprimenumber.com/what-is-a-prime-number",
+    "https://everyprimenumber.com/how-to-tell-if-a-number-is-prime",
   ]) {
     expect(sitemapXml).toContain(`<loc>${pageUrl}</loc>`);
   }

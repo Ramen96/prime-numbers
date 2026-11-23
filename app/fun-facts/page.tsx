@@ -197,6 +197,10 @@ export default function FunFactsPage() {
         Pomerance proved there are infinitely many.{" "}
         <Link href="/is-prime/561">Is 561 prime? →</Link>
       </p>
+      <p>
+        How the tests work, step by step:{" "}
+        <Link href="/how-to-tell-if-a-number-is-prime">How to tell if a number is prime →</Link>
+      </p>
 
       <h3 id="fools-13-tests">The number that fools 13 tests at once</h3>
       <p>
