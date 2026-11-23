@@ -9,6 +9,7 @@ export default function sitemap(): MetadataRoute.Sitemap {
     { url: `${SITE_URL}/about`, changeFrequency: "yearly", priority: 0.5 },
     { url: `${SITE_URL}/random-prime`, changeFrequency: "monthly", priority: 0.5 },
     { url: `${SITE_URL}/is-prime`, changeFrequency: "monthly", priority: 0.5 },
+    { url: `${SITE_URL}/fun-facts`, changeFrequency: "monthly", priority: 0.6 },
     // each listed number's own page: its answer never changes
     ...listedNumbers().map(({ value }) => ({ url: `${SITE_URL}/is-prime/${value}`, changeFrequency: "yearly" as const, priority: 0.3 })),
   ];

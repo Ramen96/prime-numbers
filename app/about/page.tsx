@@ -18,7 +18,7 @@ const FREQUENTLY_ASKED_QUESTIONS = [
       <>
         It calculates every prime, in order, for as long as you keep scrolling, and nothing is
         skipped or looked up from a list. But there are infinitely many primes (Euclid proved
-        it, see <Link href="/how-it-works#infinitely-many-primes">how it works</Link>), so
+        it, see <Link href="/fun-facts#infinitely-many-primes">the fun facts</Link>), so
         “every” is the joke: you’ll never reach the end.
       </>
     ),

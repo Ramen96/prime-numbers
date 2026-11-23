@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { pageMetadata } from "@/lib/pageMetadata";
 import { Article } from "../components/Article";
 import { PrimeChecker } from "../components/PrimeChecker";
@@ -38,6 +39,9 @@ export default function IsPrimePage() {
       <p>
         <strong>Sharing.</strong> The number goes in the address bar (up to 100,000 digits), so you can send someone
         the link to your answer.
+      </p>
+      <p>
+        <Link href="/fun-facts">Fun facts about prime numbers →</Link>
       </p>
     </Article>
   );

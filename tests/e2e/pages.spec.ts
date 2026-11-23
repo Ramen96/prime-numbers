@@ -15,14 +15,13 @@ test.describe("/how-it-works", () => {
       "How an infinite scroll can use constant memory",
       "Computing li(x) with Ramanujan’s series",
       "What is the largest number JavaScript can store exactly?",
-      "Fun facts about prime numbers",
     ]) {
       expect(html).toContain(`>${heading}</h2>`);
     }
     expect(html).toContain('<math display="block">');
     expect(html).toContain("<msqrt>");
-    expect(html).toMatch(/<svg[^>]*data-testid="ulam-spiral"/);
-    expect(html).toContain("<title id=\"ulam-spiral-title\">Ulam spiral of the numbers 1 to 14,641</title>");
+    // the fun facts moved to their own page; the old anchor lands on the link to it
+    expect(html).toMatch(/<p id="fun-facts"><a href="\/fun-facts">Fun facts about primes have a page of their own →<\/a><\/p>/);
     expect(html).toContain('<link rel="canonical" href="https://everyprimenumber.com/how-it-works"/>');
     expect(html).toContain('<meta property="og:url" content="https://everyprimenumber.com/how-it-works"/>');
   });
@@ -51,6 +50,25 @@ test.describe("/about", () => {
   });
 });
 
+test.describe("/fun-facts", () => {
+  test("is server-rendered with its groups, facts, MathML, Ulam spiral and links", async ({ request }) => {
+    const response = await request.get("/fun-facts");
+    expect(response.status()).toBe(200);
+    const html = await response.text();
+    expect(html).toMatch(/<h1[^>]*>Fun facts about prime numbers<\/h1>/);
+    expect(html).toContain("<title>Fun facts about prime numbers | Every Prime Number</title>");
+    for (const group of ["The basics", "How primes are spread out", "Numbers that fool primality tests", "Record primes, and primes at work", "Patterns", "On this site"])
+      expect(html).toContain(`>${group}</h2>`);
+    // the moved facts keep their anchors
+    for (const id of ["infinitely-many-primes", "ulam-spiral", "prime-number-theorem", "twin-primes", "goldbach-conjecture", "riemann-hypothesis", "mersenne-primes", "rsa-encryption", "why-1-isnt-prime", "prime-free-stretches", "carmichael-numbers", "hidden-in-the-list"])
+      expect(html).toContain(`<h3 id="${id}">`);
+    expect(html).toContain('<math display="block">');
+    expect(html).toMatch(/<svg[^>]*data-testid="ulam-spiral"/);
+    for (const href of ["/?jump=18361375334787046697", "/is-prime/561", "/is-prime/3317044064679887385961981", "/is-prime/147573952589676412927", "/random-prime", "/?jump=314159"])
+      expect(html).toContain(`href="${href.replace(/&/g, "&amp;")}"`);
+  });
+});
+
 test("sitemap.xml lists every page", async ({ request }) => {
   const sitemapXml = await (await request.get("/sitemap.xml")).text();
   for (const pageUrl of [
@@ -59,6 +77,7 @@ test("sitemap.xml lists every page", async ({ request }) => {
     "https://everyprimenumber.com/about",
     "https://everyprimenumber.com/random-prime",
     "https://everyprimenumber.com/is-prime",
+    "https://everyprimenumber.com/fun-facts",
   ]) {
     expect(sitemapXml).toContain(`<loc>${pageUrl}</loc>`);
   }

@@ -57,9 +57,9 @@ test.describe("layout", () => {
 
 test.describe("content pages on narrow screens", () => {
   for (const width of [320, 280]) {
-    test(`/how-it-works and /about never scroll sideways at ${width} px`, async ({ page }) => {
+    test(`/how-it-works, /about and /fun-facts never scroll sideways at ${width} px`, async ({ page }) => {
       await page.setViewportSize({ width, height: 800 });
-      for (const path of ["/how-it-works", "/about"]) {
+      for (const path of ["/how-it-works", "/about", "/fun-facts"]) {
         await page.goto(path);
         await expectNoHorizontalScrolling(page);
       }

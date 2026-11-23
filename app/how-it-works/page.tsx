@@ -7,13 +7,12 @@ import { JsonLd } from "../components/JsonLd";
 import { ScrollableTable } from "../components/ScrollableTable";
 import { SegmentDemo } from "../components/SegmentDemo";
 import { SieveDemo } from "../components/SieveDemo";
-import { UlamSpiral } from "../components/UlamSpiral";
 
 const PAGE_PATH = "/how-it-works";
 const PAGE_TITLE = "How It Works: Sieves, Prime Counting and Big Numbers | Every Prime Number";
 const PAGE_HEADLINE = "How Every Prime Number works";
 const PAGE_DESCRIPTION =
-  "How Every Prime Number finds primes live in your browser: the segmented sieve of Eratosthenes on several threads, a constant-memory infinite scroll, estimating π(x) with li(x), numbers bigger than 64 bits as 32-bit limbs, proving huge primes with elliptic curve certificates, and fun facts about primes.";
+  "How Every Prime Number finds primes live in your browser: the segmented sieve of Eratosthenes on several threads, a constant-memory infinite scroll, estimating π(x) with li(x), numbers bigger than 64 bits as 32-bit limbs, and proving huge primes with elliptic curve certificates.";
 
 export const metadata = pageMetadata({
   title: PAGE_TITLE,
@@ -44,7 +43,6 @@ const SECTIONS = [
   { id: "proving-huge-primes", title: "How to prove a huge number is prime: elliptic curve certificates" },
   { id: "displaying-long-primes", title: "How the list shows primes too long for the screen" },
   { id: "measuring-speed", title: "Why measuring speed in a browser is harder than it looks" },
-  { id: "fun-facts", title: "Fun facts about prime numbers" },
 ] as const;
 
 function SectionHeading({ id }: { id: (typeof SECTIONS)[number]["id"] }) {
@@ -945,166 +943,9 @@ for (size_t index = limb_count; index-- > 0;)
         prime takes instead, like “42 s per prime”, since a rate there would just read 0.
       </p>
 
-      {/* 14 */}
-      <SectionHeading id="fun-facts" />
-
-      <h3 id="infinitely-many-primes">Why are there infinitely many primes?</h3>
-      <p>
-        Euclid proved it around 300 BC, and the proof still fits on a napkin. Suppose there
-        were only finitely many primes, <em>p₁, p₂, …, pₖ</em>. Multiply them all together and
-        add 1:
-      </p>
-      <math display="block">
-        <mi>N</mi>
-        <mo>=</mo>
-        <msub>
-          <mi>p</mi>
-          <mn>1</mn>
-        </msub>
-        <msub>
-          <mi>p</mi>
-          <mn>2</mn>
-        </msub>
-        <mo>⋯</mo>
-        <msub>
-          <mi>p</mi>
-          <mi>k</mi>
-        </msub>
-        <mo>+</mo>
-        <mn>1</mn>
-      </math>
-      <ol>
-        <li>Dividing N by any of the primes on the list leaves a remainder of 1.</li>
-        <li>So no prime on the list divides N.</li>
-        <li>
-          But N is bigger than 1, so it has at least one prime factor (maybe N itself).
-        </li>
-        <li>That prime isn’t on the list, so the list wasn’t complete after all.</li>
-      </ol>
-      <p>
-        Any finite list of primes is missing one, so there are infinitely many. Which is why a
-        site called Every Prime Number is a joke with no punchline: you can scroll forever and
-        never finish.
-      </p>
-
-      <h3 id="ulam-spiral">What is the Ulam spiral?</h3>
-      <p>
-        In 1963, the mathematician Stanisław Ulam was doodling during a dull talk. He wrote the
-        numbers in a square spiral, starting from 1 in the middle, and circled the primes. They
-        didn’t scatter randomly. They clumped along diagonal lines:
-      </p>
-      <UlamSpiral />
-      <p>
-        Each diagonal in the spiral is the set of values of a quadratic like 4n² + 2n + 1. Some
-        quadratics can never be prime (for instance, if they’re always even), and others turn
-        out to hit primes unusually often. Euler’s n² + n + 41 is prime for every n from 0 to 39.
-        The lines are those prime-rich quadratics showing through.
-      </p>
-
-      <h3 id="prime-number-theorem">The prime number theorem in plain English</h3>
-      <p>
-        Primes get rarer as numbers grow, but in a very predictable way. Around a number{" "}
-        <em>x</em>, about one number in every ln <em>x</em> is prime: about one in 7 near a
-        thousand, one in 14 near a million, one in 28 near a trillion. That’s the prime number
-        theorem, proved in 1896 by Jacques Hadamard and Charles de la Vallée Poussin
-        independently, and it’s the reason the counter on the home page slows down: the further
-        you go, the more numbers the worker has to throw away for each prime it finds.
-      </p>
-
-      <h3 id="twin-primes">Prime gaps and twin primes</h3>
-      <p>
-        The gap between one prime and the next tends to grow, roughly like ln <em>x</em> on
-        average, but it keeps dropping back to 2. Pairs of primes that differ by 2, like 11 and
-        13 or 1,000,000,000,061 and 1,000,000,000,063, are <strong>twin primes</strong>. The{" "}
-        <strong>twin prime conjecture</strong> says there are infinitely many of them. Nobody
-        has proved it. The closest result: in 2013 Yitang Zhang proved that some gap of at most
-        70 million occurs infinitely often, and collaborative work soon brought that bound down
-        to 246.
-      </p>
-      <p>
-        <Link href="/?jump=1000000000061">See that twin prime pair just past a trillion →</Link>
-      </p>
-
-      <h3 id="goldbach-conjecture">Goldbach’s conjecture</h3>
-      <p>
-        Every even number greater than 2 seems to be the sum of two primes: 4 = 2 + 2, 28 = 5 +
-        23, 100 = 3 + 97. Christian Goldbach suggested it in a letter to Euler in 1742. It has
-        been checked by computer for every even number up to 4 × 10¹⁸, and it is still unproved.
-      </p>
-
-      <h3 id="riemann-hypothesis">The Riemann hypothesis and how far li(x) can be off</h3>
-      <p>
-        The site leans on li(x) being close to π(x). How close is it guaranteed to be? That
-        depends on the most famous unsolved problem in mathematics. If the Riemann hypothesis is
-        true, then for every x ≥ 2,657:
-      </p>
-      <math display="block">
-        <mo>|</mo>
-        <mi>π</mi>
-        <mo>(</mo>
-        <mi>x</mi>
-        <mo>)</mo>
-        <mo>−</mo>
-        <mi>li</mi>
-        <mo>(</mo>
-        <mi>x</mi>
-        <mo>)</mo>
-        <mo>|</mo>
-        <mo>&lt;</mo>
-        <mfrac>
-          <mrow>
-            <msqrt>
-              <mi>x</mi>
-            </msqrt>
-            <mi>ln</mi>
-            <mspace width="0.17em" />
-            <mi>x</mi>
-          </mrow>
-          <mrow>
-            <mn>8</mn>
-            <mi>π</mi>
-          </mrow>
-        </mfrac>
-      </math>
-      <p>
-        That bound is Lowell Schoenfeld’s (1976). At a trillion it allows an error of about 1.1
-        million; the real error is 38,263. Without the Riemann hypothesis, the proven bounds are
-        much weaker. One more twist: li(x) is bigger than π(x) for every x anyone has checked,
-        but J. E. Littlewood proved in 1914 that the two swap places infinitely often. The
-        first swap is somewhere far beyond anything a computer could reach by counting.
-      </p>
-
-      <h3 id="mersenne-primes">Mersenne primes and the largest known prime</h3>
-      <p>
-        A Mersenne number is one less than a power of two, <em>2ᵖ − 1</em>. For it to be prime,
-        p has to be prime, but that isn’t enough: 2¹¹ − 1 = 2047 = 23 × 89. Mersenne numbers
-        have a very fast special-purpose primality test (the Lucas–Lehmer test), so the largest
-        known primes are almost always Mersenne primes.
-      </p>
-      {/*
-        TODO(owner): verify the current record before adding specifics. Claim to check:
-          - the largest known prime (as 2^p − 1, i.e. the exponent p),
-          - its number of decimal digits,
-          - its discovery date,
-          - source: GIMPS, https://www.mersenne.org/
-        Then replace the general sentence below with the verified figures.
-      */}
-      <p>
-        The record holders are found by the Great Internet Mersenne Prime Search (GIMPS), a
-        volunteer project running since 1996 on thousands of ordinary computers. The current
-        record is listed at{" "}
-        <a href="https://www.mersenne.org/" rel="noopener noreferrer">
-          mersenne.org
-        </a>
-        . It would take this site a little longer to scroll there.
-      </p>
-
-      <h3 id="rsa-encryption">Where are prime numbers used? RSA encryption</h3>
-      <p>
-        Every time you load a page over HTTPS, primes may be doing the work. RSA encryption
-        builds a public key by multiplying two enormous secret primes. Multiplying them is
-        instant, but splitting the product back into its two primes is so slow for numbers that
-        size that, as far as anyone knows, no computer can do it in a useful amount of time.
+      {/* 14: the fun facts moved to their own page; the old anchor lands here */}
+      <p id="fun-facts">
+        <Link href="/fun-facts">Fun facts about primes have a page of their own →</Link>
       </p>
 
       <p className="mt-12 border-t border-rule pt-6 text-muted">
