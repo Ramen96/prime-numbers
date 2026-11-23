@@ -78,6 +78,31 @@ test.describe("random prime", () => {
     await expect(page.getByTestId("certificate-copy-status")).toHaveText("", { timeout: 5_000 });
   });
 
+  test("explains the certificate, puts its downloads before the steps, and leads to the checker", async ({ page, context }) => {
+    await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+    await page.goto("/random-prime");
+    await findRandomPrime(page, "30");
+    const certificate = page.getByTestId("certificate");
+    await expect(certificate.getByTestId("certificate-explanation")).toContainText(
+      "So you don’t have to trust the program that found them: the download has every number",
+    );
+    // the downloads come before the first step, so a long chain can't push them out of sight
+    const downloadBox = (await certificate.getByRole("link", { name: "Download as JSON" }).boundingBox())!;
+    const firstStepBox = (await certificate.getByTestId("certificate-steps").getByRole("listitem").first().boundingBox())!;
+    expect(downloadBox.y + downloadBox.height).toBeLessThan(firstStepBox.y);
+
+    const checkLink = certificate.getByRole("link", { name: "Check it yourself →" });
+    expect((await checkLink.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+    await page.getByRole("button", { name: "Copy as text" }).click();
+    await checkLink.click();
+    await expect(page).toHaveURL(/\/random-prime#check-a-certificate$/); // the same page: the prime stays
+    const box = page.getByRole("textbox", { name: "Certificate (JSON or text)" });
+    await expect(box).toBeInViewport();
+    await box.fill(await page.evaluate(() => navigator.clipboard.readText()));
+    await page.getByRole("button", { name: "Check certificate" }).click();
+    await expect(page.getByTestId("certificate-check-result")).toHaveAttribute("data-valid", "true");
+  });
+
   test("Copy as text says when the browser won’t allow it", async ({ page }) => {
     await page.addInitScript(() => {
       navigator.clipboard.writeText = () => Promise.reject(new DOMException("Write permission denied.", "NotAllowedError"));

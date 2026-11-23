@@ -33,7 +33,7 @@ export function CertificateCheck() {
     <section aria-labelledby="check-a-certificate" data-testid="certificate-check">
       <h2 id="check-a-certificate">Check a certificate</h2>
       <p>
-        Paste a certificate from this page, as JSON or text, or choose a downloaded file. It’s checked by the same
+        Paste a certificate from this site, as JSON or text, or choose a downloaded file. It’s checked by the same
         checker that checks every prime the site shows. That shows whether the certificate proves its number prime; it
         says nothing about where the certificate came from.
       </p>

@@ -82,7 +82,15 @@ test.describe("is it prime?", () => {
     const { prime: certified, steps } = certificateFromJson(await readFile((await download.path())!, "utf8"));
     expect(certified).toBe(prime);
     expect(checkCertificate(prime, steps)).toEqual({ valid: true });
+    await expect(page.getByRole("link", { name: "Check it yourself →" })).toHaveAttribute("href", "/random-prime#check-a-certificate");
     expect(errors).toEqual([]);
+  });
+
+  test("says a certificate can be checked again, and links to the checker", async ({ request }) => {
+    const html = await (await request.get("/is-prime")).text();
+    expect(html).toMatch(
+      /A prime’s certificate can be downloaded and checked again, with the(<!-- -->)? <a href="\/random-prime#check-a-certificate">certificate checker<\/a> or a program of your own./,
+    );
   });
 
   test("Give up pauses a proof, and Prove it carries on", async ({ page }) => {

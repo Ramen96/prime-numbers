@@ -29,7 +29,8 @@ export default function IsPrimePage() {
         <strong>How sure is the answer?</strong> Every answer comes with its evidence, checked again by separate,
         simpler code before it’s shown: a factor must divide the number, a witness must fail it, a certificate must
         pass the checker. That’s as certain as software gets: it can’t rule out a hardware fault, or the same mistake
-        made in both places.
+        made in both places. A prime’s certificate can be downloaded and checked again, with the{" "}
+        <Link href="/random-prime#check-a-certificate">certificate checker</Link> or a program of your own.
       </p>
       <p>
         <strong>How long does a proof take?</strong> On a laptop, under a second at 100 digits, a few seconds at 200,

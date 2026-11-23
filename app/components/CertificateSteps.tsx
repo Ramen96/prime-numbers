@@ -11,7 +11,12 @@ import { WrappableNumber } from "./WrappableNumber";
 interface Props {
   prime: bigint;
   steps: readonly CertificateStep[];
+  /** The certificate checker is further down this same page (/random-prime), so “Check it yourself” stays here. */
+  checkerOnThisPage?: boolean;
 }
+
+/** The certificate checker (CertificateCheck): one, on /random-prime. */
+const CERTIFICATE_CHECKER_PATH = "/random-prime#check-a-certificate";
 
 /** The downloads look like the site's buttons, not like links in the text. */
 const DOWNLOAD_LINK_STYLE = { color: "var(--foreground)", textDecoration: "none" } as const;
@@ -48,15 +53,59 @@ function useDownloadUrls(prime: bigint, steps: readonly CertificateStep[]) {
 }
 
 /**
- * A prime's elliptic curve certificate, as the checker accepted it: one
- * collapsible step per number in the chain, then the two downloads and a copy button.
+ * A prime's elliptic curve certificate, as the checker accepted it: what a
+ * certificate proves, in plain words; the two downloads, a copy button and a link
+ * to the checker, before the steps so a long chain can't push them out of sight;
+ * then the technical summary and one collapsible step per number in the chain.
  */
-export function CertificateSteps({ prime, steps }: Props) {
+export function CertificateSteps({ prime, steps, checkerOnThisPage = false }: Props) {
   const urls = useDownloadUrls(prime, steps);
   const last = steps.at(-1);
   return (
     <div className="mt-6" data-testid="certificate">
       <h2 className="mb-2 text-lg font-semibold">Its certificate</h2>
+      <p className="mb-3" data-testid="certificate-explanation">
+        This certificate is the proof, written out so you can check it. Each step shows that if a smaller number is
+        prime, so is a bigger one, and the chain ends at a number small enough to settle directly. Finding the steps
+        took the time; checking them is far quicker. So you don’t have to trust the program that found them: the
+        download has every number, and anyone can check it, with this site’s checker or a program of their own.
+      </p>
+      <p className="mb-4 flex flex-wrap items-center gap-2" data-testid="certificate-actions">
+        {urls && (
+          <>
+            <a
+              style={DOWNLOAD_LINK_STYLE}
+              href={urls.json}
+              download={certificateFileName(prime, "json")}
+              className={BUTTON_CLASS}
+            >
+              Download as JSON
+            </a>
+            <a
+              style={DOWNLOAD_LINK_STYLE}
+              href={urls.text}
+              download={certificateFileName(prime, "txt")}
+              className={BUTTON_CLASS}
+            >
+              Download as text
+            </a>
+            <CopyButton
+              label="Copy as text"
+              text={() => certificateText(prime, steps)}
+              copiedAnnouncement="Copied the certificate as text."
+              failedAnnouncement="Couldn’t copy: the browser didn’t allow it. Download it as text instead."
+              statusTestId="certificate-copy-status"
+            />
+          </>
+        )}
+        {/* a link, in the build's HTML too; inline-flex and h-11 make it a 44 px target like the buttons */}
+        <Link
+          href={checkerOnThisPage ? "#check-a-certificate" : CERTIFICATE_CHECKER_PATH}
+          className="inline-flex h-11 items-center px-1 text-sm text-(--heat-text) underline underline-offset-2"
+        >
+          Check it yourself →
+        </Link>
+      </p>
       <p className="mb-3 text-sm text-muted">
         Each step gives a number N, a curve y² = x³ + ax + b (mod N), a point (x, y) on it, and a prime q: the
         point times q is the point at infinity, and q is larger than (N<sup>¼</sup> + 1)², so if q is prime, N is
@@ -86,35 +135,6 @@ export function CertificateSteps({ prime, steps }: Props) {
           </li>
         ))}
       </ol>
-      <p className="mt-4 flex flex-wrap gap-2">
-        {urls && (
-          <>
-            <a
-              style={DOWNLOAD_LINK_STYLE}
-              href={urls.json}
-              download={certificateFileName(prime, "json")}
-              className={BUTTON_CLASS}
-            >
-              Download as JSON
-            </a>
-            <a
-              style={DOWNLOAD_LINK_STYLE}
-              href={urls.text}
-              download={certificateFileName(prime, "txt")}
-              className={BUTTON_CLASS}
-            >
-              Download as text
-            </a>
-            <CopyButton
-              label="Copy as text"
-              text={() => certificateText(prime, steps)}
-              copiedAnnouncement="Copied the certificate as text."
-              failedAnnouncement="Couldn’t copy: the browser didn’t allow it. Download it as text instead."
-              statusTestId="certificate-copy-status"
-            />
-          </>
-        )}
-      </p>
     </div>
   );
 }

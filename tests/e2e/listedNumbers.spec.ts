@@ -47,6 +47,12 @@ test.describe("a listed number's page, without JavaScript", () => {
     await expect(page.getByTestId("prime-check-note")).toContainText("Raphael Robinson");
   });
 
+  test("explains its certificate and links to the checker without JavaScript", async ({ request }) => {
+    const html = await (await request.get(`/is-prime/${MERSENNE_607}`)).text();
+    expect(html).toContain("This certificate is the proof, written out so you can check it.");
+    expect(html).toMatch(/<a[^>]*href="\/random-prime#check-a-certificate"[^>]*>Check it yourself →<\/a>/);
+  });
+
   test("links to its neighbours", async ({ page }) => {
     await page.goto("/is-prime/1000");
     const nearby = page.getByRole("navigation", { name: "Nearby numbers" });
@@ -57,6 +63,16 @@ test.describe("a listed number's page, without JavaScript", () => {
 });
 
 test.describe("listed number pages", () => {
+  test("a big prime's certificate has its downloads before the steps, and the checker a link away", async ({ page }) => {
+    await page.goto(`/is-prime/${MERSENNE_607}`);
+    const downloadBox = (await page.getByRole("link", { name: "Download as JSON" }).boundingBox())!;
+    const firstStepBox = (await page.getByTestId("certificate-steps").getByRole("listitem").first().boundingBox())!;
+    expect(downloadBox.y + downloadBox.height).toBeLessThan(firstStepBox.y);
+    await page.getByRole("link", { name: "Check it yourself →" }).click();
+    await expect(page).toHaveURL(/\/random-prime#check-a-certificate$/);
+    await expect(page.getByRole("textbox", { name: "Certificate (JSON or text)" })).toBeInViewport();
+  });
+
   test("have a link preview card of their own, built ahead of time", async ({ page, request }) => {
     await page.goto("/is-prime/91");
     const image = await page.locator('meta[property="og:image"]').getAttribute("content");

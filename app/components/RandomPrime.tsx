@@ -90,7 +90,7 @@ export function RandomPrime() {
             {formatWholeNumber(BigInt(state.digits))} digits, found and proven in{" "}
             {state.elapsedMs < 100 ? "under 0.1 s" : formatDuration(state.elapsedMs / 1000)}.
           </p>
-          <CertificateSteps prime={state.prime} steps={state.certificate} />
+          <CertificateSteps prime={state.prime} steps={state.certificate} checkerOnThisPage />
         </div>
       )}
     </section>
