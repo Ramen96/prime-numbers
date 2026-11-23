@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { LISTED_DESTINATIONS } from "@/lib/destinations";
 import { pageMetadata } from "@/lib/pageMetadata";
 import { Article } from "../components/Article";
 import { UlamSpiral } from "../components/UlamSpiral";
@@ -293,6 +294,28 @@ export default function FunFactsPage() {
         Scroll to 314,159, or to 359. And when proofs get slow, the list sometimes has something
         to say. <Link href="/?jump=314159">Go to 314,159 →</Link>
       </p>
+
+      <h3 id="places-to-visit">Places to visit in the list</h3>
+      <p>Jump straight to some of the list’s more interesting spots.</p>
+      <ul data-testid="places-to-visit">
+        {LISTED_DESTINATIONS.map((destination) => (
+          <li key={destination.label} className="[overflow-wrap:anywhere]">
+            {/* a note that starts with its own formula (“2⁶¹ − 1, a Mersenne prime…”) isn't given it twice */}
+            {destination.note.startsWith(destination.label) ? (
+              <>
+                <strong>{destination.label}</strong>
+                {destination.note.slice(destination.label.length)}
+              </>
+            ) : (
+              <>
+                <strong>{destination.label}</strong>: {destination.note}
+              </>
+            )}
+            {destination.slow && " (slow: every prime there is proven one at a time)"}{" "}
+            <Link href={`/?jump=${destination.value}`}>Go there →</Link>
+          </li>
+        ))}
+      </ul>
 
       <p className="mt-12 border-t border-rule pt-6 text-muted">
         Got a number of your own? <Link href="/is-prime">Check whether it’s prime</Link>, or{" "}

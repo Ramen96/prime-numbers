@@ -1,9 +1,15 @@
 $visible-for: 3s;
+// a jump that lands on one of lib/destinations.ts' places names it: long enough to read
+$visible-for-longer: 6s;
 $fade-duration: 0.6s;
 
 .fadingNotice {
   display: inline-block;
   animation: fade-out $fade-duration ease-in $visible-for forwards;
+}
+
+.fadingNoticeLonger {
+  animation-delay: $visible-for-longer;
 }
 
 @keyframes fade-out {
@@ -13,7 +19,8 @@ $fade-duration: 0.6s;
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .fadingNotice {
+  .fadingNotice,
+  .fadingNoticeLonger {
     animation-duration: 0s;
   }
 }

@@ -44,6 +44,8 @@ Three, not two, so that after every swap the view sits in the middle batch, far 
 
 Scrolling back up recomputes primes instead of storing them: memory stays flat forever and only compute grows, which is the point of the site. The exception is past 3.3 × 10^24, where a prime costs a proof: the worker keeps primes it has proven and checked (`lib/primes/provenPrimeCache.ts`, about 16 MB, oldest dropped first) so they aren't proven again. The list is virtualized with a fixed row height, so a prime too long for its row is shortened in the middle at comma groups and opens in full on tap.
 
+A jump can go anywhere (`?jump=` links are shareable), and `lib/destinations.ts` lists some places worth a visit: /fun-facts shows them, and “Take me somewhere interesting” picks one at random, never one where every prime takes seconds to prove.
+
 ### A memory budget, and partial sieving past it
 
 The budget is a quarter of the device's memory where the browser reports it. A proven lower bound on π(x) (Dusart) decides up front whether a jump's base primes could possibly fit; if so, their storage is reserved from an li(x) estimate, in one allocation. If an allocation still fails part way, the base primes roll back to exactly how they were.
