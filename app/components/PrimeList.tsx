@@ -115,6 +115,9 @@ function sameRowSpace(a: RowSpace | null, b: RowSpace): boolean {
   );
 }
 
+/** “61” for a 61-digit prime: said after a shortened prime's text, as the popup's heading says it. */
+const digitCountOf = (prime: bigint) => formatWholeNumber(BigInt(String(prime).length));
+
 /** Converts a row position on screen to a position in the prime buffer. */
 function screenRowToPrimeIndex(screenRow: number): number {
   return screenRow - HEADER_ROWS;
@@ -373,25 +376,15 @@ export function PrimeList({
         shownOrdinal = fitted.label;
       }
       const shortened = shownPrime.shortened || shownOrdinal.shortened;
-      const labelId = `prime-label-${prime}`;
+      // Estimated positions look like exact ones: the “≈” and the banner above the list say they're estimates.
+      const shownLabel = `${labelPrefix}${shownOrdinal.text}`;
       const label = (
-        <span
-          id={labelId}
-          data-testid="prime-label"
-          className={`order-2 ${LABEL_FONT_CLASSES} text-muted sm:order-1 ${labelsAreEstimated ? "opacity-70" : ""}`}
-        >
+        <span data-testid="prime-label" className={`order-2 ${LABEL_FONT_CLASSES} text-muted sm:order-1`}>
           {shownOrdinal.shortened ? (
-            // shortened on screen; screen readers get it whole
-            <>
-              <span aria-hidden className={SHORTENED_NUMBER_HINT_CLASSES}>
-                {labelPrefix}
-                {shownOrdinal.text}
-              </span>
-              <span className="sr-only">
-                {labelPrefix}
-                {ordinal}
-              </span>
-            </>
+            <span className={SHORTENED_NUMBER_HINT_CLASSES}>
+              {labelPrefix}
+              {shownOrdinal.text}
+            </span>
           ) : (
             `${labelPrefix}${ordinal}`
           )}
@@ -417,23 +410,23 @@ export function PrimeList({
           {shortened ? (
             // The prime and its label together are the button, so the whole
             // row beside the star (44px tall, like the star) opens it in full,
-            // wherever the label sits. The whole prime is the accessible name.
+            // wherever the label sits. Its name is what it shows, prime then
+            // label (WCAG 2.5.3, Label in Name), and how many digits the prime
+            // has; the whole prime and position are in the popup it opens.
             <button
               type="button"
-              aria-label={formattedPrime}
-              aria-describedby={labelId}
+              aria-label={`${shownPrime.text}, ${shownLabel}, ${digitCountOf(prime)} digits`}
               aria-haspopup="dialog"
               onClick={(event) => onShowFullPrime(prime, event.currentTarget, position)}
               className={SHORTENED_ROW_BUTTON_CLASSES}
             >
               <span className={PRIME_AND_LABEL_CLASSES}>
-                {label}
                 <span
-                  aria-hidden
                   className={`order-1 ${PRIME_FONT_CLASSES} sm:order-2 ${shownPrime.shortened ? SHORTENED_NUMBER_HINT_CLASSES : ""}`}
                 >
                   {shownPrime.text}
                 </span>
+                {label}
               </span>
             </button>
           ) : (

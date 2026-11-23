@@ -24,7 +24,9 @@ export const SHORTENED_NUMBER_CLASSES = `${SHORTENED_NUMBER_HINT_CLASSES} relati
  * A number on one line in whatever width its container gives it, shortened
  * in the middle if it doesn't fit (see lib/shortenNumber.ts). A shortened
  * number is a button that opens the full one (`onShowFull`); one that fits is
- * plain text. Its accessible name is always the whole number. For a handful
+ * plain text. A shortened one is named by what it shows and its digit count
+ * (“1,000,…,007, 61 digits”: WCAG 2.5.3, Label in Name); the whole number is in
+ * the popup, for everyone. For a handful
  * of numbers, such as the stats under the counter: each measures its own
  * width. (The prime list measures once for all its rows instead.)
  */
@@ -73,7 +75,7 @@ export function FittedNumber({
       {fitted.shortened && value !== null ? (
         <button
           type="button"
-          aria-label={formatted}
+          aria-label={`${fitted.text}, ${formatWholeNumber(BigInt(String(value).length))} digits`}
           aria-haspopup="dialog"
           onClick={(event) => onShowFull(value, event.currentTarget)}
           className={SHORTENED_NUMBER_CLASSES}

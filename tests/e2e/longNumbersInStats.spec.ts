@@ -49,8 +49,10 @@ test.describe("long numbers in the stats", () => {
     const whole = groupedByThrees(MILLION_DIGIT_RECORD);
     const button = statValue(page, "biggest visited").getByRole("button");
     await expect(button).toBeVisible();
-    expect(await button.getAttribute("aria-label"), "named with the whole number").toBe(whole);
-    const [front, back] = (await button.innerText()).split(ELLIPSIS);
+    const shown = await button.innerText();
+    // named by what it shows and its digit count (WCAG 2.5.3); the whole number is in the popup
+    await expect(button).toHaveAccessibleName(`${shown}, 1,000,002 digits`);
+    const [front, back] = shown.split(ELLIPSIS);
     expect(whole.startsWith(front) && whole.endsWith(back), "shortened to the whole number's ends").toBe(true);
 
     await button.click();
@@ -58,7 +60,7 @@ test.describe("long numbers in the stats", () => {
     expect(pageErrors).toEqual([]);
   });
 
-  test("are shortened in the middle, with the full number as their name and nothing overflowing", async ({ page }) => {
+  test("are shortened in the middle, named by what they show and their digit count, with nothing overflowing", async ({ page }) => {
     expect(SIXTY_DIGIT_RECORD).toHaveLength(60);
     expect(THOUSAND_DIGIT_RECORD).toHaveLength(1000);
     await seedRecords(page, { furthestScroll: SIXTY_DIGIT_RECORD, biggestPrimeVisited: THOUSAND_DIGIT_RECORD });
@@ -69,11 +71,13 @@ test.describe("long numbers in the stats", () => {
       ["biggest visited", THOUSAND_DIGIT_RECORD],
     ] as const) {
       const whole = formatted(record);
-      const button = statValue(page, label).getByRole("button", { name: whole, exact: true });
-      await expect(button, `${label} is a button named with the whole number`).toBeVisible();
+      const button = statValue(page, label).getByRole("button");
+      await expect(button, `${label} is a button`).toBeVisible();
       await expect(button).toHaveAttribute("aria-haspopup", "dialog");
 
       const shownText = await button.innerText();
+      // what it shows, then how many digits (WCAG 2.5.3); the whole number is in the popup
+      await expect(button).toHaveAccessibleName(`${shownText}, ${record.length.toLocaleString("en-US")} digits`);
       const [front, back] = shownText.split(ELLIPSIS);
       expect(shownText.split(ELLIPSIS), `${label}: one ellipsis in ${shownText}`).toHaveLength(2);
       expect(front.endsWith(",") && back.startsWith(","), `${label}: cut at commas`).toBe(true);

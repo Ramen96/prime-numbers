@@ -34,12 +34,12 @@ async function firstShortenedPrime(page: Page, primeListPage: PrimeListPage) {
   expect(display, "a shortened prime on screen").toBeDefined();
   const button = primeListPage.primeList
     .locator(`[data-testid="prime-row"][data-prime="${display.prime}"]`)
-    .getByRole("button", { name: formatted(display.prime), exact: true });
+    .locator('button[aria-haspopup="dialog"]');
   return { prime: display.prime, button };
 }
 
 test.describe("long primes in the list", () => {
-  test("are shortened in the middle, keeping their first and last groups and the full number as their name", async ({
+  test("are shortened in the middle, keeping their first and last groups, and named by what they show", async ({
     page,
   }) => {
     const primeListPage = await openNearTwoToThe64(page);
@@ -48,7 +48,8 @@ test.describe("long primes in the list", () => {
     for (const display of displays) {
       const whole = formatted(display.prime);
       expect(display.shortened, `${whole} is shortened`).toBe(true);
-      expect(display.accessibleName).toBe(whole);
+      // what it shows, its position label, and how many digits (WCAG 2.5.3): the whole number is in the popup
+      expect(display.accessibleName).toMatch(new RegExp(`^${display.shownText}, (≈ )?#[\\d,]+, ${display.prime.length} digits$`));
       const [front, back] = display.shownText.split(ELLIPSIS);
       expect(display.shownText.split(ELLIPSIS), `${display.shownText}: one ellipsis`).toHaveLength(2);
       expect(front.endsWith(","), `${display.shownText}: cut at a comma`).toBe(true);
@@ -98,7 +99,7 @@ test.describe("long primes in the list", () => {
           return heightPx;
         };
         return {
-          prime: primeButton.getAttribute("aria-label"),
+          prime: primeButton.textContent,
           primeButtonHeightPx: primeButton.getBoundingClientRect().height,
           primeReachesPx: rowHeightReaching(primeButton),
           starReachesPx: rowHeightReaching(starButton),

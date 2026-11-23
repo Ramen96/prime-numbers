@@ -2,6 +2,7 @@
 
 import {
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
   useSyncExternalStore,
@@ -10,11 +11,13 @@ import {
 import Link from "next/link";
 import { destinationAt, pickDestination } from "@/lib/destinations";
 import { formatWholeNumber } from "@/lib/formatNumber";
+import { fitNumber, type GlyphWidths } from "@/lib/shortenNumber";
 import { jumpParameterFrom } from "@/lib/jumpUrl";
 import { parseJumpTarget } from "@/lib/primes/parseJumpTarget";
 import type { JumpResult } from "@/lib/primes/usePrimeBuffer";
 import { CompassIcon } from "./CompassIcon";
 import fadingNotice from "./FadingNotice.module.scss";
+import { GlyphRuler, readGlyphWidths } from "./GlyphRuler";
 
 const SURPRISE_LABEL = "Take me somewhere interesting";
 
@@ -27,6 +30,75 @@ const subscribeToDesktopMedia = (onChange: () => void) => {
 };
 const readIsDesktop = () => window.matchMedia(DESKTOP_MEDIA_QUERY).matches;
 const readServerIsDesktop = () => false;
+
+/**
+ * What the jump line has room for, measured from invisible copies of its parts
+ * (and again when its width changes): far out, the numbers in “Jumped to …
+ * (first prime ≥ …)” are too long for any line, so each is shortened in the
+ * middle to fit one (lib/shortenNumber.ts), like the list's primes. Plain text,
+ * not buttons: the line fades, the prime found is the list's first row (which
+ * opens in full), and the number asked for is in the box.
+ */
+interface JumpLineSpace {
+  lineWidthPx: number;
+  primeGlyphs: GlyphWidths;
+  requestedGlyphs: GlyphWidths;
+  /** “Jumped to ”, before the prime. */
+  jumpedToPx: number;
+  /** “(first prime ≥ ” and “)”, around the number asked for. */
+  firstPrimeAtLeastPx: number;
+}
+
+function useJumpLineSpace() {
+  const lineRef = useRef<HTMLParagraphElement>(null);
+  const primeRulerRef = useRef<HTMLSpanElement>(null);
+  const requestedRulerRef = useRef<HTMLSpanElement>(null);
+  const jumpedToRef = useRef<HTMLSpanElement>(null);
+  const firstPrimeAtLeastRef = useRef<HTMLSpanElement>(null);
+  const [space, setSpace] = useState<JumpLineSpace | null>(null);
+
+  useLayoutEffect(() => {
+    const line = lineRef.current;
+    if (!line) return;
+    const measure = () => {
+      const primeGlyphs = readGlyphWidths(primeRulerRef.current);
+      const requestedGlyphs = readGlyphWidths(requestedRulerRef.current);
+      if (!primeGlyphs || !requestedGlyphs) return;
+      const next = {
+        lineWidthPx: line.clientWidth,
+        primeGlyphs,
+        requestedGlyphs,
+        jumpedToPx: jumpedToRef.current?.getBoundingClientRect().width ?? 0,
+        firstPrimeAtLeastPx: firstPrimeAtLeastRef.current?.getBoundingClientRect().width ?? 0,
+      };
+      setSpace((previous) =>
+        previous && previous.lineWidthPx === next.lineWidthPx && previous.primeGlyphs.digit === next.primeGlyphs.digit
+          ? previous
+          : next,
+      );
+    };
+    measure();
+    const resizeObserver = new ResizeObserver(measure);
+    resizeObserver.observe(line);
+    document.fonts?.ready.then(measure);
+    return () => resizeObserver.disconnect();
+  }, []);
+
+  const rulers = (
+    <span aria-hidden className="pointer-events-none invisible absolute top-0 left-0 w-0 overflow-hidden whitespace-pre">
+      <span ref={primeRulerRef} className="font-mono">
+        <GlyphRuler />
+      </span>
+      <span ref={requestedRulerRef}>
+        <GlyphRuler />
+      </span>
+      {/* generated content, not text, so nothing on the page reads or finds them */}
+      <span ref={jumpedToRef} data-text="Jumped to " className="absolute before:content-[attr(data-text)]" />
+      <span ref={firstPrimeAtLeastRef} data-text=" (first prime ≥ )" className="absolute before:content-[attr(data-text)]" />
+    </span>
+  );
+  return { lineRef, rulers, space };
+}
 
 interface Props {
   /** Jumps, and updates the URL so it can be shared. */
@@ -77,6 +149,15 @@ export function JumpForm({ onJump, lastJump }: Props) {
   };
   const landedOn = lastJump ? destinationAt(lastJump.requestedNumber) : undefined;
 
+  const { lineRef, rulers, space } = useJumpLineSpace();
+  const shownFirstPrime = lastJump ? formatWholeNumber(lastJump.firstPrimeFound) : "";
+  const shownRequested = lastJump ? formatWholeNumber(lastJump.requestedNumber) : "";
+  // each on a line of its own if it must be: the line wraps between the words around them
+  const fittedFirstPrime = space ? fitNumber(shownFirstPrime, space.lineWidthPx - space.jumpedToPx, space.primeGlyphs).text : shownFirstPrime;
+  const fittedRequested = space
+    ? fitNumber(shownRequested, space.lineWidthPx - space.firstPrimeAtLeastPx, space.requestedGlyphs).text
+    : shownRequested;
+
   const handleSubmit = (event: SubmitEvent) => {
     event.preventDefault();
     setUserInput(shownInput);
@@ -126,22 +207,28 @@ export function JumpForm({ onJump, lastJump }: Props) {
         </button>
       </div>
 
-      <p id="jump-feedback" aria-live="polite" className="mt-1.5 min-h-5 text-sm">
-        {shownError ? (
-          <span className="text-(--hot-text)">{shownError}</span>
-        ) : lastJump ? (
-          // Keyed by generation so the fade-out restarts on every jump.
-          <span key={lastJump.generation} className={`${fadingNotice.fadingNotice} ${landedOn ? fadingNotice.fadingNoticeLonger : ""} text-muted`}>
-            Jumped to{" "}
-            <span className="font-mono text-foreground">
-              {formatWholeNumber(lastJump.firstPrimeFound)}
+      {/* the rulers beside the line, in its font, so their text never joins what the line says */}
+      <div className="relative text-sm">
+        {rulers}
+        <p ref={lineRef} id="jump-feedback" aria-live="polite" className="mt-1.5 min-h-5 text-sm">
+          {shownError ? (
+            <span className="text-(--hot-text)">{shownError}</span>
+          ) : lastJump ? (
+            // Keyed by generation so the fade-out restarts on every jump.
+            <span key={lastJump.generation} className={`${fadingNotice.fadingNotice} ${landedOn ? fadingNotice.fadingNoticeLonger : ""} text-muted`}>
+              Jumped to{" "}
+              <span className="font-mono whitespace-nowrap text-foreground">{fittedFirstPrime}</span>
+              {lastJump.firstPrimeFound !== lastJump.requestedNumber && (
+                <>
+                  {" (first prime ≥ "}
+                  <span className="whitespace-nowrap">{fittedRequested}</span>)
+                </>
+              )}
+              {landedOn && `: ${landedOn.name}.`}
             </span>
-            {lastJump.firstPrimeFound !== lastJump.requestedNumber &&
-              ` (first prime ≥ ${formatWholeNumber(lastJump.requestedNumber)})`}
-            {landedOn && `: ${landedOn.name}.`}
-          </span>
-        ) : null}
-      </p>
+          ) : null}
+        </p>
+      </div>
 
       <div className="mt-2 hidden flex-wrap items-center gap-x-4 gap-y-1 desktop:flex">
         <button
