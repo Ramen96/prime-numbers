@@ -1,11 +1,13 @@
 "use client";
 
-import { useEffect, useState, type SubmitEvent } from "react";
+import Link from "next/link";
+import { useEffect, useMemo, useState, type SubmitEvent } from "react";
 import { shortNumber } from "@/lib/certificateCheck";
 import { formatWholeNumber } from "@/lib/formatNumber";
 import { formatDuration } from "@/lib/formatRate";
 import {
   describeAnswer,
+  describePosition,
   describeProofTime,
   estimatedProofSeconds,
   HUGE_PROOF_SECONDS,
@@ -13,8 +15,12 @@ import {
   type PrimeCheckAnswer,
 } from "@/lib/primeCheck";
 import { usePrimeCheck, type PrimeCheckState } from "@/lib/primes/usePrimeCheck";
+import { isFavorite } from "@/lib/personalData";
 import { describeProving } from "@/lib/provingStatus";
+import { toggleFavorite, usePersonalData } from "@/lib/usePersonalData";
 import { CertificateSteps } from "./CertificateSteps";
+import { CopyButton } from "./CopyButton";
+import { StarIcon } from "./StarIcon";
 import { WrappableNumber } from "./WrappableNumber";
 
 /** Longer numbers aren't put in the address bar (browsers cap URLs at a few MB). */
@@ -28,6 +34,11 @@ const SHOW_CHECKING_TIME_AFTER_MS = 1000;
 
 /** The answer's headline: the size of text-xl, no article heading margin, and a long number may wrap (it has no spaces). */
 const HEADLINE_STYLE = { margin: 0, fontSize: "1.25rem", lineHeight: 1.4, overflowWrap: "anywhere" } as const;
+
+/** The answer's actions: buttons and a link that looks like one. */
+const ACTION_CLASS =
+  "inline-flex h-11 items-center rounded-md border border-rule px-4 text-sm font-medium hover:border-foreground focus-visible:outline-2 focus-visible:outline-(--heat-text)";
+const ACTION_LINK_STYLE = { color: "var(--foreground)", textDecoration: "none" } as const;
 
 const BUTTON_CLASS =
   "h-11 rounded-md border border-rule px-4 text-sm font-medium hover:border-foreground focus-visible:outline-2 focus-visible:outline-(--heat-text) disabled:text-muted";
@@ -107,14 +118,71 @@ function Answer({ answer, elapsedMs }: { answer: PrimeCheckAnswer; elapsedMs: nu
         </details>
       )}
       <p className="mt-2">{explanation}</p>
+      {answer.kind === "prime" && <Position prime={answer.value} />}
       {elapsedMs !== null && (
         <p className="mt-2 text-sm text-muted">
           {formatWholeNumber(BigInt(digits))} {digits === 1 ? "digit" : "digits"}, {certificate ? "proven" : "checked"} in{" "}
           {elapsedMs < 100 ? "under 0.1 s" : formatDuration(elapsedMs / 1000)}.
         </p>
       )}
+      <AnswerActions answer={answer} />
       {certificate && <CertificateSteps prime={answer.value} steps={certificate} />}
     </div>
+  );
+}
+
+/** Its place in the list. Counting can sieve up to 10 million, so it's done once per prime, not per render. */
+function Position({ prime }: { prime: bigint }) {
+  const position = useMemo(() => describePosition(prime), [prime]);
+  return (
+    <p className="mt-2" data-testid="prime-check-position">
+      {position}
+    </p>
+  );
+}
+
+/** Favorite (a proven prime), Copy number, and the list at this number. */
+function AnswerActions({ answer }: { answer: PrimeCheckAnswer }) {
+  const { data, storageIsFull } = usePersonalData();
+  const { value, kind } = answer;
+  const shown = shortNumber(value);
+  const favorite = kind === "prime" && isFavorite(data, value);
+  const inList = value >= 2n && value.toString().length <= MAX_DIGITS_IN_URL;
+  return (
+    <>
+      <div className="mt-3 flex flex-wrap gap-2" data-testid="prime-check-actions">
+        {kind === "prime" && (
+          <button
+            type="button"
+            aria-pressed={favorite}
+            aria-label={`Favorite ${shown}`}
+            onClick={() => toggleFavorite(value)}
+            className={`${ACTION_CLASS} gap-2 aria-pressed:text-(--heat-text)`}
+          >
+            <StarIcon filled={favorite} />
+            <span aria-hidden="true">Favorite</span>
+          </button>
+        )}
+        <CopyButton
+          label="Copy number"
+          text={() => value.toString()}
+          copiedAnnouncement={`Copied ${shown}.`}
+          failedAnnouncement="Couldn’t copy: the browser didn’t allow it."
+          statusTestId="prime-check-copy-status"
+        />
+        {inList && (
+          // inline, to override the article's link style (.prose a), which outranks utilities
+          <Link href={`/?jump=${value}`} style={ACTION_LINK_STYLE} className={ACTION_CLASS}>
+            {kind === "composite" || kind === "neither" ? "See the primes after it" : "Find it in the list"}
+          </Link>
+        )}
+      </div>
+      {storageIsFull && (
+        <p role="status" className="mt-1 text-xs text-(--hot-text)">
+          Your browser’s storage is full, so favorites aren’t being saved.
+        </p>
+      )}
+    </>
   );
 }
 

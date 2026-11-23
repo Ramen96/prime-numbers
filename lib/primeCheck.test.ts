@@ -6,6 +6,8 @@ import {
   answerHolds,
   NUMBER_CHECK_VERDICT,
   describeAnswer,
+  describePosition,
+  ordinalSuffix,
   describeProofTime,
   estimatedProofSeconds,
   exactSquareRoot,
@@ -208,5 +210,28 @@ describe("the proof time estimate", () => {
     assert.equal(say(10_000_000), "more than a trillion years");
     assert.equal(describeProofTime(59.4), "about 59 seconds");
     assert.equal(describeProofTime(3 * 3600 * 24 * 365.25 * 1e6), "about 3 million years");
+  });
+});
+
+describe("a prime's place in the list", () => {
+  it("counts it below 10 million, with the right ordinal", () => {
+    assert.equal(describePosition(2n), "It’s the 1st prime.");
+    assert.equal(describePosition(3n), "It’s the 2nd prime.");
+    assert.equal(describePosition(5n), "It’s the 3rd prime.");
+    assert.equal(describePosition(31n), "It’s the 11th prime.");
+    assert.equal(describePosition(1_000_003n), "It’s the 78,499th prime.");
+    const started = performance.now();
+    assert.equal(describePosition(9_999_991n), "It’s the 664,579th prime.");
+    assert.ok(performance.now() - started < 500, `${performance.now() - started} ms`);
+  });
+
+  it("estimates it from 10 million up, as the list does after a jump", () => {
+    assert.equal(describePosition(10_000_019n), "It’s about the 664,920th prime: estimated with li(x), not counted.");
+    assert.match(describePosition(10n ** 100n + 267n), /^It’s about the 43,619,719,871,…,\d{3},\d{3},\d{3}(st|nd|rd|th) prime: estimated with li\(x\), not counted\.$/);
+  });
+
+  it("knows its ordinals", () => {
+    for (const [count, suffix] of [[1n, "st"], [2n, "nd"], [3n, "rd"], [4n, "th"], [11n, "th"], [12n, "th"], [13n, "th"], [21n, "st"], [111n, "th"], [112n, "th"], [122n, "nd"], [1_003n, "rd"]] as const)
+      assert.equal(ordinalSuffix(count), suffix, String(count));
   });
 });

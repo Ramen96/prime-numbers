@@ -1,10 +1,11 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { certificateFileName, certificateJson, certificateText } from "@/lib/certificateExport";
 import { formatWholeNumber } from "@/lib/formatNumber";
 import type { CertificateStep } from "@/lib/primes/primalityCertificate";
+import { CopyButton } from "./CopyButton";
 import { WrappableNumber } from "./WrappableNumber";
 
 interface Props {
@@ -16,9 +17,6 @@ interface Props {
 const DOWNLOAD_LINK_STYLE = { color: "var(--foreground)", textDecoration: "none" } as const;
 const BUTTON_CLASS =
   "inline-flex h-11 items-center rounded-md border border-rule px-4 text-sm font-medium hover:border-foreground focus-visible:outline-2 focus-visible:outline-(--heat-text)";
-
-/** How long “Copied” (or “Couldn’t copy”) shows before the button reads “Copy as text” again. */
-const COPY_FEEDBACK_MS = 2_000;
 
 const digitsOf = (value: bigint) => formatWholeNumber(BigInt(value.toString().length));
 
@@ -47,55 +45,6 @@ function useDownloadUrls(prime: bigint, steps: readonly CertificateStep[]) {
     };
   }, [prime, steps]);
   return urls;
-}
-
-type CopyOutcome = "idle" | "copied" | "failed";
-
-const COPY_LABELS: Record<CopyOutcome, string> = { idle: "Copy as text", copied: "Copied", failed: "Couldn’t copy" };
-const COPY_ANNOUNCEMENTS: Record<CopyOutcome, string> = {
-  idle: "",
-  copied: "Copied the certificate as text.",
-  failed: "Couldn’t copy: the browser didn’t allow it. Download it as text instead.",
-};
-
-/**
- * Copies the text download to the clipboard. Every label is stacked in one grid
- * cell, so the button keeps its width; the outcome is announced separately, and
- * the button's own name stays “Copy as text”.
- */
-function CopyAsTextButton({ prime, steps }: Props) {
-  const [outcome, setOutcome] = useState<CopyOutcome>("idle");
-  const resetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  useEffect(() => () => clearTimeout(resetTimerRef.current ?? undefined), []);
-
-  const copy = async () => {
-    let copied = true;
-    try {
-      await navigator.clipboard.writeText(certificateText(prime, steps));
-    } catch {
-      copied = false; // no clipboard (not a secure context) or permission refused
-    }
-    setOutcome(copied ? "copied" : "failed");
-    clearTimeout(resetTimerRef.current ?? undefined);
-    resetTimerRef.current = setTimeout(() => setOutcome("idle"), COPY_FEEDBACK_MS);
-  };
-
-  return (
-    <>
-      <button type="button" onClick={copy} aria-label="Copy as text" className={BUTTON_CLASS}>
-        <span className="grid" aria-hidden="true">
-          {(Object.keys(COPY_LABELS) as CopyOutcome[]).map((label) => (
-            <span key={label} className={`col-start-1 row-start-1 ${label === outcome ? "" : "invisible"}`}>
-              {COPY_LABELS[label]}
-            </span>
-          ))}
-        </span>
-      </button>
-      <span role="status" className="sr-only" data-testid="certificate-copy-status">
-        {COPY_ANNOUNCEMENTS[outcome]}
-      </span>
-    </>
-  );
 }
 
 /**
@@ -156,7 +105,13 @@ export function CertificateSteps({ prime, steps }: Props) {
             >
               Download as text
             </a>
-            <CopyAsTextButton prime={prime} steps={steps} />
+            <CopyButton
+              label="Copy as text"
+              text={() => certificateText(prime, steps)}
+              copiedAnnouncement="Copied the certificate as text."
+              failedAnnouncement="Couldn’t copy: the browser didn’t allow it. Download it as text instead."
+              statusTestId="certificate-copy-status"
+            />
           </>
         )}
       </p>

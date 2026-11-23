@@ -5,6 +5,8 @@
 // answers and be tested on its own.
 
 import { shortNumber } from "./certificateCheck.ts";
+import { formatWholeNumber } from "./formatNumber.ts";
+import { estimatePrimeOrdinal } from "./primes/logarithmicIntegral.ts";
 import { checkCertificate, type CertificateStep } from "./primes/primalityCertificate.ts";
 import { parseJumpTarget, type JumpTargetResult } from "./primes/parseJumpTarget.ts";
 import { primalityTableBelow } from "./primes/sieveOfEratosthenes.ts";
@@ -343,3 +345,29 @@ export function describeProofTime(seconds: number): string {
 
 /** From here a proof takes days or more: the page says so, with a smile, and still offers it. */
 export const HUGE_PROOF_SECONDS = DAY;
+
+/** Below this a prime's place in the list is counted (a sieve of this size takes milliseconds); from here, estimated. */
+export const EXACT_POSITION_BELOW = 10_000_000;
+
+/** “st”, “nd”, “rd” or “th”, for the ordinal of `count`: 1st, 12th, 22nd, 113th. */
+export function ordinalSuffix(count: bigint): string {
+  const lastTwo = count % 100n;
+  if (lastTwo >= 11n && lastTwo <= 13n) return "th";
+  return ["th", "st", "nd", "rd"][Number(count % 10n)] ?? "th";
+}
+
+/**
+ * Where a prime comes in the list (2 is the 1st): counted below
+ * EXACT_POSITION_BELOW, otherwise estimated as li(x), the way the list labels
+ * primes after a jump (“≈ #n”).
+ */
+export function describePosition(prime: bigint): string {
+  if (prime < BigInt(EXACT_POSITION_BELOW)) {
+    const isPrime = primalityTableBelow(Number(prime) + 1);
+    let count = 0n;
+    for (const flag of isPrime) count += BigInt(flag);
+    return `It’s the ${formatWholeNumber(count)}${ordinalSuffix(count)} prime.`;
+  }
+  const estimate = estimatePrimeOrdinal(prime);
+  return `It’s about the ${shortNumber(estimate)}${ordinalSuffix(estimate)} prime: estimated with li(x), not counted.`;
+}
