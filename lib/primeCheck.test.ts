@@ -2,7 +2,9 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { certifiedPrimeFrom } from "../tests/support/curveCertificates.ts";
 import {
+  answerFromVerdict,
   answerHolds,
+  NUMBER_CHECK_VERDICT,
   describeAnswer,
   exactSquareRoot,
   parseNumberToCheck,
@@ -159,5 +161,27 @@ describe("parseNumberToCheck", () => {
     assert.deepEqual(parseNumberToCheck("0"), { valid: true, target: 0n });
     assert.deepEqual(parseNumberToCheck("  "), { valid: false, message: "Type a number to check." });
     assert.deepEqual(parseNumberToCheck("2.5"), { valid: false, message: "Whole numbers only. Primes don’t do fractions." });
+  });
+});
+
+describe("answerFromVerdict", () => {
+  it("turns each of check_number's verdicts into an answer, and settles nothing on the rest", () => {
+    const { prime, compositeByFactor, compositeByWitness, belowTwo, beyondProvenBound, outOfMemory, probablePrime, compositeBySquare, compositeByLucas } =
+      NUMBER_CHECK_VERDICT;
+    assert.deepEqual(answerFromVerdict(1n, belowTwo, 0), { settled: true, answer: { kind: "neither", value: 1n } });
+    assert.deepEqual(answerFromVerdict(1_000_003n, prime, 0), { settled: true, answer: { kind: "prime", value: 1_000_003n, proof: { by: "trial-division" } } });
+    assert.deepEqual(answerFromVerdict(123n, compositeByFactor, 3), { settled: true, answer: { kind: "composite", value: 123n, evidence: { by: "factor", factor: 3n } } });
+    assert.deepEqual(answerFromVerdict(4_295_229_443n, compositeByWitness, 2), {
+      settled: true,
+      answer: { kind: "composite", value: 4_295_229_443n, evidence: { by: "witness", base: 2 } },
+    });
+    const big = 10n ** 30n + 57n;
+    assert.deepEqual(answerFromVerdict(big, probablePrime, 0), { settled: true, answer: { kind: "probably-prime", value: big } });
+    assert.deepEqual(answerFromVerdict(big * big, compositeBySquare, 0), { settled: true, answer: { kind: "composite", value: big * big, evidence: { by: "square", root: big } } });
+    assert.deepEqual(answerFromVerdict(big, compositeByLucas, 0), { settled: true, answer: { kind: "composite", value: big, evidence: { by: "lucas" } } });
+    assert.deepEqual(answerFromVerdict(big, outOfMemory, 0), { settled: false, reason: "out-of-memory" });
+    for (const verdict of [beyondProvenBound, -1, 9])
+      assert.deepEqual(answerFromVerdict(big, verdict, 0), { settled: false, reason: "unexpected-verdict" }, String(verdict));
+    assert.deepEqual(answerFromVerdict(big * big + 2n, compositeBySquare, 0), { settled: false, reason: "unexpected-verdict" }, "not a square");
   });
 });

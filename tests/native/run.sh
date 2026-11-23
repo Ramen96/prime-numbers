@@ -1,5 +1,5 @@
 #!/bin/sh
-# Builds wasm/sieve.c (and bignum.c, primality.c) natively and runs their tests.
+# Builds wasm/sieve.c (and bignum.c, primality.c, number_check.c, …) natively and runs their tests.
 #
 #   sh tests/native/run.sh fast   # npm run test:native
 #   sh tests/native/run.sh slow   # npm run test:native:slow (around 2^64)
@@ -33,6 +33,8 @@ fast)
   .cache/bignum_test
   cc -O2 $warnings -o .cache/primality_test tests/native/primality_test.c wasm/primality.c wasm/bignum.c -lm
   .cache/primality_test
+  cc -O2 $warnings -o .cache/number_check_test tests/native/number_check_test.c wasm/number_check.c wasm/primality.c wasm/bignum.c -lm
+  .cache/number_check_test
   cc -O2 $warnings -o .cache/ecpp_test tests/native/ecpp_test.c wasm/ecpp.c wasm/classpoly.c wasm/bignum.c -lm
   .cache/ecpp_test
   cc -O2 $warnings -o .cache/classpoly_test tests/native/classpoly_test.c wasm/classpoly.c wasm/bignum.c -lm
@@ -65,6 +67,8 @@ asan)
   .cache/bignum_test_asan
   cc $sanitizers $warnings -o .cache/primality_test_asan tests/native/primality_test.c wasm/primality.c wasm/bignum.c -lm
   .cache/primality_test_asan
+  cc $sanitizers $warnings -o .cache/number_check_test_asan tests/native/number_check_test.c wasm/number_check.c wasm/primality.c wasm/bignum.c -lm
+  .cache/number_check_test_asan
   cc $sanitizers $warnings -o .cache/ecpp_test_asan tests/native/ecpp_test.c wasm/ecpp.c wasm/classpoly.c wasm/bignum.c -lm
   .cache/ecpp_test_asan
   cc $sanitizers $warnings -o .cache/classpoly_test_asan tests/native/classpoly_test.c wasm/classpoly.c wasm/bignum.c -lm

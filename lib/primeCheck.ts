@@ -1,7 +1,8 @@
-// The prime checker (/is-prime): what it reads, the evidence for its answers,
-// the independent re-check of that evidence, and what the page says. The worker
-// (step 3) decides with the C engine; everything here is plain BigInt, so it can
-// check the worker's answers and be tested on its own.
+// The prime checker (/is-prime): what it reads, the evidence for its answers
+// (and how wasm/number_check.c's verdicts become them), the independent
+// re-check of that evidence, and what the page says. The worker decides with
+// the C engine; everything here is plain BigInt, so it can check the worker's
+// answers and be tested on its own.
 
 import { shortNumber } from "./certificateCheck.ts";
 import { checkCertificate, type CertificateStep } from "./primes/primalityCertificate.ts";
@@ -122,6 +123,57 @@ const TRIAL_DIVISION_PROVES_BELOW = BigInt(SMALL_FACTOR_LIMIT) ** 2n;
 /** How a number with no small factor that the worker found prime below a(13) was proven. */
 export function proofBelowProvenBound(value: bigint): PrimeProof {
   return value < TRIAL_DIVISION_PROVES_BELOW ? { by: "trial-division" } : { by: "miller-rabin", bases: millerRabinBasesFor(value) };
+}
+
+/** wasm/primality.h's primality_verdict, as check_number returns it. */
+export const NUMBER_CHECK_VERDICT = {
+  prime: 0,
+  compositeByFactor: 1,
+  compositeByWitness: 2,
+  belowTwo: 3,
+  beyondProvenBound: 4,
+  outOfMemory: 5,
+  probablePrime: 6,
+  compositeBySquare: 7,
+  compositeByLucas: 8,
+} as const;
+
+export type VerdictAnswer =
+  | { settled: true; answer: PrimeCheckAnswer }
+  /** Memory ran out: nothing is settled. Anything else is a verdict check_number never gives. */
+  | { settled: false; reason: "out-of-memory" | "unexpected-verdict" };
+
+/**
+ * The answer check_number's verdict and evidence give for `value` (with no
+ * factor below SMALL_FACTOR_LIMIT: the worker looks for one first). Not yet
+ * checked: answerHolds does that.
+ */
+export function answerFromVerdict(value: bigint, verdict: number, evidence: number): VerdictAnswer {
+  const settled = (answer: PrimeCheckAnswer): VerdictAnswer => ({ settled: true, answer });
+  switch (verdict) {
+    case NUMBER_CHECK_VERDICT.belowTwo:
+      return settled({ kind: "neither", value });
+    case NUMBER_CHECK_VERDICT.prime:
+      return settled({ kind: "prime", value, proof: proofBelowProvenBound(value) });
+    case NUMBER_CHECK_VERDICT.probablePrime:
+      return settled({ kind: "probably-prime", value });
+    case NUMBER_CHECK_VERDICT.compositeByFactor:
+      return settled({ kind: "composite", value, evidence: { by: "factor", factor: BigInt(evidence) } });
+    case NUMBER_CHECK_VERDICT.compositeByWitness:
+      return settled({ kind: "composite", value, evidence: { by: "witness", base: evidence } });
+    case NUMBER_CHECK_VERDICT.compositeBySquare: {
+      const root = exactSquareRoot(value);
+      return root === null
+        ? { settled: false, reason: "unexpected-verdict" }
+        : settled({ kind: "composite", value, evidence: { by: "square", root } });
+    }
+    case NUMBER_CHECK_VERDICT.compositeByLucas:
+      return settled({ kind: "composite", value, evidence: { by: "lucas" } });
+    case NUMBER_CHECK_VERDICT.outOfMemory:
+      return { settled: false, reason: "out-of-memory" };
+    default:
+      return { settled: false, reason: "unexpected-verdict" }; // beyondProvenBound, -1, or anything else
+  }
 }
 
 /**
