@@ -62,3 +62,47 @@ export function fitNumber(formatted: string, availablePx: number, widths: GlyphW
   }
   return { text: join(front, back), shortened: true };
 }
+
+/** At most this share of a row's width goes to a position label that sits beside a prime too long to fit with it. */
+export const LABEL_SHARE_BESIDE_PRIME = 0.4;
+
+export interface RowSpaceForFit {
+  /** The width the prime and its label share. */
+  columnPx: number;
+  /** From 640px up the label sits beside the prime (they split the width); below, under it (each gets all of it). */
+  labelBesidePrime: boolean;
+  primeGlyphs: GlyphWidths;
+  labelGlyphs: GlyphWidths;
+  /** The width of the label before its digits: "#", or "≈ #" after a jump. */
+  labelPrefixPx: number;
+}
+
+/**
+ * A list row's prime and its position label (the ordinal's digits, without
+ * "#"), each shortened in the middle like fitNumber if it must be. Under the
+ * prime, each gets the whole width. Beside it, both stay whole if they fit
+ * (with a digit's width between); otherwise the label gets what the whole prime
+ * leaves, but always at least LABEL_SHARE_BESIDE_PRIME of the row if it needs
+ * it, and the prime the rest. So far out, where both are long, neither can
+ * crowd the other out.
+ */
+export function fitPrimeAndLabel(
+  formattedPrime: string,
+  formattedOrdinal: string,
+  space: RowSpaceForFit,
+): { prime: FittedNumber; label: FittedNumber } {
+  const { columnPx, labelBesidePrime, primeGlyphs, labelGlyphs, labelPrefixPx } = space;
+  if (!labelBesidePrime) {
+    return {
+      prime: fitNumber(formattedPrime, columnPx, primeGlyphs),
+      label: fitNumber(formattedOrdinal, columnPx - labelPrefixPx, labelGlyphs),
+    };
+  }
+  const gapPx = primeGlyphs.digit;
+  const wholeLabelPx = labelPrefixPx + textWidth(formattedOrdinal, labelGlyphs);
+  const wholePrimePx = textWidth(formattedPrime, primeGlyphs);
+  const labelBudgetPx = Math.min(wholeLabelPx, Math.max(columnPx - gapPx - wholePrimePx, columnPx * LABEL_SHARE_BESIDE_PRIME));
+  const label = fitNumber(formattedOrdinal, labelBudgetPx - labelPrefixPx, labelGlyphs);
+  const shownLabelPx = labelPrefixPx + textWidth(label.text, labelGlyphs);
+  return { prime: fitNumber(formattedPrime, columnPx - shownLabelPx - gapPx, primeGlyphs), label };
+}

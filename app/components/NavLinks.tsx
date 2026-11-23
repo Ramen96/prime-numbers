@@ -15,9 +15,9 @@ const PAGES = [
   { href: "/about", label: "About", desktopOnly: false },
 ] as const;
 
-// Below 300 px (a Galaxy Fold's cover screen is 280), a little tighter, so the row still fits.
+// Below 320 px (a Galaxy Fold’s cover screen is 280), a little tighter, so the row still fits.
 const LINK_CLASSES =
-  "flex h-11 items-center rounded-md px-2.5 text-sm max-[299px]:px-1 max-[299px]:text-[0.8125rem] text-muted transition-colors hover:text-foreground focus-visible:outline-2 focus-visible:outline-(--heat-text) sm:px-3 desktop:h-auto desktop:px-0 desktop:py-1.5 desktop:text-[0.95rem]";
+  "flex h-11 items-center rounded-md px-2.5 text-sm max-[319px]:px-1 max-[319px]:text-[0.8125rem] text-muted transition-colors hover:text-foreground focus-visible:outline-2 focus-visible:outline-(--heat-text) sm:px-3 desktop:h-auto desktop:px-0 desktop:py-1.5 desktop:text-[0.95rem]";
 // The heat accent marks the current page: a bar under it on mobile, beside it on desktop.
 const CURRENT_PAGE_CLASSES =
   "font-semibold text-foreground! shadow-[inset_0_-2px_0_var(--heat-color)] desktop:pl-3 desktop:shadow-[inset_2px_0_0_var(--heat-color)]";

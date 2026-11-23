@@ -55,6 +55,43 @@ test.describe("layout", () => {
   });
 });
 
+test.describe("the speed counter", () => {
+  // An 8-digit rate (10 million primes a second or more) is the widest it shows:
+  // its font follows its box (16.5cqi), so it stays on one line at every width.
+  for (const width of [320, 330, 340, 360, 1440]) {
+    test(`keeps an 8-digit rate on one line at ${width} px`, async ({ page }, testInfo) => {
+      test.skip(testInfo.project.name !== "phone", "the widths are set here, so run once");
+      await page.setViewportSize({ width, height: 800 });
+      const primeListPage = new PrimeListPage(page);
+      await primeListPage.open();
+      const counter = page.getByText(/^primes per second$/i).locator("xpath=../preceding-sibling::div[1]");
+      const firstRowTop = (await page.getByTestId("prime-row").first().boundingBox())!.y;
+      // a real rate can't be forced, so the widest one is written in, as the meltdown tests force their values
+      const { lines, counterTopBefore, counterTopAfter } = await counter.evaluate((element) => {
+        const counterTopBefore = element.getBoundingClientRect().top;
+        element.textContent = "88,888,888";
+        const fontSize = parseFloat(getComputedStyle(element).fontSize);
+        return { lines: Math.round(element.getBoundingClientRect().height / fontSize), counterTopBefore, counterTopAfter: element.getBoundingClientRect().top };
+      });
+      expect(lines).toBe(1);
+      expect(counterTopAfter).toBe(counterTopBefore);
+      expect((await page.getByTestId("prime-row").first().boundingBox())!.y).toBe(firstRowTop);
+      await expectNoHorizontalScrolling(page);
+    });
+  }
+});
+
+test.describe("the phone nav bar", () => {
+  test("never scrolls the page sideways, at any width from 280 to 420 px", async ({ page }, testInfo) => {
+    test.skip(testInfo.project.name !== "phone", "the widths are set here, so run once");
+    for (let width = 280; width <= 420; width += 10) {
+      await page.setViewportSize({ width, height: 700 });
+      await page.goto("/about");
+      await expectNoHorizontalScrolling(page);
+    }
+  });
+});
+
 test.describe("content pages on narrow screens", () => {
   for (const width of [320, 280]) {
     test(`the content pages never scroll sideways at ${width} px`, async ({ page }) => {

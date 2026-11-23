@@ -6,7 +6,7 @@ import type { Batch, BufferStatus, PrimeBuffer, ScrollInstruction } from "@/lib/
 import { formatWholeNumber } from "@/lib/formatNumber";
 import { PROVING_LINES } from "@/lib/mentatLines";
 import { describeProving, type ProvingStatus } from "@/lib/provingStatus";
-import { fitNumber, textWidth, type GlyphWidths } from "@/lib/shortenNumber";
+import { fitPrimeAndLabel, type GlyphWidths } from "@/lib/shortenNumber";
 import { SHORTENED_NUMBER_HINT_CLASSES } from "./FittedNumber";
 import { GlyphRuler, readGlyphWidths } from "./GlyphRuler";
 import { PI_PRIME, PiMark } from "./PiMark";
@@ -63,8 +63,8 @@ interface Props {
   onToggleFavorite: (prime: bigint) => void;
   /** The largest prime actually on screen (for personal records). */
   onLargestVisiblePrime: (prime: bigint) => void;
-  /** Opens the popup with a shortened prime in full. */
-  onShowFullPrime: (prime: bigint, opener: HTMLElement) => void;
+  /** Opens the popup with a shortened prime (or position) in full. */
+  onShowFullPrime: (prime: bigint, opener: HTMLElement, position: ListPosition) => void;
 }
 
 
@@ -97,6 +97,12 @@ interface RowSpace {
   labelGlyphs: GlyphWidths;
   /** The width of the label before its digits: "#", or "≈ #" after a jump. */
   labelPrefixPx: { exact: number; estimated: number };
+}
+
+/** A prime's place in the list: 2 is #1. After a jump it's estimated (li(x)), shown with “≈”. */
+export interface ListPosition {
+  ordinal: bigint;
+  estimated: boolean;
 }
 
 function sameRowSpace(a: RowSpace | null, b: RowSpace): boolean {
@@ -350,21 +356,23 @@ export function PrimeList({
       const primeIndex = screenRowToPrimeIndex(screenRow);
       const prime = allPrimes[primeIndex];
       // 2 is #1, 3 is #2, … After a jump this is estimated (see rollingBuffer.ts).
-      const ordinal = formatWholeNumber(ordinalOfFirstPrime + BigInt(primeIndex));
+      const position: ListPosition = { ordinal: ordinalOfFirstPrime + BigInt(primeIndex), estimated: labelsAreEstimated };
+      const ordinal = formatWholeNumber(position.ordinal);
+      const labelPrefix = labelsAreEstimated ? "≈ #" : "#";
       const formattedPrime = formatWholeNumber(prime);
       const isFavorite = favoritePrimes.has(String(prime));
-      // Shortened in the middle if it doesn't fit beside (or above) its label.
+      // Each shortened in the middle if the two don't fit beside (or above) each other.
       let shownPrime = { text: formattedPrime, shortened: false };
+      let shownOrdinal = { text: ordinal, shortened: false };
       if (rowSpace) {
-        const labelPx =
-          (labelsAreEstimated ? rowSpace.labelPrefixPx.estimated : rowSpace.labelPrefixPx.exact) +
-          textWidth(ordinal, rowSpace.labelGlyphs);
-        // beside the label, keep at least a digit's width between them
-        const availablePx = rowSpace.labelBesidePrime
-          ? rowSpace.columnPx - labelPx - rowSpace.primeGlyphs.digit
-          : rowSpace.columnPx;
-        shownPrime = fitNumber(formattedPrime, availablePx, rowSpace.primeGlyphs);
+        const fitted = fitPrimeAndLabel(formattedPrime, ordinal, {
+          ...rowSpace,
+          labelPrefixPx: labelsAreEstimated ? rowSpace.labelPrefixPx.estimated : rowSpace.labelPrefixPx.exact,
+        });
+        shownPrime = fitted.prime;
+        shownOrdinal = fitted.label;
       }
+      const shortened = shownPrime.shortened || shownOrdinal.shortened;
       const labelId = `prime-label-${prime}`;
       const label = (
         <span
@@ -372,7 +380,21 @@ export function PrimeList({
           data-testid="prime-label"
           className={`order-2 ${LABEL_FONT_CLASSES} text-muted sm:order-1 ${labelsAreEstimated ? "opacity-70" : ""}`}
         >
-          {labelsAreEstimated ? `≈ #${ordinal}` : `#${ordinal}`}
+          {shownOrdinal.shortened ? (
+            // shortened on screen; screen readers get it whole
+            <>
+              <span aria-hidden className={SHORTENED_NUMBER_HINT_CLASSES}>
+                {labelPrefix}
+                {shownOrdinal.text}
+              </span>
+              <span className="sr-only">
+                {labelPrefix}
+                {ordinal}
+              </span>
+            </>
+          ) : (
+            `${labelPrefix}${ordinal}`
+          )}
         </span>
       );
       renderedRows.push(
@@ -392,7 +414,7 @@ export function PrimeList({
           >
             <StarIcon filled={isFavorite} />
           </button>
-          {shownPrime.shortened ? (
+          {shortened ? (
             // The prime and its label together are the button, so the whole
             // row beside the star (44px tall, like the star) opens it in full,
             // wherever the label sits. The whole prime is the accessible name.
@@ -401,12 +423,15 @@ export function PrimeList({
               aria-label={formattedPrime}
               aria-describedby={labelId}
               aria-haspopup="dialog"
-              onClick={(event) => onShowFullPrime(prime, event.currentTarget)}
+              onClick={(event) => onShowFullPrime(prime, event.currentTarget, position)}
               className={SHORTENED_ROW_BUTTON_CLASSES}
             >
               <span className={PRIME_AND_LABEL_CLASSES}>
                 {label}
-                <span aria-hidden className={`order-1 ${PRIME_FONT_CLASSES} sm:order-2 ${SHORTENED_NUMBER_HINT_CLASSES}`}>
+                <span
+                  aria-hidden
+                  className={`order-1 ${PRIME_FONT_CLASSES} sm:order-2 ${shownPrime.shortened ? SHORTENED_NUMBER_HINT_CLASSES : ""}`}
+                >
                   {shownPrime.text}
                 </span>
               </span>

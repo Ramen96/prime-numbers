@@ -134,19 +134,21 @@ test.describe("long numbers in the stats", () => {
       await expect(part).toBeInViewport({ ratio: 1 });
     }
     // Scrolled to the end, the number moves and its last group shows inside its
-    // own box (rather than spilling out over the buttons below it).
+    // scrolling box (rather than spilling out over the buttons below it). The box
+    // is the paragraph's parent, which can also hold a list row's position.
     const scrolledToEnd = await fullNumber.evaluate((paragraph) => {
-      paragraph.scrollTop = paragraph.scrollHeight;
+      const scrollBox = paragraph.parentElement!;
+      scrollBox.scrollTop = scrollBox.scrollHeight;
       // the last text node, the number's last digit group, however deep it sits
       let lastText: Node = paragraph;
       while (lastText.lastChild) lastText = lastText.lastChild;
       const lastGroup = document.createRange();
       lastGroup.selectNodeContents(lastText);
       const lastGroupBox = lastGroup.getBoundingClientRect();
-      const paragraphBox = paragraph.getBoundingClientRect();
+      const scrollBoxRect = scrollBox.getBoundingClientRect();
       return {
-        moved: paragraph.scrollTop > 0,
-        lastGroupInside: lastGroupBox.top >= paragraphBox.top && lastGroupBox.bottom <= paragraphBox.bottom + 0.5,
+        moved: scrollBox.scrollTop > 0,
+        lastGroupInside: lastGroupBox.top >= scrollBoxRect.top && lastGroupBox.bottom <= scrollBoxRect.bottom + 0.5,
       };
     });
     expect(scrolledToEnd.moved, "the number scrolls inside the popup").toBe(true);

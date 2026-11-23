@@ -129,8 +129,10 @@ export function InfinitePrimes({ intro, firstBatchFromServer }: Props) {
       <div className="flex h-[calc(100dvh-var(--mobile-nav-height)-var(--storage-notice-height))] flex-col desktop:contents">
         <header className="flex flex-wrap items-center gap-x-6 gap-y-2 border-y border-rule px-5 py-4 desktop:col-start-1 desktop:row-start-2 desktop:px-0">
           <Cpu />
-          <div className="min-w-40 flex-1">
-            <div className="font-mono text-[clamp(2rem,8vw,3.75rem)] leading-none font-bold tabular-nums wrap-anywhere text-(--heat-text) transition-colors duration-600 desktop:text-[3.25rem]">
+          {/* A size container, so the counter's font can follow its box (cqi): an 8-digit rate,
+              “88,888,888”, is 6em wide in this font, so at most 16.5cqi keeps it on one line at any width. */}
+          <div className="@container min-w-40 flex-1">
+            <div className="font-mono text-[min(clamp(2rem,8vw,3.75rem),16.5cqi)] leading-none font-bold tabular-nums wrap-anywhere text-(--heat-text) transition-colors duration-600 desktop:text-[min(3.25rem,16.5cqi)]">
               {status === "stopped" ? (
                 "stopped"
               ) : rateReading ? (

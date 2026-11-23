@@ -4,6 +4,12 @@ import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type 
 import scrollbar from "./ThemedScrollbar.module.scss";
 import { WrappableNumber } from "./WrappableNumber";
 
+/** A list row's place (PrimeList's ListPosition): shown in full under the prime, since the row may have shortened it. */
+interface ShownPosition {
+  ordinal: bigint;
+  estimated: boolean;
+}
+
 const numberFormatter = new Intl.NumberFormat("en-US");
 const COPIED_MESSAGE_MS = 2000;
 
@@ -19,22 +25,22 @@ const COPIED_MESSAGE_MS = 2000;
  * Returns `show(value, opener)` and the popover element to render once.
  */
 export function useNumberPopover(): {
-  show: (value: bigint, opener: HTMLElement) => void;
+  show: (value: bigint, opener: HTMLElement, position?: ShownPosition) => void;
   popover: ReactNode;
 } {
   const popoverRef = useRef<HTMLDivElement>(null);
   const copyButtonRef = useRef<HTMLButtonElement>(null);
   const openerRef = useRef<HTMLElement | null>(null);
   // Bumped on every show, so showing the same number twice still opens it.
-  const [request, setRequest] = useState<{ value: bigint; count: number } | null>(null);
+  const [request, setRequest] = useState<{ value: bigint; position?: ShownPosition; count: number } | null>(null);
   const [copyMessage, setCopyMessage] = useState("");
   const copyMessageTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const titleId = useId();
 
-  const show = useCallback((value: bigint, opener: HTMLElement) => {
+  const show = useCallback((value: bigint, opener: HTMLElement, position?: ShownPosition) => {
     openerRef.current = opener;
     setCopyMessage("");
-    setRequest((previous) => ({ value, count: (previous?.count ?? 0) + 1 }));
+    setRequest((previous) => ({ value, position, count: (previous?.count ?? 0) + 1 }));
   }, []);
 
   // Open once the number is rendered inside, then move focus into it.
@@ -90,12 +96,23 @@ export function useNumberPopover(): {
         {numberFormatter.format(digitCount)} digits
       </h2>
       {/* Focusable so the keyboard can scroll it when it's too long to show at once. */}
-      <p
+      <div
         tabIndex={0}
-        className={`${scrollbar.themedScrollbar} mt-2 min-h-0 overflow-y-auto rounded-sm font-mono text-lg leading-snug tabular-nums focus-visible:outline-2 focus-visible:outline-(--heat-text)`}
+        className={`${scrollbar.themedScrollbar} mt-2 min-h-0 overflow-y-auto rounded-sm leading-snug tabular-nums focus-visible:outline-2 focus-visible:outline-(--heat-text)`}
       >
-        <WrappableNumber value={request?.value ?? null} />
-      </p>
+        <p className="font-mono text-lg">
+          <WrappableNumber value={request?.value ?? null} />
+        </p>
+        {/* in the scrolling box too: far out, a list position is about as long as its prime */}
+        {request?.position && (
+          <p className="mt-2 text-sm text-muted" data-testid="popover-position">
+            <span className="font-mono">
+              {request.position.estimated ? "≈ #" : "#"}
+              <WrappableNumber value={request.position.ordinal} />
+            </span>
+          </p>
+        )}
+      </div>
       <div className="mt-4 flex items-center gap-2">
         <button
           ref={copyButtonRef}

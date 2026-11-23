@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { ELLIPSIS, fitNumber, textWidth, type GlyphWidths } from "./shortenNumber.ts";
+import { ELLIPSIS, fitNumber, textWidth, type GlyphWidths, LABEL_SHARE_BESIDE_PRIME, fitPrimeAndLabel } from "./shortenNumber.ts";
 import { formatWholeNumber } from "./formatNumber.ts";
 
 // Intl.NumberFormat throws past about a million digits, so not that (formatNumber.ts)
@@ -201,5 +201,45 @@ describe("fitNumber", () => {
     assert.equal(fitted.shortened, true);
     // k kept groups take 40k − 10 px here, so 300px keeps 7: 4 in front, 3 behind.
     assert.equal(fitted.text, `1,000,000,000,${ELLIPSIS},000,000,007`);
+  });
+});
+
+describe("fitPrimeAndLabel", () => {
+  // the list's real proportions: mono prime digits 12 px, label digits 7 px, commas narrower
+  const primeGlyphs = { digit: 12, comma: 12, ellipsis: 12 };
+  const labelGlyphs = { digit: 7, comma: 3, ellipsis: 9 };
+  const space = (columnPx: number, labelBesidePrime: boolean) => ({ columnPx, labelBesidePrime, primeGlyphs, labelGlyphs, labelPrefixPx: 20 });
+  const commas = (digits: string) => digits.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+  const huge = (digits: number) => commas("7".repeat(digits));
+
+  it("leaves both whole when they fit", () => {
+    for (const beside of [true, false]) {
+      const { prime, label } = fitPrimeAndLabel("1,000,003", "78,498", space(600, beside));
+      assert.deepEqual([prime.shortened, label.shortened], [false, false]);
+    }
+  });
+
+  it("under the prime, gives each the whole width", () => {
+    const { prime, label } = fitPrimeAndLabel(huge(60), huge(58), space(300, false));
+    assert.ok(textWidth(prime.text, primeGlyphs) <= 300);
+    assert.ok(20 + textWidth(label.text, labelGlyphs) <= 300);
+    assert.ok(label.shortened && label.text.includes(ELLIPSIS));
+  });
+
+  it("beside it, never lets the two overlap, and keeps both readable at any size", () => {
+    for (const digits of [20, 40, 60, 100, 1000]) {
+      const { prime, label } = fitPrimeAndLabel(huge(digits), huge(digits - 2), space(560, true));
+      const used = textWidth(prime.text, primeGlyphs) + primeGlyphs.digit + 20 + textWidth(label.text, labelGlyphs);
+      assert.ok(used <= 560, `${digits} digits use ${used} px`);
+      // the prime keeps at least half of the row once both are long
+      if (digits >= 60) assert.ok(textWidth(prime.text, primeGlyphs) >= 560 * (1 - LABEL_SHARE_BESIDE_PRIME) - primeGlyphs.digit - 3 * primeGlyphs.digit);
+      assert.ok(label.text.length >= 7); // at least its first and last groups
+    }
+  });
+
+  it("gives a short prime's leftover room to a long label", () => {
+    const { prime, label } = fitPrimeAndLabel("1,009", huge(40), space(560, true));
+    assert.equal(prime.shortened, false);
+    assert.ok(20 + textWidth(label.text, labelGlyphs) > 560 * LABEL_SHARE_BESIDE_PRIME); // more than its share, since the prime doesn't need it
   });
 });
