@@ -76,6 +76,9 @@ export default function HowItWorksPage() {
         is either prime or a product of primes, which is why primes are often called the atoms of
         arithmetic.
       </p>
+      <p>
+        <Link href="/what-is-a-prime-number">For a gentler introduction, see What is a prime number? →</Link>
+      </p>
 
       {/* 2 */}
       <SectionHeading id="why-check-up-to-square-root" />

@@ -7,6 +7,7 @@ const PAGES = [
   { path: "/about", linkName: "About" },
   { path: "/favorites", linkName: "Favorites" },
   { path: "/random-prime", linkName: "Random prime" },
+  { path: "/fun-facts", linkName: "Fun facts" },
 ] as const;
 
 test.describe("site navigation", () => {
@@ -38,6 +39,23 @@ test.describe("site navigation", () => {
     }
   });
 
+  test("has Fun facts as a word in the sidebar, and as a lightbulb in the phone bar in GitHub's place", async ({ page }, testInfo) => {
+    await page.goto("/fun-facts");
+    const siteNav = page.getByRole("navigation", { name: "Site" });
+    const funFacts = siteNav.getByRole("link", { name: "Fun facts", exact: true });
+    await expect(funFacts).toBeVisible();
+    await expect(funFacts).toHaveAttribute("aria-current", "page");
+    const github = siteNav.getByRole("link", { name: "GitHub (opens in a new tab)" });
+    if (testInfo.project.name === "desktop") {
+      await expect(github).toBeVisible();
+    } else {
+      await expect(funFacts.locator("svg")).toBeVisible();
+      await expect(github).toBeHidden(); // the bar is full: GitHub is on /about for phones
+      await page.goto("/about");
+      await expect(page.locator("main").getByRole("link", { name: "GitHub" })).toBeVisible();
+    }
+  });
+
   test("works from the keyboard", async ({ page }) => {
     await page.goto("/");
     const howItWorksLink = page
@@ -49,11 +67,13 @@ test.describe("site navigation", () => {
     await expect(page).toHaveURL("/how-it-works");
   });
 
-  test("GitHub opens in a new tab and has an accessible name", async ({ page }) => {
+  test("GitHub opens in a new tab and has an accessible name", async ({ page }, testInfo) => {
     await page.goto("/about");
-    const githubLink = page
-      .getByRole("navigation", { name: "Site" })
-      .getByRole("link", { name: "GitHub (opens in a new tab)" });
+    // in the sidebar on desktop; on phones the bar has no room, and /about's link is the way there
+    const githubLink =
+      testInfo.project.name === "desktop"
+        ? page.getByRole("navigation", { name: "Site" }).getByRole("link", { name: "GitHub (opens in a new tab)" })
+        : page.locator("main").getByRole("link", { name: "GitHub" });
     await expect(githubLink).toHaveAttribute("href", GITHUB_URL);
     await expect(githubLink).toHaveAttribute("target", "_blank");
     await expect(githubLink).toHaveAttribute("rel", /noopener/);

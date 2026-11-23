@@ -41,6 +41,9 @@ export default function IsPrimePage() {
         the link to your answer.
       </p>
       <p>
+        <Link href="/what-is-a-prime-number">New to primes? What is a prime number? →</Link>
+      </p>
+      <p>
         <Link href="/fun-facts">Fun facts about prime numbers →</Link>
       </p>
     </Article>

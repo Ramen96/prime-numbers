@@ -69,6 +69,33 @@ test.describe("/fun-facts", () => {
   });
 });
 
+test.describe("/what-is-a-prime-number", () => {
+  test("is server-rendered with its headings, figures, the primes to 100 and the sieve demo", async ({ request }) => {
+    const response = await request.get("/what-is-a-prime-number");
+    expect(response.status()).toBe(200);
+    const html = await response.text();
+    expect(html).toMatch(/<h1[^>]*>What is a prime number\?<\/h1>/);
+    for (const heading of ["The prime numbers from 1 to 100", "Primes are the building blocks of numbers", "How to find prime numbers: the sieve of Eratosthenes", "How many prime numbers are there?"])
+      expect(html).toContain(`>${heading}</h2>`);
+    for (const question of ["Is 1 a prime number?", "Is 2 a prime number?", "Is 0 a prime number?", "Can a negative number be prime?"])
+      expect(html).toContain(`>${question}</h3>`);
+    expect(html).toContain('<title id="dot-rectangles-title">Dots in rectangles</title>');
+    expect(html).toContain('<title id="factor-tree-title">A factor tree for 60</title>');
+    expect(html).toContain('data-testid="sieve-demo"');
+  });
+
+  test("marks the 25 primes to 100, each number linking to its own page", async ({ page }) => {
+    await page.goto("/what-is-a-prime-number");
+    const grid = page.getByRole("list", { name: "The numbers from 1 to 100, primes marked" });
+    await expect(grid.getByRole("link")).toHaveCount(100);
+    const primes = grid.getByRole("link", { name: /, prime$/ });
+    await expect(primes).toHaveCount(25);
+    expect(await primes.allInnerTexts()).toEqual(["2", "3", "5", "7", "11", "13", "17", "19", "23", "29", "31", "37", "41", "43", "47", "53", "59", "61", "67", "71", "73", "79", "83", "89", "97"]);
+    await grid.getByRole("link", { name: "91", exact: true }).click();
+    await expect(page).toHaveURL(/\/is-prime\/91$/);
+  });
+});
+
 test("sitemap.xml lists every page", async ({ request }) => {
   const sitemapXml = await (await request.get("/sitemap.xml")).text();
   for (const pageUrl of [
@@ -78,6 +105,7 @@ test("sitemap.xml lists every page", async ({ request }) => {
     "https://everyprimenumber.com/random-prime",
     "https://everyprimenumber.com/is-prime",
     "https://everyprimenumber.com/fun-facts",
+    "https://everyprimenumber.com/what-is-a-prime-number",
   ]) {
     expect(sitemapXml).toContain(`<loc>${pageUrl}</loc>`);
   }

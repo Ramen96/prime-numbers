@@ -21,6 +21,9 @@ export default function FunFactsPage() {
       lead="Some are famous, some are odd, and every number here can be checked on this site."
     >
       <h2 id="the-basics">The basics</h2>
+      <p>
+        <Link href="/what-is-a-prime-number">New to primes? Start with What is a prime number? →</Link>
+      </p>
 
       <h3 id="only-even-prime">Why is 2 the only even prime?</h3>
       <p>

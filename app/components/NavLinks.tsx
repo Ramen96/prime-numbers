@@ -4,12 +4,15 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { GITHUB_URL } from "@/lib/site";
 import { DieIcon } from "./DieIcon";
+import { LightbulbIcon } from "./LightbulbIcon";
 import { StarIcon } from "./StarIcon";
 
+// desktopOnly: a word in the sidebar only. In the phone bar, Fun facts is an icon instead (below).
 const PAGES = [
-  { href: "/", label: "Home" },
-  { href: "/how-it-works", label: "How it works" },
-  { href: "/about", label: "About" },
+  { href: "/", label: "Home", desktopOnly: false },
+  { href: "/how-it-works", label: "How it works", desktopOnly: false },
+  { href: "/fun-facts", label: "Fun facts", desktopOnly: true },
+  { href: "/about", label: "About", desktopOnly: false },
 ] as const;
 
 // Below 300 px (a Galaxy Fold's cover screen is 280), a little tighter, so the row still fits.
@@ -26,10 +29,10 @@ export function NavLinks() {
 
   return (
     <ul className="flex w-full items-center desktop:flex-col desktop:items-stretch desktop:gap-1">
-      {PAGES.map(({ href, label }) => {
+      {PAGES.map(({ href, label, desktopOnly }) => {
         const isCurrentPage = currentPath === href;
         return (
-          <li key={href}>
+          <li key={href} className={desktopOnly ? "hidden desktop:list-item" : undefined}>
             <Link
               href={href}
               aria-current={isCurrentPage ? "page" : undefined}
@@ -43,7 +46,9 @@ export function NavLinks() {
       {/*
         Random prime and Favorites: icons in the phone nav bar (a die and a star;
         their words don't fit in one row at 320 px), words in the desktop sidebar.
-        Named by their words either way.
+        Named by their words either way. Fun facts is a lightbulb in the phone bar
+        only (its word is in the list above on desktop), in GitHub's place: the bar
+        is full from 280 to about 420 px, so GitHub is on desktop and /about there.
       */}
       <li className="ml-auto desktop:ml-0">
         <Link
@@ -69,7 +74,17 @@ export function NavLinks() {
           <span className="sr-only desktop:not-sr-only">Favorites</span>
         </Link>
       </li>
-      <li className="desktop:mt-3">
+      <li className="desktop:hidden">
+        <Link
+          href="/fun-facts"
+          aria-current={currentPath === "/fun-facts" ? "page" : undefined}
+          className={`${LINK_CLASSES} w-11 justify-center ${currentPath === "/fun-facts" ? CURRENT_PAGE_CLASSES : ""}`}
+        >
+          <LightbulbIcon />
+          <span className="sr-only">Fun facts</span>
+        </Link>
+      </li>
+      <li className="hidden desktop:mt-3 desktop:list-item">
         <a
           href={GITHUB_URL}
           target="_blank"
