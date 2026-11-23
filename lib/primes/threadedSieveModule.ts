@@ -2,6 +2,7 @@
 // as WasmSieve sees it. Shared by the worker's loader (loadSieve.ts) and the
 // Wasm tests, so both go through the same boundary.
 
+import type { RawNumberCheckExports } from "./numberCheck.ts";
 import type { RawProofSlotExports } from "./proofSlots.ts";
 import type { RawSieveExports } from "./wasmSieve.ts";
 
@@ -44,6 +45,9 @@ export interface ThreadedSieveModule {
   _proof_output_buffer(): number;
   _proof_slot_clear(slot: number): void;
   _proof_slot_progress(slot: number): number;
+  _number_check_input_buffer(limbCount: number): number;
+  _check_number(limbCount: number): number;
+  _number_check_evidence(): number;
 }
 
 /**
@@ -97,5 +101,15 @@ export function rawProofSlotExportsOf(sieveModule: ThreadedSieveModule): RawProo
     proof_output_buffer: sieveModule._proof_output_buffer,
     proof_slot_clear: sieveModule._proof_slot_clear,
     proof_slot_progress: sieveModule._proof_slot_progress,
+  };
+}
+
+/** The module's prime-checker exports under the names NumberCheck expects (numberCheck.ts). */
+export function rawNumberCheckExportsOf(sieveModule: ThreadedSieveModule): RawNumberCheckExports {
+  return {
+    memory: sieveModule.wasmMemory,
+    number_check_input_buffer: sieveModule._number_check_input_buffer,
+    check_number: sieveModule._check_number,
+    number_check_evidence: sieveModule._number_check_evidence,
   };
 }
