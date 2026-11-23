@@ -1,0 +1,32 @@
+{
+  "format": "everyprimenumber.com/ecpp-certificate/1",
+  "prime": "162259276829213363391578010288127",
+  "explanation": "Each step gives a number N, a curve y^2 = x^3 + a*x + b (mod N), a point (x, y) on it, and a prime q. The point times q is the point at infinity, and q > (N^(1/4) + 1)^2, so if q is prime, N is prime (Goldwasser and Kilian; Atkin and Morain). Each step's q is the next step's N. The last q is below 3317044064679887385961981 (a(13), OEIS A014233), where Miller-Rabin with the first 13 prime bases (2 to 41) proves it prime.",
+  "steps": [
+    {
+      "N": "162259276829213363391578010288127",
+      "a": "0",
+      "b": "27",
+      "x": "65733967743240219824164880792679",
+      "y": "26419228046704176897909965051085",
+      "q": "3345000346936862884841863603"
+    },
+    {
+      "N": "3345000346936862884841863603",
+      "a": "1719044705197608569761031933",
+      "b": "62059375638902836453466842",
+      "x": "1941387747004027646804149642",
+      "y": "2592953461117382165749236149",
+      "q": "24777780347680084957786343"
+    },
+    {
+      "N": "24777780347680084957786343",
+      "a": "12961365649423631987198328",
+      "b": "18426771817065354999541417",
+      "x": "22275907567571881065899468",
+      "y": "19859308326081724561611890",
+      "q": "26817713949071"
+    }
+  ],
+  "lastStepBelow": "3317044064679887385961981"
+}
