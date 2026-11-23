@@ -6,6 +6,8 @@ import {
   answerHolds,
   NUMBER_CHECK_VERDICT,
   describeAnswer,
+  describeProofTime,
+  estimatedProofSeconds,
   exactSquareRoot,
   parseNumberToCheck,
   proofBelowProvenBound,
@@ -183,5 +185,28 @@ describe("answerFromVerdict", () => {
     for (const verdict of [beyondProvenBound, -1, 9])
       assert.deepEqual(answerFromVerdict(big, verdict, 0), { settled: false, reason: "unexpected-verdict" }, String(verdict));
     assert.deepEqual(answerFromVerdict(big * big + 2n, compositeBySquare, 0), { settled: false, reason: "unexpected-verdict" }, "not a square");
+  });
+});
+
+describe("the proof time estimate", () => {
+  it("follows the measurements, doubled for the browser, and grows as digits^5 past them", () => {
+    assert.ok(Math.abs(estimatedProofSeconds(300) - 17) < 1e-9);
+    assert.ok(Math.abs(estimatedProofSeconds(1000) - 6668) < 1e-9);
+    assert.ok(Math.abs(estimatedProofSeconds(2000) / estimatedProofSeconds(1000) - 32) < 1e-9);
+    for (let digits = 26; digits < 5000; digits += 7) assert.ok(estimatedProofSeconds(digits + 1) > estimatedProofSeconds(digits), String(digits));
+  });
+
+  it("says it the way people do", () => {
+    const say = (digits: number) => describeProofTime(estimatedProofSeconds(digits));
+    assert.equal(say(100), "under a second");
+    assert.equal(say(200), "about 2 seconds");
+    assert.equal(say(500), "about 4 minutes");
+    assert.equal(say(1000), "about 2 hours");
+    assert.equal(say(2000), "about 2 days");
+    assert.equal(say(10_000), "about 21 years");
+    assert.equal(say(1_000_000), "about 211 billion years");
+    assert.equal(say(10_000_000), "more than a trillion years");
+    assert.equal(describeProofTime(59.4), "about 59 seconds");
+    assert.equal(describeProofTime(3 * 3600 * 24 * 365.25 * 1e6), "about 3 million years");
   });
 });

@@ -282,3 +282,64 @@ export function describeAnswer(answer: PrimeCheckAnswer): AnswerText {
     }
   }
 }
+
+/**
+ * Measured seconds per ECPP proof (CLAUDE.md, step 7a: native, one thread, an
+ * M-series laptop), by digits. The browser's Wasm is slower; BROWSER_SLOWDOWN
+ * allows for it.
+ */
+const MEASURED_PROOF_SECONDS: readonly [digits: number, seconds: number][] = [
+  [100, 0.07],
+  [200, 1.1],
+  [300, 8.5],
+  [500, 112],
+  [1000, 3334],
+];
+const BROWSER_SLOWDOWN = 2;
+/** Past the last measurement, time grows about as digits^5 (step 7a: ×30 from 500 to 1,000 digits). */
+const PROOF_TIME_EXPONENT = 5;
+
+/** About how many seconds a proof of a `digits`-digit number takes in a laptop's browser. */
+export function estimatedProofSeconds(digits: number): number {
+  const points = MEASURED_PROOF_SECONDS;
+  const at = (index: number) => points[index][1] * BROWSER_SLOWDOWN;
+  if (digits <= points[0][0]) return at(0) * (digits / points[0][0]) ** PROOF_TIME_EXPONENT;
+  for (let index = 1; index < points.length; index++) {
+    const [lowDigits] = points[index - 1];
+    const [highDigits] = points[index];
+    if (digits <= highDigits) {
+      // straight between measurements on a log-log scale
+      const exponent = Math.log(at(index) / at(index - 1)) / Math.log(highDigits / lowDigits);
+      return at(index - 1) * (digits / lowDigits) ** exponent;
+    }
+  }
+  const [lastDigits] = points[points.length - 1];
+  return at(points.length - 1) * (digits / lastDigits) ** PROOF_TIME_EXPONENT;
+}
+
+const MINUTE = 60;
+const HOUR = 60 * MINUTE;
+const DAY = 24 * HOUR;
+const YEAR = 365.25 * DAY;
+
+/** “about 3 minutes”: an estimate, rounded the way people say it. */
+export function describeProofTime(seconds: number): string {
+  const about = (count: number, unit: string) => {
+    const rounded = Math.max(1, Math.round(count));
+    return `about ${rounded.toLocaleString("en-US")} ${unit}${rounded === 1 ? "" : "s"}`;
+  };
+  if (seconds < 1) return "under a second";
+  if (seconds < MINUTE) return about(seconds, "second");
+  if (seconds < HOUR) return about(seconds / MINUTE, "minute");
+  if (seconds < DAY) return about(seconds / HOUR, "hour");
+  if (seconds < YEAR) return about(seconds / DAY, "day");
+  const years = seconds / YEAR;
+  if (years < 1e3) return about(years, "year");
+  if (years < 1e6) return `about ${Math.round(years / 1e3).toLocaleString("en-US")} thousand years`;
+  if (years < 1e9) return `about ${Math.round(years / 1e6).toLocaleString("en-US")} million years`;
+  if (years < 1e12) return `about ${Math.round(years / 1e9).toLocaleString("en-US")} billion years`;
+  return "more than a trillion years";
+}
+
+/** From here a proof takes days or more: the page says so, with a smile, and still offers it. */
+export const HUGE_PROOF_SECONDS = DAY;
