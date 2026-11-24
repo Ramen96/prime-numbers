@@ -14,19 +14,20 @@
 import { logarithmicIntegral } from "./logarithmicIntegral.ts";
 
 /**
- * All a wasm32 module can address (and what `npm run build:wasm` allows).
+ * All a wasm32 module can address (and what `npm run build:wasm` allows): the
+ * module's memory ceiling, a platform limit. When the list reaches it, it stops
+ * with the memory-limit notice, nothing skipped. Where the browser reports the
+ * device's memory (Chrome), the budget below stops first (a quarter of it, at
+ * most 2 GiB); elsewhere (Firefox, Safari) this is the ceiling. 64-bit
+ * WebAssembly would raise it; the developer decided (2026-11-23) it isn't needed.
  *
- * Why 32-bit Wasm's 4 GiB is never what stops the list (step 7, measured
- * 2026-11-17, native, one prover): a prover's memory barely grows with the
- * numbers (about 3 MB at 100 digits, 3.6 MB at 1,000), and what does grow, its
- * certificate and chain, grows with the square of the digits. Nine of them would
- * need 4 GiB only near 40,000 digits, where one proof would take centuries (a
- * 1,000-digit proof takes about an hour, and time grows with about the fifth
- * power of the digits). Its class-polynomial cache holds at most one polynomial
- * per discriminant in its table (2,490 at every size measured; about 150 KB
- * after 200 proofs). Base primes are only fully built below 2^64 (about 200 MB
- * there); the proven-prime cache is 16 MB. So time runs out first, and 64-bit
- * Wasm memory isn't needed.
+ * For scale (step 7, measured 2026-11-17, native, one prover): a prover's memory
+ * barely grows with the numbers (about 3 MB at 100 digits, 3.6 MB at 1,000); what
+ * does grow, its certificate and chain, grows with the square of the digits, so
+ * nine of them reach 4 GiB near 40,000 digits. Its class-polynomial cache holds at
+ * most one polynomial per discriminant in its table (2,490 at every size
+ * measured; about 150 KB after 200 proofs). Base primes are only fully built below
+ * 2^64 (about 200 MB there); the proven-prime cache is 16 MB.
  */
 export const WASM_ADDRESS_SPACE_BYTES = 2 ** 32;
 

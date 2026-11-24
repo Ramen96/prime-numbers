@@ -8,6 +8,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 import { DETERMINISTIC_VERIFICATION_LIMIT, millerRabinVerdict, type Verdict } from "../../lib/primes/verifyPrimes.ts";
+import { nextPrimeAfter } from "../support/primality.ts";
 
 interface Harness {
   memory: WebAssembly.Memory;
@@ -317,5 +318,133 @@ describe("BPSW in primality.c", () => {
       const product = nextPrimeFrom(randomBits(36) | (1n << 35n)) * nextPrimeFrom(randomBits(36) | (1n << 35n));
       assert.notEqual(bpswVerdict(product).verdict, "probable-prime", `${product}`);
     }
+  });
+});
+
+// ── Selfridge's D past the 64-bit range (no cap) ──────────────────────────
+//
+// A search for D from 5 never gets near |D| = 2^63, so these call the search from
+// a chosen start through a test-only hook (PRIMALITY_TEST_HOOKS, never in the
+// shipped builds), and check it against BigInt references written here.
+
+interface WideLucasHarness {
+  memory: WebAssembly.Memory;
+  harness_first_input(): number;
+  harness_second_input(): number;
+  harness_output(): number;
+  harness_wide_lucas(candidateCount: number, startCount: number): number;
+  harness_wide_d_limb_count(): number;
+  harness_wide_d_negative(): number;
+}
+const wide = instance.exports as unknown as WideLucasHarness;
+
+function writeLimbs(pointer: number, value: bigint): number {
+  const limbs: number[] = [];
+  for (let rest = value; rest > 0n; rest >>= 32n) limbs.push(Number(rest & 0xffffffffn));
+  new Uint32Array(wide.memory.buffer, pointer >>> 0, limbs.length).set(limbs);
+  return limbs.length;
+}
+
+function readLimbs(pointer: number, count: number): bigint {
+  const limbs = new Uint32Array(wide.memory.buffer, pointer >>> 0, count);
+  let value = 0n;
+  for (let index = count - 1; index >= 0; index--) value = (value << 32n) | BigInt(limbs[index]);
+  return value;
+}
+
+/** The Jacobi symbol (top / bottom) for odd positive bottom, any top. */
+function jacobiReference(top: bigint, bottom: bigint): number {
+  let a = ((top % bottom) + bottom) % bottom;
+  let n = bottom;
+  let sign = 1;
+  while (a !== 0n) {
+    while ((a & 1n) === 0n) {
+      a >>= 1n;
+      if (n % 8n === 3n || n % 8n === 5n) sign = -sign;
+    }
+    [a, n] = [n, a];
+    if (a % 4n === 3n && n % 4n === 3n) sign = -sign;
+    a %= n;
+  }
+  return n === 1n ? sign : 0;
+}
+
+/** The strong Lucas test with P = 1, Q = (1 − D) / 4 and the given D: true if it passes. */
+function strongLucasReference(n: bigint, d: bigint): boolean {
+  const q = (1n - d) / 4n;
+  const reduce = (value: bigint) => ((value % n) + n) % n;
+  const halve = (value: bigint) => {
+    const reduced = reduce(value);
+    return ((reduced & 1n) === 1n ? reduced + n : reduced) >> 1n;
+  };
+  let odd = n + 1n;
+  let twos = 0;
+  while ((odd & 1n) === 0n) {
+    odd >>= 1n;
+    twos++;
+  }
+  let [u, v, qPower] = [1n, 1n, reduce(q)];
+  for (const bit of odd.toString(2).slice(1)) {
+    [u, v] = [reduce(u * v), reduce(v * v - 2n * qPower)];
+    qPower = reduce(qPower * qPower);
+    if (bit === "1") {
+      [u, v] = [halve(u + v), halve(d * u + v)];
+      qPower = reduce(qPower * q);
+    }
+  }
+  if (u === 0n || v === 0n) return true;
+  for (let round = 1; round < twos; round++) {
+    v = reduce(v * v - 2n * qPower);
+    qPower = reduce(qPower * qPower);
+    if (v === 0n) return true;
+  }
+  return false;
+}
+
+/** Selfridge's sequence from |D| = start: the first D with symbol −1, or "factor" at a symbol of 0. */
+function firstDReference(n: bigint, start: bigint): bigint | "factor" {
+  for (let magnitude = start; ; magnitude += 2n) {
+    const d = magnitude % 4n === 1n ? magnitude : -magnitude;
+    const symbol = jacobiReference(d, n);
+    if (symbol === -1) return d;
+    if (symbol === 0 && magnitude % n !== 0n) return "factor";
+  }
+}
+
+function wideLucas(candidate: bigint, start: bigint): { result: number; d: bigint } {
+  const candidateCount = writeLimbs(wide.harness_first_input(), candidate);
+  const startCount = writeLimbs(wide.harness_second_input(), start);
+  const result = wide.harness_wide_lucas(candidateCount, startCount);
+  const magnitude = readLimbs(wide.harness_output(), wide.harness_wide_d_limb_count());
+  return { result, d: wide.harness_wide_d_negative() ? -magnitude : magnitude };
+}
+
+describe("Selfridge's D past 2^63 (no cap)", () => {
+  const PAST_63_BITS = (1n << 63n) + 1n; // where the 64-bit search hands over
+  const BELOW_64_BITS = (1n << 64n) - 1n; // |D| itself crosses into a third limb on the way
+
+  it("finds the same D as the reference, and the Lucas test agrees with it, for primes and composites", () => {
+    const prime100 = nextPrimeAfter(10n ** 99n);
+    const prime300 = nextPrimeAfter(10n ** 299n);
+    const composite = nextPrimeAfter(10n ** 49n) * nextPrimeAfter(3n * 10n ** 50n);
+    let compositeCaught = false;
+    for (const candidate of [prime100, prime300, composite, nextPrimeAfter(prime100)])
+      for (const start of [PAST_63_BITS, BELOW_64_BITS]) {
+        const expectedD = firstDReference(candidate, start);
+        assert.notEqual(expectedD, "factor");
+        const { result, d } = wideLucas(candidate, start);
+        assert.equal(d, expectedD, `D from ${start} for a ${candidate.toString().length}-digit number`);
+        const passes = strongLucasReference(candidate, d);
+        assert.equal(result, passes ? 1 : 0, `the Lucas verdict with D = ${d}`);
+        if (candidate === composite) compositeCaught ||= !passes;
+        if (candidate !== composite) assert.equal(result, 1, "a prime passes");
+      }
+    assert.ok(compositeCaught, "the composite fails the Lucas test with a wide D");
+  });
+
+  it("reports a shared factor past 2^63, which no 32-bit evidence slot could hold", () => {
+    const sharesD = PAST_63_BITS * nextPrimeAfter(10n ** 40n); // the very first |D| divides it
+    assert.equal(firstDReference(sharesD, PAST_63_BITS), "factor");
+    assert.equal(wideLucas(sharesD, PAST_63_BITS).result, 2);
   });
 });

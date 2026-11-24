@@ -669,7 +669,49 @@ static void check_perfect_square_modulus(const big_number *root) {
   big_number_free(&value);
 }
 
+// The search has no fixed-width counter: started just below 2^64 for small primes,
+// it counts past 2^64 where every value it meets there is a residue. The reference
+// counts in unsigned __int128.
+static void check_non_residue_search_crosses_2_to_the_64(void) {
+  const u128 start = (u128)UINT64_MAX - 1; // 2^64 − 2
+  int crossings = 0;
+  for (uint64_t prime = 3; prime < 2000; prime += 2) {
+    int is_prime = 1;
+    for (uint64_t divisor = 3; divisor * divisor <= prime && is_prime; divisor += 2)
+      is_prime = prime % divisor != 0;
+    if (!is_prime)
+      continue;
+    u128 expected = start;
+    while (reference_power_mod((uint64_t)(expected % prime), (prime - 1) / 2, prime) != prime - 1)
+      expected++;
+    if (expected <= (u128)UINT64_MAX)
+      continue; // doesn't cross: covered by the search from 2
+    crossings++;
+    big_number modulus, from, found, two_to_the_64, past;
+    big_number_init(&modulus);
+    big_number_init(&from);
+    big_number_init(&found);
+    big_number_init(&two_to_the_64);
+    big_number_init(&past);
+    big_number_set_u64(&modulus, prime);
+    big_number_set_u64(&from, UINT64_MAX - 1);
+    big_number_set_u64(&two_to_the_64, UINT64_MAX);
+    big_number_add_small(&two_to_the_64, 1);
+    int status = big_number_test_first_non_residue_from(&found, &modulus, &from);
+    expect_equal("non-residue found past 2^64", prime, 2, (u128)(status + 1));
+    big_number_subtract(&past, &found, &two_to_the_64);
+    expect_equal("non-residue past 2^64 (found − 2^64)", prime, expected - ((u128)UINT64_MAX + 1), big_number_to_u64(&past));
+    big_number_free(&modulus);
+    big_number_free(&from);
+    big_number_free(&found);
+    big_number_free(&two_to_the_64);
+    big_number_free(&past);
+  }
+  expect_equal("primes whose search crosses 2^64", 0, 1, crossings > 0);
+}
+
 static void check_non_residue_search(void) {
+  check_non_residue_search_crosses_2_to_the_64();
   for (uint64_t candidate = 3; candidate < 100000; candidate += 2) {
     int is_prime = 1;
     for (uint64_t divisor = 3; divisor * divisor <= candidate && is_prime; divisor += 2)

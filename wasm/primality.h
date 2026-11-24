@@ -77,4 +77,12 @@ primality_verdict bpsw(const big_number *candidate, uint32_t *evidence);
 // above 41: 1 if it passes, 0 if it's proven composite, -1 if memory ran out.
 int strong_lucas_probable_prime(const big_number *candidate);
 
+#ifdef PRIMALITY_TEST_HOOKS
+// For the tests only (never in the shipped builds): Selfridge's search for D from
+// any odd |D| = `start`, past the 64-bit range a search from 5 never leaves, and
+// the strong Lucas test with the D found. Returns 1 passes, 0 composite, 2 a
+// shared factor (no D), -1 out of memory.
+int primality_test_wide_lucas(const big_number *candidate, const big_number *start, big_number *d_magnitude, int *d_negative);
+#endif
+
 #endif

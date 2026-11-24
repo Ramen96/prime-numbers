@@ -107,9 +107,9 @@ static int compare_discriminants(const void *first, const void *second) {
   return left->discriminant > right->discriminant ? -1 : left->discriminant < right->discriminant;
 }
 
-// Adds the next band of discriminants, sorted by class number. |D| is int64_t,
-// which a band can't reach: listing one band's forms takes about |D|² / 2 steps,
-// so |D| near 2^62 would be about 10^37 steps away.
+// Adds the next band of discriminants, sorted by class number. |D| is int64_t, which
+// memory runs out before: every fundamental discriminant found is kept (16 bytes; about
+// 3 in 10 numbers are one), so |D| near 2^62 would mean holding about 10^18 of them.
 static int add_band(ecpp_prover *prover) {
   int64_t start = prover->next_band_start, end = start < FIRST_BAND_END ? FIRST_BAND_END : 2 * start;
   size_t first_new = prover->discriminant_count;
@@ -414,10 +414,10 @@ static int discriminant_root(ecpp_prover *prover, const big_number *n, int64_t d
 // Allows every step more effort when the whole search is stuck: the limit doubles,
 // but stops at SIZE_MAX / 2 + 1 instead of wrapping to 0, which would let no step
 // examine anything and leave the prime pending forever. In wasm32 that's 2^31,
-// reached after 20 doublings from 2,048. It can't be reached first anyway: a step
-// examining 2^31 discriminants needs |D| up to about 2^33 (about 3 in 10 numbers
-// give a fundamental discriminant), and listing a band's forms takes about
-// |D|² / 2 steps, some 10^19. The cap only makes sure of it.
+// reached after 20 doublings from 2,048. Memory runs out first: a step examines only
+// discriminants held in prover->discriminants (16 bytes each), so examining more than
+// SIZE_MAX / 2 of them means holding more bytes than the module can address, in any
+// build. The cap only makes sure of it.
 static void allow_more_effort(ecpp_prover *prover) {
   if (prover->effort_limit <= SIZE_MAX / 2)
     prover->effort_limit *= 2;

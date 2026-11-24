@@ -235,6 +235,27 @@ int harness_strong_lucas(size_t count) {
   return result;
 }
 
+#ifdef PRIMALITY_TEST_HOOKS
+// Selfridge's search for D from |D| = the second input (odd), past where a search
+// from 5 ever gets, and the strong Lucas test with that D: 1 passes, 0 composite,
+// 2 a shared factor, -1 out of memory. |D| goes in the output (its limb count from
+// harness_wide_d_limb_count) and D's sign from harness_wide_d_negative.
+static size_t wide_d_limb_count;
+static int wide_d_negative;
+size_t harness_wide_d_limb_count(void) { return wide_d_limb_count; }
+int harness_wide_d_negative(void) { return wide_d_negative; }
+int harness_wide_lucas(size_t candidate_count, size_t start_count) {
+  big_number candidate = load(first_input, candidate_count), start = load(second_input, start_count), magnitude;
+  big_number_init(&magnitude);
+  wide_d_negative = 0;
+  int result = primality_test_wide_lucas(&candidate, &start, &magnitude, &wide_d_negative);
+  wide_d_limb_count = store(&magnitude);
+  big_number_free(&candidate);
+  big_number_free(&start);
+  return result;
+}
+#endif
+
 // ── for ECPP ──────────────────────────────────────────────────────────────
 
 // first⁻¹ mod second, in the output. FAILED if there's no inverse.

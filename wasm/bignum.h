@@ -136,6 +136,9 @@ int big_number_jacobi(const big_number *top, const big_number *bottom);
 // Returns 1, or -1 if there's none (the modulus is a perfect square), or 0 if memory
 // runs out.
 int big_number_first_non_residue(big_number *result, const big_number *modulus);
+#ifdef BIGNUM_TEST_HOOKS
+int big_number_test_first_non_residue_from(big_number *result, const big_number *modulus, const big_number *start);
+#endif
 
 // result = a square root of value mod an odd modulus above 2, by Tonelli–Shanks.
 // Returns 1 with a result that's been squared to check it, or -1 if none was

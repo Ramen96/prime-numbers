@@ -84,7 +84,8 @@ function ProofEstimate({ digits }: { digits: number }) {
     <p className="mt-2 text-sm text-muted" data-testid="prime-check-estimate">
       A proof of a {formatWholeNumber(BigInt(digits))}-digit number takes {describeProofTime(seconds)} on a laptop; a
       phone is slower.
-      {seconds >= HUGE_PROOF_SECONDS && " That’s a big number. The page will try, and “Give up” is right there."}
+      {seconds >= HUGE_PROOF_SECONDS &&
+        " That’s a big number. The page will try, and “Give up” is right there. Only your device decides how far it can go."}
     </p>
   );
 }

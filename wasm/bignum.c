@@ -948,23 +948,42 @@ static int is_perfect_square(const big_number *number) {
 // code limit: a prime with no non-residue below the cap has no square roots here,
 // so no curve orders and no points, and it would block the list forever. Such
 // primes exist (one with none below 100,000 can be built at about 43,000 digits).
-// The counter is uint64_t: 2^64 Jacobi symbols for one number can't be reached first.
-int big_number_first_non_residue(big_number *result, const big_number *modulus) {
-  for (uint64_t value = 2;; value++) {
-    if (!big_number_set_u64(result, value))
-      return 0;
+// The candidate is a big_number, so the count has no fixed width either. Starts at
+// `start` (2, except in a test that crosses 2^64).
+static int first_non_residue_from(big_number *result, const big_number *modulus, const big_number *start) {
+  if (!big_number_copy(result, start))
+    return 0;
+  for (unsigned tries = 1;; tries++) {
     int symbol = big_number_jacobi(result, modulus);
     if (symbol == -2)
       return 0;
     if (symbol == -1)
       return 1;
-    if (value - 1 == TRIES_BEFORE_SQUARE_CHECK) {
+    if (tries == TRIES_BEFORE_SQUARE_CHECK) { // compared once, so it never needs to count further
       int square = is_perfect_square(modulus);
       if (square != 0)
         return square < 0 ? 0 : -1;
     }
+    if (!big_number_add_small(result, 1))
+      return 0;
   }
 }
+
+int big_number_first_non_residue(big_number *result, const big_number *modulus) {
+  big_number two;
+  big_number_init(&two);
+  int status = big_number_set_u64(&two, 2) ? first_non_residue_from(result, modulus, &two) : 0;
+  big_number_free(&two);
+  return status;
+}
+
+#ifdef BIGNUM_TEST_HOOKS
+// For the native tests only (never in the shipped builds): the search from `start`,
+// so a test can watch it count past 2^64, which from 2 it never gets near.
+int big_number_test_first_non_residue_from(big_number *result, const big_number *modulus, const big_number *start) {
+  return first_non_residue_from(result, modulus, start);
+}
+#endif
 
 // Tonelli–Shanks. Write modulus − 1 = odd · 2^twos. With z a non-residue, keep
 //   t = value^odd   (its order divides 2^twos)

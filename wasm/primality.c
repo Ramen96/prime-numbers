@@ -390,25 +390,40 @@ static int is_perfect_square(const big_number *number) {
 // Selfridge's D tries before checking for a perfect square, which has no D at
 // all. A non-square reaches this about once in a million, so the check is rare.
 #define SELFRIDGE_TRIES_BEFORE_SQUARE_CHECK 20
-// A fixed width that can't be reached first. Every D tried is 1 mod 4, so for each
-// odd prime p below 2^31, ±p is among them, and by quadratic reciprocity
-// (±p / candidate) = (candidate / p). Getting past the end needs that to be 1 for
-// every such p (0 is a factor, and stops the search): a non-square that's a square
-// modulo all of about 10^8 primes. A random number does that with odds of about
-// 2^-(10^8). And the only known way to build one, by the Chinese remainder theorem,
-// gives about 10^9 digits, more than a browser's BigInt can hold, so it can't be a
-// jump target either. Squares are caught long before. If it were ever reached, the
-// candidate would just stay pending.
-#define SELFRIDGE_LARGEST_D 2147483647
+// No cap on D. The search runs through 5, −7, 9, −11, … in int64_t (fast: one
+// "big mod small" per D) up to |D| = 2^63 − 1, and past that with |D| as a
+// big_number, as far as it takes. A non-square always has some D with symbol −1
+// (Jacobi symbols of a non-square aren't all 1), so the search ends; squares are
+// caught after SELFRIDGE_TRIES_BEFORE_SQUARE_CHECK tries, long before.
+//
+// D is 1 mod 4 in this sequence, so its sign follows from |D|: + when |D| is 1
+// mod 4, − when it's 3 mod 4.
 
-typedef enum { LUCAS_FOUND_D, LUCAS_FOUND_FACTOR, LUCAS_IS_SQUARE, LUCAS_UNSETTLED } lucas_parameter_result;
+typedef enum {
+  LUCAS_FOUND_D,
+  LUCAS_FOUND_FACTOR,      // a factor below 2^32, as evidence
+  LUCAS_FOUND_WIDE_FACTOR, // D shares a factor of 2^32 or more: proven by the Lucas stage, re-checked without a number
+  LUCAS_IS_SQUARE,
+  LUCAS_PAST_64_BITS, // every D up to |D| = 2^63 − 1 gave +1: go on with big_number D
+  LUCAS_UNSETTLED,    // out of memory: stays pending
+} lucas_parameter_result;
 
-// Selfridge's method A: the first D in 5, −7, 9, −11, … with (D / candidate) = −1.
-// A symbol of 0 means D shares a factor with the candidate, which is a proof.
+// Selfridge's method A's D: in int64_t while it fits (`small`), else as a sign and
+// a big_number magnitude.
+typedef struct {
+  int small;
+  int64_t d;
+  big_number magnitude;
+  int negative;
+} lucas_d;
+
+// Selfridge's method A: the first D in 5, −7, 9, −11, … with (D / candidate) = −1,
+// for |D| up to 2^63 − 1. A symbol of 0 means D shares a factor with the
+// candidate, which is a proof.
 static lucas_parameter_result find_lucas_d(const big_number *candidate, int64_t *d, uint32_t *factor) {
   int tries = 0;
-  for (int64_t magnitude = 5, sign = 1; magnitude <= SELFRIDGE_LARGEST_D; magnitude += 2, sign = -sign) {
-    int64_t candidate_d = sign * magnitude;
+  for (int64_t magnitude = 5;; magnitude += 2) {
+    int64_t candidate_d = (magnitude & 3) == 1 ? magnitude : -magnitude;
     int symbol = jacobi_of_small(candidate_d, candidate);
     if (symbol == -1) {
       *d = candidate_d;
@@ -417,7 +432,9 @@ static lucas_parameter_result find_lucas_d(const big_number *candidate, int64_t 
     if (symbol == 0) {
       uint64_t common = greatest_common_divisor((uint64_t)magnitude, big_number_mod_small(candidate, (uint64_t)magnitude));
       if (big_number_compare_u64(candidate, common) != 0) {
-        *factor = (uint32_t)common; // below 2^31, since magnitude is
+        if (common > UINT32_MAX)
+          return LUCAS_FOUND_WIDE_FACTOR;
+        *factor = (uint32_t)common;
         return LUCAS_FOUND_FACTOR;
       }
     }
@@ -428,8 +445,70 @@ static lucas_parameter_result find_lucas_d(const big_number *candidate, int64_t 
       if (square)
         return LUCAS_IS_SQUARE;
     }
+    if (magnitude == INT64_MAX)
+      return LUCAS_PAST_64_BITS;
   }
-  return LUCAS_UNSETTLED;
+}
+
+// The same search past |D| = 2^63 − 1, with |D| a big_number starting at `start`
+// (2^63 + 1 when it follows find_lucas_d). Squares were ruled out before it.
+// (D / candidate) = (−1 / candidate)(|D| / candidate) for negative D.
+static lucas_parameter_result find_wide_lucas_d(const big_number *candidate, const big_number *start, lucas_d *found) {
+  big_number *magnitude = &found->magnitude;
+  big_number remainder;
+  big_number_init(&remainder);
+  lucas_parameter_result result = LUCAS_UNSETTLED;
+  if (!big_number_copy(magnitude, start))
+    goto done;
+  for (;;) {
+    int negative = (magnitude->limbs[0] & 3) == 3;
+    int symbol = big_number_jacobi(magnitude, candidate);
+    if (symbol == -2)
+      goto done; // out of memory
+    if (negative && (candidate->limbs[0] & 3) == 3)
+      symbol = -symbol;
+    if (symbol == -1) {
+      found->small = 0;
+      found->negative = negative;
+      result = LUCAS_FOUND_D;
+      goto done;
+    }
+    if (symbol == 0) {
+      // shares a factor, unless the candidate divides |D| (only if it's no bigger)
+      if (big_number_compare(candidate, magnitude) > 0) {
+        result = LUCAS_FOUND_WIDE_FACTOR;
+        goto done;
+      }
+      if (!big_number_divide(NULL, &remainder, magnitude, candidate))
+        goto done;
+      if (remainder.limb_count != 0) {
+        result = LUCAS_FOUND_WIDE_FACTOR;
+        goto done;
+      }
+    }
+    if (!big_number_add_small(magnitude, 2))
+      goto done;
+  }
+done:
+  big_number_free(&remainder);
+  return result;
+}
+
+// Both searches, one after the other: D for the Lucas test in `found`.
+static lucas_parameter_result find_any_lucas_d(const big_number *candidate, lucas_d *found, uint32_t *factor) {
+  lucas_parameter_result result = find_lucas_d(candidate, &found->d, factor);
+  found->small = 1;
+  if (result != LUCAS_PAST_64_BITS)
+    return result;
+  big_number start;
+  big_number_init(&start);
+  // 2^63 + 1, the next odd |D|
+  if (!big_number_set_u64(&start, (uint64_t)INT64_MAX) || !big_number_add_small(&start, 2))
+    result = LUCAS_UNSETTLED;
+  else
+    result = find_wide_lucas_d(candidate, &start, found);
+  big_number_free(&start);
+  return result;
 }
 
 // number = number / 2 mod N, for odd N: an odd number becomes even by adding N.
@@ -437,6 +516,21 @@ static int halve_mod(big_number *number, const big_number *modulus) {
   if (big_number_is_odd(number) && !big_number_add(number, number, modulus))
     return 0;
   return big_number_shift_right(number, number, 1);
+}
+
+// result = (±magnitude) mod N in Montgomery form, for a magnitude of any size.
+static int signed_to_form(montgomery_context *context, big_number *result, const big_number *magnitude, int negative) {
+  big_number reduced, form;
+  big_number_init(&reduced);
+  big_number_init(&form);
+  int ok = big_number_divide(NULL, &reduced, magnitude, &context->modulus) && montgomery_to_form(context, &form, &reduced);
+  if (ok && negative && form.limb_count > 0)
+    ok = big_number_subtract(result, &context->modulus, &form);
+  else if (ok)
+    ok = big_number_copy(result, &form);
+  big_number_free(&reduced);
+  big_number_free(&form);
+  return ok;
 }
 
 // result = value mod N in Montgomery form, for a small value of either sign.
@@ -455,13 +549,29 @@ static int small_to_form(montgomery_context *context, big_number *result, int64_
   return ok;
 }
 
+// D and Q = (1 − D) / 4 in Montgomery form, from a small D or a wide one. For a
+// wide D (1 mod 4): Q = −(|D| − 1) / 4 if D > 0, (|D| + 1) / 4 if D < 0.
+static int lucas_forms(montgomery_context *context, const lucas_d *d, big_number *d_form, big_number *q_form) {
+  if (d->small)
+    return small_to_form(context, d_form, d->d) && small_to_form(context, q_form, (1 - d->d) / 4);
+  big_number q_magnitude;
+  big_number_init(&q_magnitude);
+  int ok = signed_to_form(context, d_form, &d->magnitude, d->negative) && big_number_copy(&q_magnitude, &d->magnitude) &&
+           (d->negative ? big_number_add_small(&q_magnitude, 1) : big_number_subtract_small(&q_magnitude, 1)) &&
+           big_number_shift_right(&q_magnitude, &q_magnitude, 2) &&
+           signed_to_form(context, q_form, &q_magnitude, !d->negative);
+  big_number_free(&q_magnitude);
+  return ok;
+}
+
+
 // The strong Lucas test with P = 1, Q = (1 − D) / 4. Write n + 1 = d · 2^s with d
 // odd. A prime n must have U_d ≡ 0, or V_(d·2^r) ≡ 0 for some r < s. U and V are
 // computed mod n by walking d's bits from the top, as in binary exponentiation:
 //   doubling:  U_2k = U_k V_k          V_2k = V_k² − 2 Q^k
 //   adding 1:  U_k+1 = (U_k + V_k) / 2    V_k+1 = (D U_k + V_k) / 2
 // Returns 1 passes, 0 proven composite, -1 out of memory.
-static int passes_strong_lucas(const big_number *candidate, int64_t d) {
+static int passes_strong_lucas(const big_number *candidate, const lucas_d *d) {
   montgomery_context context;
   big_number odd_part, u, v, q_power, q_form, d_form, product, old_u;
   big_number *numbers[] = {&odd_part, &u, &v, &q_power, &q_form, &d_form, &product, &old_u};
@@ -481,8 +591,8 @@ static int passes_strong_lucas(const big_number *candidate, int64_t d) {
   if (!big_number_shift_right(&odd_part, &odd_part, powers_of_two))
     goto done;
 
-  if (!small_to_form(&context, &d_form, d) || !small_to_form(&context, &q_form, (1 - d) / 4) ||
-      !small_to_form(&context, &u, 1) || !small_to_form(&context, &v, 1) || !big_number_copy(&q_power, &q_form))
+  if (!lucas_forms(&context, d, &d_form, &q_form) || !small_to_form(&context, &u, 1) || !small_to_form(&context, &v, 1) ||
+      !big_number_copy(&q_power, &q_form))
     goto done;
 
 // V = V² − 2 · Q^k, and Q^k = (Q^k)²: the step every doubling needs
@@ -519,16 +629,23 @@ done:
 }
 
 int strong_lucas_probable_prime(const big_number *candidate) {
-  int64_t d = 0;
+  lucas_d d = {0};
+  big_number_init(&d.magnitude);
   uint32_t factor = 0;
-  switch (find_lucas_d(candidate, &d, &factor)) {
+  int result;
+  switch (find_any_lucas_d(candidate, &d, &factor)) {
   case LUCAS_FOUND_D:
-    return passes_strong_lucas(candidate, d);
+    result = passes_strong_lucas(candidate, &d);
+    break;
   case LUCAS_UNSETTLED:
-    return -1;
+  case LUCAS_PAST_64_BITS: // find_any_lucas_d never returns it
+    result = -1;
+    break;
   default:
-    return 0; // a factor, or a square
+    result = 0; // a factor, or a square
   }
+  big_number_free(&d.magnitude);
+  return result;
 }
 
 primality_verdict bpsw(const big_number *candidate, uint32_t *evidence) {
@@ -553,22 +670,60 @@ primality_verdict bpsw(const big_number *candidate, uint32_t *evidence) {
     return PRIMALITY_COMPOSITE_BY_WITNESS;
   }
 
-  int64_t d = 0;
+  lucas_d d = {0};
+  big_number_init(&d.magnitude);
   uint32_t factor = 0;
-  switch (find_lucas_d(candidate, &d, &factor)) {
+  primality_verdict verdict;
+  switch (find_any_lucas_d(candidate, &d, &factor)) {
   case LUCAS_FOUND_FACTOR:
     if (evidence)
       *evidence = factor;
-    return PRIMALITY_COMPOSITE_BY_FACTOR;
+    verdict = PRIMALITY_COMPOSITE_BY_FACTOR;
+    goto done;
+  case LUCAS_FOUND_WIDE_FACTOR:
+    // too wide for the evidence slot: the Lucas re-check (failsStrongLucas) finds the same D
+    verdict = PRIMALITY_COMPOSITE_BY_LUCAS;
+    goto done;
   case LUCAS_IS_SQUARE:
-    return PRIMALITY_COMPOSITE_BY_SQUARE;
+    verdict = PRIMALITY_COMPOSITE_BY_SQUARE;
+    goto done;
   case LUCAS_UNSETTLED:
-    return PRIMALITY_OUT_OF_MEMORY; // stays pending
+  case LUCAS_PAST_64_BITS: // find_any_lucas_d never returns it
+    verdict = PRIMALITY_OUT_OF_MEMORY; // stays pending
+    goto done;
   case LUCAS_FOUND_D:
     break;
   }
-  int passed_lucas = passes_strong_lucas(candidate, d);
-  if (passed_lucas < 0)
-    return PRIMALITY_OUT_OF_MEMORY;
-  return passed_lucas ? PRIMALITY_PROBABLE_PRIME : PRIMALITY_COMPOSITE_BY_LUCAS;
+  int passed_lucas = passes_strong_lucas(candidate, &d);
+  verdict = passed_lucas < 0 ? PRIMALITY_OUT_OF_MEMORY : passed_lucas ? PRIMALITY_PROBABLE_PRIME : PRIMALITY_COMPOSITE_BY_LUCAS;
+done:
+  big_number_free(&d.magnitude);
+  return verdict;
 }
+
+#ifdef PRIMALITY_TEST_HOOKS
+// For the tests only (never in the shipped builds): the search for D from any odd
+// |D| = `start`, and the strong Lucas test with the D it finds, which a search from
+// 5 never reaches past 2^63. Returns 1 passes, 0 composite, 2 a shared factor
+// (no D), -1 out of memory; the D found goes in `d_magnitude` and `d_negative`.
+int primality_test_wide_lucas(const big_number *candidate, const big_number *start, big_number *d_magnitude, int *d_negative) {
+  lucas_d d = {0};
+  big_number_init(&d.magnitude);
+  int result = -1;
+  switch (find_wide_lucas_d(candidate, start, &d)) {
+  case LUCAS_FOUND_D:
+    result = passes_strong_lucas(candidate, &d);
+    if (!big_number_copy(d_magnitude, &d.magnitude))
+      result = -1;
+    *d_negative = d.negative;
+    break;
+  case LUCAS_FOUND_WIDE_FACTOR:
+    result = 2;
+    break;
+  default:
+    break;
+  }
+  big_number_free(&d.magnitude);
+  return result;
+}
+#endif

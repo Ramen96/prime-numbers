@@ -29,7 +29,7 @@ fast)
   SIEVE_TEST_HELPERS=8 .cache/sieve_test_threads
   cc -O2 $warnings -DSIEVE_TEST_HOOKS -DSIEVE_THREADS -pthread -o .cache/sieve_test_measured tests/native/sieve_test.c $sources
   SIEVE_TEST_HELPERS=8 SIEVE_TEST_MEASURE=1 .cache/sieve_test_measured
-  cc -O2 $warnings -o .cache/bignum_test tests/native/bignum_test.c wasm/bignum.c -lm
+  cc -O2 $warnings -DBIGNUM_TEST_HOOKS -o .cache/bignum_test tests/native/bignum_test.c wasm/bignum.c -lm
   .cache/bignum_test
   cc -O2 $warnings -o .cache/primality_test tests/native/primality_test.c wasm/primality.c wasm/bignum.c -lm
   .cache/primality_test
@@ -63,7 +63,7 @@ tsan)
   ;;
 asan)
   sanitizers="-O1 -g -fsanitize=address"
-  cc $sanitizers $warnings -o .cache/bignum_test_asan tests/native/bignum_test.c wasm/bignum.c -lm
+  cc $sanitizers $warnings -DBIGNUM_TEST_HOOKS -o .cache/bignum_test_asan tests/native/bignum_test.c wasm/bignum.c -lm
   .cache/bignum_test_asan
   cc $sanitizers $warnings -o .cache/primality_test_asan tests/native/primality_test.c wasm/primality.c wasm/bignum.c -lm
   .cache/primality_test_asan
