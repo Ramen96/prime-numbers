@@ -47,18 +47,13 @@ export function fitNumber(formatted: string, availablePx: number, widths: GlyphW
     [...groups.slice(0, front), ELLIPSIS, ...groups.slice(groups.length - back)].join(",");
   let front = 1;
   let back = 1;
-  // keep at least one group out, or it isn't shortened
+  // Every group past the first has three digits, so the next group adds the same
+  // width on either side: once one doesn't fit, neither would the other. The loop
+  // stops with at least one group left out, which is also where it ends anyway.
   while (front + back < groups.length - 1) {
-    const addToFront = front <= back;
-    const [nextFront, nextBack] = addToFront ? [front + 1, back] : [front, back + 1];
-    if (textWidth(join(nextFront, nextBack), widths) <= availablePx) {
-      [front, back] = [nextFront, nextBack];
-      continue;
-    }
-    // that side's next group is too wide; the other side's may still fit
-    const [otherFront, otherBack] = addToFront ? [front, back + 1] : [front + 1, back];
-    if (textWidth(join(otherFront, otherBack), widths) > availablePx) break;
-    [front, back] = [otherFront, otherBack];
+    const [nextFront, nextBack] = front <= back ? [front + 1, back] : [front, back + 1];
+    if (textWidth(join(nextFront, nextBack), widths) > availablePx) break;
+    [front, back] = [nextFront, nextBack];
   }
   return { text: join(front, back), shortened: true };
 }
