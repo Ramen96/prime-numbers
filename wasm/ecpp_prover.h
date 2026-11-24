@@ -40,6 +40,13 @@ typedef enum {
   // Memory ran out. The search can go on (ecpp_prover_run again) once memory
   // is free; nothing is lost and nothing is decided.
   ECPP_PROOF_OUT_OF_MEMORY,
+  // External stripping only (ecpp_prover_set_external_stripping): a batch of
+  // curve orders is ready to strip. Read it with ecpp_prover_strip_request, and
+  // call ecpp_prover_run again meanwhile: the prover works ahead.
+  ECPP_PROOF_NEEDS_STRIPPING,
+  // External stripping only: nothing more can be done until the batch handed out
+  // is stripped (ecpp_prover_report_factor, then ecpp_prover_stripping_done).
+  ECPP_PROOF_WAITING,
 } ecpp_proof_status;
 
 // Everything below is private to ecpp_prover.c; the struct is here so it can live
@@ -56,6 +63,7 @@ typedef struct {
 } ecpp_cached_polynomial;
 
 typedef struct ecpp_proof_node ecpp_proof_node;
+typedef struct ecpp_pending_discriminant ecpp_pending_discriminant;
 
 // One prime discriminant (−4, 8, −8, or ±p, the sign making it 1 mod 4) and what's
 // known about it modulo the number being examined. Private to ecpp_prover.c.
@@ -92,6 +100,10 @@ typedef struct {
   // The finished certificate, once ECPP_PROOF_DONE.
   ecpp_certificate_step *steps;
   size_t step_count;
+  // External stripping (step 11b): discriminants per batch, 0 for built in.
+  size_t discriminants_per_batch;
+  // Factors reported that don't divide their order: ignored, and counted.
+  size_t rejected_claims;
 } ecpp_prover;
 
 // Sets up a prover, with nothing to prove yet. effort_limit is how many
@@ -107,6 +119,27 @@ int ecpp_prover_reset(ecpp_prover *prover, const big_number *candidate);
 // Goes on with the proof for about `work` units (a unit is one discriminant
 // examined, or one curve built).
 ecpp_proof_status ecpp_prover_run(ecpp_prover *prover, size_t work);
+
+// Stripping small factors from curve orders (CLAUDE.md, step 11b). Built in (the
+// default, discriminants_per_batch 0): by trial division, here, as it always was.
+// External: the prover hands the orders out a batch at a time, for something else
+// (the GPU) to find their small prime factors, and checks every factor reported:
+// one that doesn't divide its order is ignored and counted, and one that's missed
+// only leaves the order unusable. So a wrong stripper can only make proofs
+// slower, never wrong. Switching to built in at any time strips whatever is
+// handed out or worked out ahead here, at the next run.
+void ecpp_prover_set_external_stripping(ecpp_prover *prover, size_t discriminants_per_batch);
+// The batch handed out: its orders, while one is out (0 otherwise). Requests stay
+// out across pauses until ecpp_prover_stripping_done, so they can be sent again.
+size_t ecpp_prover_strip_request_count(const ecpp_prover *prover);
+const big_number *ecpp_prover_strip_request(const ecpp_prover *prover, size_t index);
+// A prime factor found for request `index` (any size, any number of times): divided
+// out if it divides the order, otherwise counted as rejected. Returns 1, or 0 if
+// memory runs out (call it again).
+int ecpp_prover_report_factor(ecpp_prover *prover, size_t index, uint64_t factor);
+// Every factor of the batch is reported: the prover can go on with it.
+void ecpp_prover_stripping_done(ecpp_prover *prover);
+size_t ecpp_prover_rejected_claims(const ecpp_prover *prover);
 
 // The certificate, once ecpp_prover_run has returned ECPP_PROOF_DONE.
 size_t ecpp_prover_step_count(const ecpp_prover *prover);

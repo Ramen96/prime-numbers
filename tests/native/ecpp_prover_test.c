@@ -200,7 +200,136 @@ static void check_effort_never_wraps(void) {
   ecpp_prover_free(&prover);
 }
 
+// ── external stripping (step 11b) ─────────────────────────────────────────
+//
+// Stand-in strippers answer the prover's requests the way the GPU will: exactly
+// (trial division to built-in stripping's bound, so certificates must match
+// built-in stripping's exactly), lying (adding factors that don't divide), or
+// partly (only primes below 100, as a GPU missing most factors would).
+
+typedef enum { STAND_IN_EXACT, STAND_IN_LYING, STAND_IN_PARTIAL } stand_in;
+
+#define STAND_IN_BOUND 100000 // built-in stripping's bound below 830 bits (every candidate here)
+static uint32_t stand_in_primes[9592];
+static size_t stand_in_prime_count = 0;
+
+static void build_stand_in_primes(void) {
+  static unsigned char composite[STAND_IN_BOUND];
+  for (uint32_t value = 2; value < STAND_IN_BOUND; value++) {
+    if (composite[value])
+      continue;
+    stand_in_primes[stand_in_prime_count++] = value;
+    for (uint64_t multiple = (uint64_t)value * value; multiple < STAND_IN_BOUND; multiple += value)
+      composite[multiple] = 1;
+  }
+}
+
+// Answers every request handed out, `times` times over (2: a batch sent again after a pause).
+static void answer_requests(ecpp_prover *prover, stand_in kind, int times) {
+  size_t count = ecpp_prover_strip_request_count(prover);
+  expect(count > 0, "a waiting prover has requests out", 0);
+  for (int round = 0; round < times; round++)
+    for (size_t index = 0; index < count; index++) {
+      const big_number *order = ecpp_prover_strip_request(prover, index);
+      uint32_t bound = kind == STAND_IN_PARTIAL ? 100 : STAND_IN_BOUND;
+      uint32_t not_a_factor = 0;
+      for (size_t prime = 0; prime < stand_in_prime_count && stand_in_primes[prime] < bound; prime++) {
+        if (big_number_mod_small(order, stand_in_primes[prime]) == 0)
+          expect(ecpp_prover_report_factor(prover, index, stand_in_primes[prime]), "report a factor", index);
+        else if (not_a_factor == 0)
+          not_a_factor = stand_in_primes[prime];
+      }
+      if (kind == STAND_IN_LYING) {
+        ecpp_prover_report_factor(prover, index, 0);
+        ecpp_prover_report_factor(prover, index, 1);
+        ecpp_prover_report_factor(prover, index, not_a_factor);
+        ecpp_prover_report_factor(prover, index + 1000000, 2); // no such request
+      }
+    }
+  ecpp_prover_stripping_done(prover);
+  expect(ecpp_prover_strip_request_count(prover) == 0, "nothing is out once stripped", 0);
+}
+
+// Runs a proof to the end with external stripping. switch_at: hand out that many
+// batches, then switch to built-in stripping with the last one still out (0: never).
+// Gives up (ECPP_PROOF_MORE) after far more work than any such proof here needs,
+// so a stripper that breaks the search fails the test instead of hanging it. A
+// stripper missing most factors needs many more curves, so more work.
+#define EXTERNAL_RUN_CALLS 500
+#define PARTIAL_RUN_CALLS 50000
+static ecpp_proof_status run_external(ecpp_prover *prover, stand_in kind, int times, int switch_at, size_t *batches) {
+  *batches = 0;
+  size_t budget = kind == STAND_IN_PARTIAL ? PARTIAL_RUN_CALLS : EXTERNAL_RUN_CALLS;
+  for (size_t calls = 0; calls < budget; calls++) {
+    ecpp_proof_status status = ecpp_prover_run(prover, 1000);
+    if (status == ECPP_PROOF_MORE)
+      continue;
+    if (status == ECPP_PROOF_NEEDS_STRIPPING) {
+      if (++*batches == (size_t)switch_at)
+        ecpp_prover_set_external_stripping(prover, 0);
+      continue; // work ahead while it's out
+    }
+    if (status == ECPP_PROOF_WAITING) {
+      answer_requests(prover, kind, times);
+      continue;
+    }
+    return status;
+  }
+  return ECPP_PROOF_MORE;
+}
+
+static void check_external_stripping(void) {
+  build_stand_in_primes();
+  ecpp_prover built_in, external;
+  expect(ecpp_prover_init(&built_in, 0) && ecpp_prover_init(&external, 0), "provers start", 0);
+  big_number candidate;
+  big_number_init(&candidate);
+  size_t total_batches = 0;
+  for (int digits = 30; digits <= 120; digits += 10) {
+    for (uint64_t offset = 0; offset < 2; offset++) {
+      size_t detail = (size_t)digits * 10 + offset, batches;
+      probable_prime_near(&candidate, digits, offset * 7000003);
+      expect(ecpp_prover_reset(&built_in, &candidate) && run_to_end(&built_in, 1u << 30) == ECPP_PROOF_DONE, "built in", detail);
+
+      // exactly: the same certificate as built in, a batch of 1 or 4 discriminants
+      for (size_t per_batch = 1; per_batch <= 4; per_batch += 3) {
+        ecpp_prover_set_external_stripping(&external, per_batch);
+        expect(ecpp_prover_reset(&external, &candidate) && run_external(&external, STAND_IN_EXACT, 1, 0, &batches) == ECPP_PROOF_DONE,
+               "external, exact", detail);
+        expect(same_certificate(&built_in, &external), "exact external stripping finds built-in's certificate", detail);
+        total_batches += batches;
+      }
+      // a batch reported twice (sent again after a pause): the same, nothing rejected
+      size_t rejected = ecpp_prover_rejected_claims(&external);
+      expect(ecpp_prover_reset(&external, &candidate) && run_external(&external, STAND_IN_EXACT, 2, 0, &batches) == ECPP_PROOF_DONE,
+             "external, reported twice", detail);
+      expect(same_certificate(&built_in, &external), "a batch reported twice changes nothing", detail);
+      expect(ecpp_prover_rejected_claims(&external) == rejected, "a factor reported twice isn't rejected", detail);
+      // lying: every false claim rejected and counted, and still built-in's certificate
+      expect(ecpp_prover_reset(&external, &candidate) && run_external(&external, STAND_IN_LYING, 1, 0, &batches) == ECPP_PROOF_DONE,
+             "external, lying", detail);
+      expect(same_certificate(&built_in, &external), "false factors change nothing", detail);
+      expect(ecpp_prover_rejected_claims(&external) > rejected, "false factors are counted", detail);
+      // switching to built in with a batch out: finishes, with built-in's certificate
+      expect(ecpp_prover_reset(&external, &candidate) && run_external(&external, STAND_IN_EXACT, 1, 2, &batches) == ECPP_PROOF_DONE,
+             "switched to built in", detail);
+      expect(same_certificate(&built_in, &external), "switching to built in mid-batch changes nothing", detail);
+      ecpp_prover_set_external_stripping(&external, 4);
+      // partly (most factors missed): slower, but done, and a valid chain
+      expect(ecpp_prover_reset(&external, &candidate) && run_external(&external, STAND_IN_PARTIAL, 1, 0, &batches) == ECPP_PROOF_DONE,
+             "external, partial", detail);
+      check_shape(&external, &candidate, detail);
+    }
+  }
+  expect(total_batches > 100, "the external runs handed out batches", total_batches);
+  big_number_free(&candidate);
+  ecpp_prover_free(&built_in);
+  ecpp_prover_free(&external);
+}
+
 int main(void) {
+  setvbuf(stdout, NULL, _IONBF, 0); // so a failure shows even if a run is stopped
+  check_external_stripping();
   check_discriminant_roots();
   check_effort_never_wraps();
   ecpp_prover whole, pieces, tiny;

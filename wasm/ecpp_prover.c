@@ -45,12 +45,28 @@ typedef struct {
   int tried;
 } proof_option;
 
+// A discriminant whose orders are found but not yet evaluated (external stripping):
+// worked out ahead, handed out to be stripped, or stripped and waiting its turn.
+// A node takes them strictly in order, so options come out in the same order as
+// with built-in stripping.
+typedef enum { PENDING_FOUND, PENDING_HANDED_OUT, PENDING_STRIPPED } pending_state;
+struct ecpp_pending_discriminant {
+  int64_t discriminant;
+  size_t order_count;
+  big_number orders[ECPP_MOST_ORDERS];   // as found
+  big_number stripped[ECPP_MOST_ORDERS]; // with every checked factor divided out
+  pending_state state;
+};
+
 struct ecpp_proof_node {
   big_number n;
   proof_option *options;
   size_t option_count, option_capacity;
-  size_t next_discriminant; // index into prover->discriminants
+  size_t next_discriminant; // index into prover->discriminants: the next to find orders for
   size_t discriminants_examined;
+  // External stripping: discriminants found but not yet evaluated, oldest first.
+  ecpp_pending_discriminant *pending;
+  size_t pending_count, pending_capacity;
   // the curve for the option this node is descending into
   big_number curve_a, curve_b, point_x, point_y;
   size_t chosen_option;
@@ -162,7 +178,17 @@ static const class_polynomial *polynomial_for(ecpp_prover *prover, int64_t discr
 
 // ── nodes ─────────────────────────────────────────────────────────────────
 
+static void pending_free(ecpp_pending_discriminant *entry) {
+  for (size_t index = 0; index < ECPP_MOST_ORDERS; index++) {
+    big_number_free(&entry->orders[index]);
+    big_number_free(&entry->stripped[index]);
+  }
+}
+
 static void node_free(ecpp_proof_node *node) {
+  for (size_t index = 0; index < node->pending_count; index++)
+    pending_free(&node->pending[index]);
+  free(node->pending);
   big_number_free(&node->n);
   for (size_t index = 0; index < node->option_count; index++) {
     big_number_free(&node->options[index].q);
@@ -437,37 +463,48 @@ size_t ecpp_prover_test_allow_more_effort(ecpp_prover *prover) {
 }
 #endif
 
-// Examines the node's next discriminant, adding an option for each usable order.
-// Returns 1, or 0 if memory runs out (the node can try the same one again).
-static int examine_next_discriminant(ecpp_prover *prover, ecpp_proof_node *node, const big_number *proven_bound) {
+// The curve orders for the node's next discriminant (none if it can't give a
+// curve), and moves past it. Returns 1, or 0 if memory runs out (the same
+// discriminant is tried again).
+static int find_next_orders(ecpp_prover *prover, ecpp_proof_node *node, int64_t *discriminant, big_number orders[ECPP_MOST_ORDERS],
+                            size_t *count) {
   while (node->next_discriminant >= prover->discriminant_count)
     if (!add_band(prover))
       return 0;
-  int64_t discriminant = prover->discriminants[node->next_discriminant].discriminant;
-  big_number orders[ECPP_MOST_ORDERS], q, root;
-  for (size_t index = 0; index < ECPP_MOST_ORDERS; index++)
-    big_number_init(&orders[index]);
-  big_number_init(&q);
+  *discriminant = prover->discriminants[node->next_discriminant].discriminant;
+  big_number root;
   big_number_init(&root);
-  size_t count = 0;
-  int ok = 1;
-  int rooted = discriminant_root(prover, &node->n, discriminant, &root);
-  ecpp_status status = rooted == 1   ? ecpp_find_orders_from_root(&node->n, discriminant, &root, orders, &count)
+  *count = 0;
+  int rooted = discriminant_root(prover, &node->n, *discriminant, &root);
+  ecpp_status status = rooted == 1   ? ecpp_find_orders_from_root(&node->n, *discriminant, &root, orders, count)
                        : rooted == 0 ? ECPP_NOT_FOUND
                                      : ECPP_OUT_OF_MEMORY;
   big_number_free(&root);
   if (status == ECPP_OUT_OF_MEMORY)
-    ok = 0;
-  uint32_t strip_bound = big_number_bit_length(&node->n) >= DEEPER_STRIP_FROM_BITS ? STRIP_BOUND : SMALL_STRIP_BOUND;
-  for (size_t index = 0; ok && status == ECPP_FOUND && index < count; index++) {
-    if (!big_number_copy(&q, &orders[index]) || !strip_small_factors(prover, &q, strip_bound)) {
-      ok = 0;
-      break;
-    }
-    if (big_number_compare(&q, &node->n) >= 0)
+    return 0;
+  if (status != ECPP_FOUND)
+    *count = 0;
+  node->next_discriminant++;
+  return 1;
+}
+
+// Built-in stripping's bound for the node's number.
+static uint32_t built_in_strip_bound(const ecpp_proof_node *node) {
+  return big_number_bit_length(&node->n) >= DEEPER_STRIP_FROM_BITS ? STRIP_BOUND : SMALL_STRIP_BOUND;
+}
+
+// Turns one discriminant's stripped orders into options: each q below the number,
+// large enough and (probably) prime. Counts the discriminant as examined. Returns
+// 1, or 0 if memory runs out.
+static int evaluate_orders(ecpp_proof_node *node, int64_t discriminant, const big_number orders[ECPP_MOST_ORDERS],
+                           const big_number stripped[ECPP_MOST_ORDERS], size_t count, const big_number *proven_bound) {
+  int ok = 1;
+  for (size_t index = 0; ok && index < count; index++) {
+    const big_number *q = &stripped[index];
+    if (big_number_compare(q, &node->n) >= 0)
       continue;
-    int large = order_is_large_enough(&q, &node->n);
-    int prime = large == 1 ? is_usable_prime(&q, proven_bound) : 0;
+    int large = order_is_large_enough(q, &node->n);
+    int prime = large == 1 ? is_usable_prime(q, proven_bound) : 0;
     if (large < 0 || prime < 0) {
       ok = 0;
       break;
@@ -489,7 +526,7 @@ static int examine_next_discriminant(ecpp_prover *prover, ecpp_proof_node *node,
     big_number_init(&option->order);
     option->discriminant = discriminant;
     option->tried = 0;
-    if (!big_number_copy(&option->q, &q) || !big_number_copy(&option->order, &orders[index])) {
+    if (!big_number_copy(&option->q, q) || !big_number_copy(&option->order, &orders[index])) {
       big_number_free(&option->q);
       big_number_free(&option->order);
       ok = 0;
@@ -497,14 +534,197 @@ static int examine_next_discriminant(ecpp_prover *prover, ecpp_proof_node *node,
     }
     node->option_count++;
   }
-  if (ok) {
-    node->next_discriminant++;
+  if (ok)
     node->discriminants_examined++;
-  }
-  for (size_t index = 0; index < ECPP_MOST_ORDERS; index++)
-    big_number_free(&orders[index]);
-  big_number_free(&q);
   return ok;
+}
+
+// Built-in stripping: finds, strips and evaluates the node's next discriminant,
+// as one piece of work. Returns 1, or 0 if memory runs out.
+static int examine_next_discriminant(ecpp_prover *prover, ecpp_proof_node *node, const big_number *proven_bound) {
+  big_number orders[ECPP_MOST_ORDERS], stripped[ECPP_MOST_ORDERS];
+  for (size_t index = 0; index < ECPP_MOST_ORDERS; index++) {
+    big_number_init(&orders[index]);
+    big_number_init(&stripped[index]);
+  }
+  int64_t discriminant = 0;
+  size_t count = 0;
+  size_t position = node->next_discriminant;
+  int ok = find_next_orders(prover, node, &discriminant, orders, &count);
+  for (size_t index = 0; ok && index < count; index++)
+    ok = big_number_copy(&stripped[index], &orders[index]) && strip_small_factors(prover, &stripped[index], built_in_strip_bound(node));
+  if (ok)
+    ok = evaluate_orders(node, discriminant, orders, stripped, count, proven_bound);
+  if (!ok)
+    node->next_discriminant = position; // try it again
+  for (size_t index = 0; index < ECPP_MOST_ORDERS; index++) {
+    big_number_free(&orders[index]);
+    big_number_free(&stripped[index]);
+  }
+  return ok;
+}
+
+// ── external stripping (step 11b) ─────────────────────────────────────────
+
+// Finds the node's next discriminant's orders and queues them, unstripped.
+// Returns 1, or 0 if memory runs out.
+static int queue_next_discriminant(ecpp_prover *prover, ecpp_proof_node *node) {
+  if (node->pending_count == node->pending_capacity) {
+    size_t larger = node->pending_capacity == 0 ? 8 : 2 * node->pending_capacity;
+    ecpp_pending_discriminant *grown = realloc(node->pending, larger * sizeof *grown);
+    if (grown == NULL)
+      return 0;
+    node->pending = grown;
+    node->pending_capacity = larger;
+  }
+  ecpp_pending_discriminant *entry = &node->pending[node->pending_count];
+  for (size_t index = 0; index < ECPP_MOST_ORDERS; index++) {
+    big_number_init(&entry->orders[index]);
+    big_number_init(&entry->stripped[index]);
+  }
+  size_t position = node->next_discriminant;
+  if (!find_next_orders(prover, node, &entry->discriminant, entry->orders, &entry->order_count)) {
+    pending_free(entry);
+    return 0;
+  }
+  for (size_t index = 0; index < entry->order_count; index++)
+    if (!big_number_copy(&entry->stripped[index], &entry->orders[index])) {
+      pending_free(entry);
+      node->next_discriminant = position;
+      return 0;
+    }
+  // nothing to strip: it's ready when its turn comes
+  entry->state = entry->order_count == 0 ? PENDING_STRIPPED : PENDING_FOUND;
+  node->pending_count++;
+  return 1;
+}
+
+// Evaluates the oldest queued discriminant (stripped) and drops it from the queue.
+static int evaluate_oldest_pending(ecpp_proof_node *node, const big_number *proven_bound) {
+  ecpp_pending_discriminant *entry = &node->pending[0];
+  if (!evaluate_orders(node, entry->discriminant, entry->orders, entry->stripped, entry->order_count, proven_bound))
+    return 0;
+  pending_free(entry);
+  memmove(&node->pending[0], &node->pending[1], (node->pending_count - 1) * sizeof *node->pending);
+  node->pending_count--;
+  return 1;
+}
+
+// Strips every queued discriminant not yet stripped here, by trial division (built
+// in, or switching to it). Returns 1, or 0 if memory runs out.
+static int strip_pending_here(ecpp_prover *prover, ecpp_proof_node *node) {
+  for (size_t entry_index = 0; entry_index < node->pending_count; entry_index++) {
+    ecpp_pending_discriminant *entry = &node->pending[entry_index];
+    if (entry->state == PENDING_STRIPPED)
+      continue;
+    for (size_t index = 0; index < entry->order_count; index++)
+      if (!big_number_copy(&entry->stripped[index], &entry->orders[index]) ||
+          !strip_small_factors(prover, &entry->stripped[index], built_in_strip_bound(node)))
+        return 0;
+    entry->state = PENDING_STRIPPED;
+  }
+  return 1;
+}
+
+static size_t pending_in_state(const ecpp_proof_node *node, pending_state state) {
+  size_t count = 0;
+  for (size_t index = 0; index < node->pending_count; index++)
+    count += node->pending[index].state == state;
+  return count;
+}
+
+// The handed-out order at `index` (counted across the handed-out discriminants), or NULL.
+static ecpp_pending_discriminant *handed_out_order(const ecpp_prover *prover, size_t index, size_t *order) {
+  if (prover->depth == 0)
+    return NULL;
+  ecpp_proof_node *node = &prover->nodes[prover->depth - 1];
+  for (size_t entry_index = 0; entry_index < node->pending_count; entry_index++) {
+    ecpp_pending_discriminant *entry = &node->pending[entry_index];
+    if (entry->state != PENDING_HANDED_OUT)
+      continue;
+    if (index < entry->order_count) {
+      *order = index;
+      return entry;
+    }
+    index -= entry->order_count;
+  }
+  return NULL;
+}
+
+void ecpp_prover_set_external_stripping(ecpp_prover *prover, size_t discriminants_per_batch) {
+  prover->discriminants_per_batch = discriminants_per_batch;
+}
+
+size_t ecpp_prover_strip_request_count(const ecpp_prover *prover) {
+  if (prover->depth == 0)
+    return 0;
+  const ecpp_proof_node *node = &prover->nodes[prover->depth - 1];
+  size_t count = 0;
+  for (size_t index = 0; index < node->pending_count; index++)
+    if (node->pending[index].state == PENDING_HANDED_OUT)
+      count += node->pending[index].order_count;
+  return count;
+}
+
+const big_number *ecpp_prover_strip_request(const ecpp_prover *prover, size_t index) {
+  size_t order;
+  ecpp_pending_discriminant *entry = handed_out_order(prover, index, &order);
+  return entry ? &entry->orders[order] : NULL;
+}
+
+int ecpp_prover_report_factor(ecpp_prover *prover, size_t index, uint64_t factor) {
+  size_t order;
+  ecpp_pending_discriminant *entry = handed_out_order(prover, index, &order);
+  // checked against the order as found, so a factor reported twice (a batch sent
+  // again after a pause) is still accepted, and divided out only once
+  if (entry == NULL || factor < 2 || big_number_mod_small(&entry->orders[order], factor) != 0) {
+    prover->rejected_claims++;
+    return 1;
+  }
+  big_number *stripped = &entry->stripped[order], divisor;
+  big_number_init(&divisor);
+  int ok = big_number_set_u64(&divisor, factor);
+  while (ok && big_number_compare_u64(stripped, factor) > 0 && big_number_mod_small(stripped, factor) == 0)
+    ok = big_number_divide(stripped, NULL, stripped, &divisor);
+  big_number_free(&divisor);
+  return ok;
+}
+
+void ecpp_prover_stripping_done(ecpp_prover *prover) {
+  if (prover->depth == 0)
+    return;
+  ecpp_proof_node *node = &prover->nodes[prover->depth - 1];
+  for (size_t index = 0; index < node->pending_count; index++)
+    if (node->pending[index].state == PENDING_HANDED_OUT)
+      node->pending[index].state = PENDING_STRIPPED;
+}
+
+size_t ecpp_prover_rejected_claims(const ecpp_prover *prover) { return prover->rejected_claims; }
+
+// One piece of work for a node that needs options, with external stripping:
+// evaluate the oldest queued discriminant once stripped; or hand out what's found
+// (NEEDS_STRIPPING); or, while a batch is out, work ahead up to a batch more; or
+// wait (WAITING). Discriminants are taken strictly in order and counted against
+// the effort limit when queued, so the search spends its effort as built in.
+static ecpp_proof_status external_step(ecpp_prover *prover, ecpp_proof_node *node, const big_number *proven_bound) {
+  if (node->pending_count > 0 && node->pending[0].state == PENDING_STRIPPED)
+    return evaluate_oldest_pending(node, proven_bound) ? ECPP_PROOF_MORE : ECPP_PROOF_OUT_OF_MEMORY;
+  size_t handed_out = pending_in_state(node, PENDING_HANDED_OUT), found = pending_in_state(node, PENDING_FOUND);
+  int may_queue = node->discriminants_examined + node->pending_count < prover->effort_limit;
+  if (handed_out > 0) {
+    // the oldest is out: work ahead, at most a batch
+    if (found < prover->discriminants_per_batch && may_queue)
+      return queue_next_discriminant(prover, node) ? ECPP_PROOF_MORE : ECPP_PROOF_OUT_OF_MEMORY;
+    return ECPP_PROOF_WAITING;
+  }
+  if (found < prover->discriminants_per_batch && may_queue)
+    return queue_next_discriminant(prover, node) ? ECPP_PROOF_MORE : ECPP_PROOF_OUT_OF_MEMORY;
+  if (found == 0)
+    return ECPP_PROOF_MORE; // only stripped ones are queued, and the oldest isn't: can't happen
+  for (size_t index = 0; index < node->pending_count; index++)
+    if (node->pending[index].state == PENDING_FOUND)
+      node->pending[index].state = PENDING_HANDED_OUT;
+  return ECPP_PROOF_NEEDS_STRIPPING;
 }
 
 // ── the search ────────────────────────────────────────────────────────────
@@ -629,7 +849,19 @@ ecpp_proof_status ecpp_prover_run(ecpp_prover *prover, size_t work) {
     }
     int ok;
     size_t untried = untried_options(node);
-    if (untried < OPTIONS_WANTED && node->discriminants_examined < prover->effort_limit) {
+    if (prover->discriminants_per_batch == 0 && node->pending_count > 0 && untried < OPTIONS_WANTED) {
+      // switched to built in: strip what's queued here, and take it in turn (it was
+      // counted against the effort limit when queued)
+      ok = strip_pending_here(prover, node) && (node->pending_count == 0 || evaluate_oldest_pending(node, &proven_bound));
+    } else if (untried < OPTIONS_WANTED && prover->discriminants_per_batch > 0 &&
+               (node->pending_count > 0 || node->discriminants_examined < prover->effort_limit)) {
+      ecpp_proof_status external = external_step(prover, node, &proven_bound);
+      if (external == ECPP_PROOF_NEEDS_STRIPPING || external == ECPP_PROOF_WAITING) {
+        status = external;
+        break;
+      }
+      ok = external != ECPP_PROOF_OUT_OF_MEMORY;
+    } else if (untried < OPTIONS_WANTED && node->discriminants_examined < prover->effort_limit) {
       ok = examine_next_discriminant(prover, node, &proven_bound);
     } else if (untried > 0) {
       ok = descend(prover, node);
