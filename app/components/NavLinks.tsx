@@ -16,8 +16,8 @@ interface NavLink {
 }
 
 interface NavGroup {
-  /** Shown above the group; the first group, the list and its tools, has none. */
-  heading: string | null;
+  /** Shown above the group, with a rule to the edge. */
+  heading: string;
   links: readonly NavLink[];
   /** Ends with GitHub, which opens in a new tab. */
   withGitHub?: boolean;
@@ -25,7 +25,7 @@ interface NavGroup {
 
 const NAV_GROUPS: readonly NavGroup[] = [
   {
-    heading: null,
+    heading: "Explore",
     links: [
       { href: "/", label: "Home" },
       { href: "/is-prime", label: "Is it prime?" },
@@ -55,16 +55,24 @@ const NAV_GROUPS: readonly NavGroup[] = [
 const FOCUS_CLASSES = "focus-visible:outline-2 focus-visible:outline-(--heat-text)";
 // The heat accent marks the current page: a bar under it in the phone bar, beside it in the lists.
 const CURRENT_IN_BAR_CLASSES = "font-semibold text-foreground! shadow-[inset_0_-2px_0_var(--heat-color)]";
-const CURRENT_IN_LIST_CLASSES = "font-semibold text-foreground! pl-3 shadow-[inset_2px_0_0_var(--heat-color)]";
-const GROUP_HEADING_CLASSES = "mb-1 text-[0.7rem] tracking-widest text-muted uppercase";
+// In the lists, each group's links hang off a rail (the list's left border); a link
+// lights its own piece of it, so the current page is marked without moving sideways.
+const CURRENT_IN_LIST_CLASSES = "font-semibold text-foreground! border-(--heat-color)!";
+const GROUP_HEADING_CLASSES = "mb-2 flex items-center gap-2 text-xs font-semibold tracking-widest text-foreground uppercase";
+const RAIL_CLASSES = "flex flex-col border-l border-rule";
 
 /** The phone bar's links. Below 320 px (a Galaxy Fold’s cover screen is 280), a little tighter. */
 const BAR_LINK_CLASSES = `flex h-11 items-center rounded-md px-2.5 text-sm max-[319px]:px-1 max-[319px]:text-[0.8125rem] text-muted transition-colors hover:text-foreground sm:px-3 ${FOCUS_CLASSES}`;
 
-/** A link in one of the full lists: the sidebar (compact, so all fit at 600 px tall) or the menu (44 px rows). */
+/**
+ * A link in one of the full lists: the sidebar (compact, so all fit at 600 px
+ * tall) or the menu (44 px rows). Its left border sits over the rail (-ml-px),
+ * clear until hovered or current.
+ */
 const listLinkClasses = (inMenu: boolean) =>
-  `flex items-center rounded-md text-muted transition-colors hover:text-foreground ${FOCUS_CLASSES} ${
-    inMenu ? "h-11 px-2 text-base" : "py-1 text-[0.95rem]"
+  `-ml-px flex items-center border-l-2 border-transparent pl-3 text-muted transition-colors hover:border-muted hover:text-foreground ${FOCUS_CLASSES} ${
+    // on desktops under 760 px tall, a little tighter, so every link fits (down to 600, the smallest desktop)
+    inMenu ? "h-11 text-base" : "py-1 text-[0.95rem] [@media(max-height:47.5rem)]:py-0.5"
   }`;
 
 const MENU_ID = "site-menu";
@@ -73,11 +81,14 @@ const MENU_ID = "site-menu";
 function SiteLinks({ currentPath, inMenu, onNavigate }: { currentPath: string; inMenu: boolean; onNavigate?: () => void }) {
   const linkClasses = listLinkClasses(inMenu);
   return (
-    <div className="flex flex-col gap-4">
+    <div className={`flex flex-col ${inMenu ? "gap-6" : "gap-6 [@media(max-height:47.5rem)]:gap-5"}`}>
       {NAV_GROUPS.map((group) => (
-        <div key={group.heading ?? "the list"}>
-          {group.heading && <p className={GROUP_HEADING_CLASSES}>{group.heading}</p>}
-          <ul className="flex flex-col">
+        <div key={group.heading}>
+          <p className={GROUP_HEADING_CLASSES}>
+            {group.heading}
+            <span aria-hidden className="h-px flex-1 bg-rule" />
+          </p>
+          <ul className={RAIL_CLASSES}>
             {group.links.map(({ href, label }) => {
               const isCurrentPage = currentPath === href;
               return (

@@ -47,7 +47,7 @@ test.describe("site navigation", () => {
     await page.goto("/");
     for (const { path, linkName } of PAGES) {
       const list = await fullList(page, testInfo);
-      for (const heading of ["Learn", "This site"]) await expect(list.getByText(heading, { exact: true })).toBeVisible();
+      for (const heading of ["Explore", "Learn", "This site"]) await expect(list.getByText(heading, { exact: true })).toBeVisible();
       await list.getByRole("link", { name: linkName, exact: true }).click();
       await expect(page).toHaveURL(path);
       if (isPhone(testInfo)) await expect(menu(page)).toBeHidden(); // following a link closes the menu
@@ -56,6 +56,21 @@ test.describe("site navigation", () => {
       await expect(listAgain.locator('[aria-current="page"]')).toHaveCount(1);
       if (isPhone(testInfo)) await page.keyboard.press("Escape");
     }
+  });
+
+  test("marks the current page on its group's rail, without moving it sideways", async ({ page }, testInfo) => {
+    await page.goto("/mersenne-primes");
+    const list = await fullList(page, testInfo);
+    const current = list.getByRole("link", { name: "Mersenne primes", exact: true });
+    const other = list.getByRole("link", { name: "Fun facts", exact: true });
+    await expect(current).toHaveAttribute("aria-current", "page");
+    expect((await current.boundingBox())!.x).toBe((await other.boundingBox())!.x);
+    // the current page lights its piece of the rail in the heat colour; the others' pieces are clear
+    const [currentBorder, otherBorder] = await Promise.all(
+      [current, other].map((link) => link.evaluate((element) => getComputedStyle(element).borderLeftColor)),
+    );
+    expect(currentBorder).not.toBe(otherBorder);
+    expect(otherBorder).toBe("rgba(0, 0, 0, 0)");
   });
 
   test("GitHub opens in a new tab and has an accessible name", async ({ page }, testInfo) => {

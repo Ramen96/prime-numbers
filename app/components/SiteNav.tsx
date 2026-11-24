@@ -12,11 +12,11 @@ export function SiteNav() {
     <nav
       aria-label="Site"
       data-testid="site-nav"
-      className="sticky top-0 z-20 flex h-(--mobile-nav-height) items-center border-b border-rule bg-background px-2 max-[319px]:px-1 sm:px-3 desktop:h-[calc(100dvh-var(--storage-notice-height))] desktop:w-48 desktop:shrink-0 desktop:flex-col desktop:items-stretch desktop:border-r desktop:border-b-0 desktop:px-5 desktop:py-8"
+      className="sticky top-0 z-20 flex h-(--mobile-nav-height) items-center border-b border-rule bg-background px-2 max-[319px]:px-1 sm:px-3 desktop:h-[calc(100dvh-var(--storage-notice-height))] desktop:w-48 desktop:shrink-0 desktop:flex-col desktop:items-stretch desktop:border-r desktop:border-b-0 desktop:px-5 desktop:py-8 [@media(max-height:47.5rem)]:desktop:py-6"
     >
       <Link
         href="/"
-        className="hidden font-bold leading-tight tracking-tight desktop:mb-8 desktop:block"
+        className="hidden font-bold leading-tight tracking-tight desktop:mb-8 desktop:block [@media(max-height:47.5rem)]:desktop:mb-5"
       >
         {SITE_NAME}
       </Link>
