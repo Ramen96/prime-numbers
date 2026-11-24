@@ -76,6 +76,220 @@ static void check_against_lone_prover(ecpp_prover *lone, int slot, const big_num
   expect(proof_slot_step_count(slot) == 0 || value_is(slot, 0, 0, candidate), "the first step is the candidate", (size_t)slot);
 }
 
+
+// ── external stripping (step 11d) ─────────────────────────────────────────
+//
+// A stand-in for the GPU: trial division to built-in stripping's bound below 830
+// bits (every candidate here), so certificates must be exactly a lone prover's.
+
+#define STAND_IN_BOUND 100000
+static uint32_t stand_in_primes[9592];
+static size_t stand_in_prime_count = 0;
+
+static void build_stand_in_primes(void) {
+  static unsigned char composite[STAND_IN_BOUND];
+  for (uint32_t value = 2; value < STAND_IN_BOUND; value++) {
+    if (composite[value])
+      continue;
+    stand_in_primes[stand_in_prime_count++] = value;
+    for (uint64_t multiple = (uint64_t)value * value; multiple < STAND_IN_BOUND; multiple += value)
+      composite[multiple] = 1;
+  }
+}
+
+// What the stand-in finds for a slot's batch: pairs (request, prime), and with
+// `lies`, two false ones (a prime that doesn't divide request 0, a request that
+// doesn't exist). Returns the pair count; the pairs are in `pairs`.
+static size_t stand_in_answer(int slot, int lies, uint32_t **pairs) {
+  size_t requests = proof_slot_strip_request_count(slot), count = 0, room = 64;
+  *pairs = malloc(room * 2 * sizeof **pairs);
+  big_number order;
+  big_number_init(&order);
+  for (size_t request = 0; request < requests; request++) {
+    size_t limbs = proof_slot_strip_request(slot, request);
+    expect(limbs > 0 && limbs != SIZE_MAX, "a request can be read", request);
+    big_number_set_limbs(&order, proof_output_buffer(), limbs);
+    for (size_t index = 0; index < stand_in_prime_count; index++) {
+      if (big_number_mod_small(&order, stand_in_primes[index]) != 0)
+        continue;
+      if (count + 3 > room)
+        *pairs = realloc(*pairs, (room *= 2) * 2 * sizeof **pairs);
+      (*pairs)[2 * count] = (uint32_t)request;
+      (*pairs)[2 * count + 1] = stand_in_primes[index];
+      count++;
+    }
+    if (lies && request == 0) {
+      uint32_t liar = 3;
+      while (big_number_mod_small(&order, liar) == 0)
+        liar += 2;
+      (*pairs)[2 * count] = 0;
+      (*pairs)[2 * count + 1] = liar;
+      count++;
+    }
+  }
+  if (lies) {
+    (*pairs)[2 * count] = (uint32_t)requests + 5;
+    (*pairs)[2 * count + 1] = 7;
+    count++;
+  }
+  big_number_free(&order);
+  return count;
+}
+
+static int report(int slot, uint32_t batch, const uint32_t *pairs, size_t count) {
+  uint32_t *input = proof_input_buffer(2 * count);
+  for (size_t index = 0; index < 2 * count; index++)
+    input[index] = pairs[index];
+  return proof_slot_report_factors(slot, batch, count);
+}
+
+// Answers every slot with a batch it hasn't been answered for. Returns how many lies were told.
+static size_t answer_batches(int slots, int lies) {
+  size_t told = 0;
+  for (int slot = 0; slot < slots; slot++) {
+    uint32_t batch = proof_slot_strip_batch(slot);
+    if (batch == 0)
+      continue;
+    uint32_t *pairs;
+    size_t count = stand_in_answer(slot, lies, &pairs);
+    expect(report(slot, batch, pairs, count), "factors are reported", (size_t)slot);
+    expect(proof_slot_strip_batch(slot) == 0, "a reported batch is done", (size_t)slot);
+    free(pairs);
+    told += lies ? 2 : 0;
+  }
+  return told;
+}
+
+#define EXTERNAL_RUNS_ALLOWED 200000 // far more than any of these needs, so a bug fails instead of hanging
+
+// Every slot proves a candidate with external stripping, answered every `answer_every`
+// runs (so slots wait in between), lying or not; certificates must be a lone prover's.
+static void check_external_round(ecpp_prover *lone, int slots, int answer_every, int lies, int round) {
+  big_number *candidates = calloc((size_t)slots, sizeof *candidates);
+  size_t *rejected_before = calloc((size_t)slots, sizeof *rejected_before);
+  for (int slot = 0; slot < slots; slot++) {
+    big_number_init(&candidates[slot]);
+    probable_prime_near(&candidates[slot], 30 + 7 * ((slot + round) % 5), (uint64_t)(slot * 7919 + round * 104729));
+    start(slot, &candidates[slot]);
+    rejected_before[slot] = proof_slot_rejected_claims(slot);
+  }
+  size_t lies_told = 0;
+  int runs = 0, saw_waiting = 0, saw_batch = 0;
+  uint32_t seen_batches[64] = {0};
+  while (proof_slots_run(4) > 0 && ++runs < EXTERNAL_RUNS_ALLOWED) {
+    for (int slot = 0; slot < slots; slot++) {
+      saw_waiting |= proof_slot_state_of(slot) == PROOF_SLOT_WAITING;
+      if (proof_slot_state_of(slot) == PROOF_SLOT_WAITING)
+        expect(proof_slot_progress(slot) > 0, "a waiting slot shows its progress", (size_t)slot);
+      uint32_t batch = proof_slot_strip_batch(slot);
+      saw_batch |= batch != 0;
+      // batches out at once have different numbers
+      for (int other = 0; other < slot && other < 64; other++)
+        expect(batch == 0 || seen_batches[other] != batch, "batch numbers differ between slots", (size_t)batch);
+      if (slot < 64)
+        seen_batches[slot] = batch;
+    }
+    if (runs % answer_every == 0)
+      lies_told += answer_batches(slots, lies);
+  }
+  expect(runs < EXTERNAL_RUNS_ALLOWED, "external stripping finishes", (size_t)runs);
+  expect(saw_batch, "batches are handed out", (size_t)round);
+  if (answer_every > 1)
+    expect(saw_waiting, "a slot waits for its batch", (size_t)round);
+  size_t rejected = 0;
+  for (int slot = 0; slot < slots; slot++) {
+    expect(proof_slot_state_of(slot) == PROOF_SLOT_DONE, "every external slot finished", (size_t)slot);
+    check_against_lone_prover(lone, slot, &candidates[slot]);
+    rejected += proof_slot_rejected_claims(slot) - rejected_before[slot];
+    proof_slot_clear(slot);
+    big_number_free(&candidates[slot]);
+  }
+  expect(rejected == lies_told, "every false claim is counted, and only those", rejected);
+  free(candidates);
+  free(rejected_before);
+}
+
+// Runs until `slot` has a batch out; returns its number (0 if it finished first).
+static uint32_t run_until_batch(int slot) {
+  for (int runs = 0; runs < EXTERNAL_RUNS_ALLOWED; runs++) {
+    uint32_t batch = proof_slot_strip_batch(slot);
+    if (batch != 0 || proof_slot_state_of(slot) == PROOF_SLOT_DONE)
+      return batch;
+    proof_slots_run(4);
+  }
+  return 0;
+}
+
+static void check_external_stripping(ecpp_prover *lone, int slots) {
+  build_stand_in_primes();
+  proof_slots_set_external_stripping(1);
+  check_external_round(lone, slots, 1, 0, 0);
+  proof_slots_set_external_stripping(4);
+  check_external_round(lone, slots, 1, 0, 1);
+  check_external_round(lone, slots, 5, 0, 2); // slots wait between answers
+  check_external_round(lone, slots, 3, 1, 3); // lying
+
+  // a late answer: slot 0's batch answered only after the slot has a new candidate
+  big_number first, second;
+  big_number_init(&first);
+  big_number_init(&second);
+  probable_prime_near(&first, 45, 31337);
+  probable_prime_near(&second, 50, 27182);
+  start(0, &first);
+  uint32_t old_batch = run_until_batch(0);
+  expect(old_batch != 0, "the first candidate hands out a batch", 0);
+  uint32_t *old_pairs;
+  size_t old_count = stand_in_answer(0, 0, &old_pairs);
+  proof_slot_clear(0);
+  expect(proof_slot_strip_batch(0) == 0 && proof_slot_strip_request_count(0) == 0, "a cleared slot has no batch out", 0);
+  start(0, &second);
+  uint32_t new_batch = run_until_batch(0);
+  expect(new_batch != 0 && new_batch != old_batch, "the new candidate's batch has a new number", new_batch);
+  size_t rejected_before = proof_slot_rejected_claims(0);
+  expect(report(0, old_batch, old_pairs, old_count), "a late answer is accepted", 0);
+  expect(proof_slot_strip_batch(0) == new_batch, "a late answer leaves the new batch out", 0);
+  expect(proof_slot_rejected_claims(0) == rejected_before, "a late answer isn't counted as false", 0);
+  free(old_pairs);
+  int runs = 0;
+  while (proof_slots_run(4) > 0 && ++runs < EXTERNAL_RUNS_ALLOWED)
+    answer_batches(slots, 0);
+  check_against_lone_prover(lone, 0, &second);
+  expect(proof_slot_rejected_claims(0) == rejected_before, "nothing is rejected after a late answer", 0);
+  proof_slot_clear(0);
+
+  // switching back to the CPU with every slot's batch out (and an answer still to come)
+  big_number *candidates = calloc((size_t)slots, sizeof *candidates);
+  uint32_t *batches = calloc((size_t)slots, sizeof *batches);
+  for (int slot = 0; slot < slots; slot++) {
+    big_number_init(&candidates[slot]);
+    probable_prime_near(&candidates[slot], 40, (uint64_t)slot * 65537 + 3);
+    start(slot, &candidates[slot]);
+  }
+  for (int slot = 0; slot < slots; slot++)
+    batches[slot] = run_until_batch(slot);
+  proof_slots_set_external_stripping(0);
+  for (int slot = 0; slot < slots; slot++) {
+    expect(proof_slot_strip_batch(slot) == 0, "back on the CPU, no batch is out", (size_t)slot);
+    rejected_before = proof_slot_rejected_claims(slot);
+    uint32_t pair[2] = {0, 3};
+    expect(report(slot, batches[slot], pair, 1), "an answer after switching back is accepted", (size_t)slot);
+    expect(proof_slot_rejected_claims(slot) == rejected_before, "and ignored", (size_t)slot);
+  }
+  runs = 0;
+  while (proof_slots_run(4) > 0 && ++runs < EXTERNAL_RUNS_ALLOWED)
+    ;
+  for (int slot = 0; slot < slots; slot++) {
+    expect(proof_slot_strip_batch(slot) == 0, "on the CPU, no batch is handed out", (size_t)slot);
+    check_against_lone_prover(lone, slot, &candidates[slot]);
+    proof_slot_clear(slot);
+    big_number_free(&candidates[slot]);
+  }
+  free(candidates);
+  free(batches);
+  big_number_free(&first);
+  big_number_free(&second);
+}
+
 int main(void) {
 #ifdef SIEVE_THREADS
   const char *requested = getenv("PROOF_TEST_HELPERS");
@@ -138,10 +352,15 @@ int main(void) {
   check_against_lone_prover(&lone, slots - 1, &candidates[0]);
   big_number_free(&candidates[0]);
 
+  check_external_stripping(&lone, slots);
+
   // what doesn't exist: no slot, no step, no field
   expect(!proof_slot_start(slots, 1) && !proof_slot_start(-1, 1), "no such slot", 0);
   expect(proof_slot_progress(slots) == 0 && proof_slot_progress(-1) == 0, "no such slot has no progress", 0);
   expect(proof_slot_value(slots - 1, 1000000, 0) == 0 && proof_slot_value(slots - 1, 0, 6) == 0, "no such step or field", 0);
+  expect(proof_slot_strip_batch(slots) == 0 && proof_slot_strip_request_count(-1) == 0 && proof_slot_strip_request(slots, 0) == 0,
+         "no such slot has no batch", 0);
+  expect(proof_slot_report_factors(slots, 1, 0) == 1 && proof_slot_rejected_claims(-1) == 0, "reporting to no slot does nothing", 0);
 
   free(candidates);
   ecpp_prover_free(&lone);
