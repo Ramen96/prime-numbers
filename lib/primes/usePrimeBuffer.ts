@@ -17,6 +17,7 @@ import { estimatedBasePrimeBytes, shouldRestartWorkerToReleaseMemory } from "./m
 import { addBatch, extendBatch, MAX_BATCHES, type Batch } from "./rollingBuffer.ts";
 import { basePrimeLimitNeededFor } from "./wasmSieve.ts";
 import { PRIME_WORKER_NAME } from "./workerNames.ts";
+import { gpuPreferred } from "../gpuPreference.ts";
 import { heatFromRate, meltdownFromRate, primesTakeMinutes } from "../heat.ts";
 import type { ProvingStatus } from "../provingStatus.ts";
 
@@ -294,6 +295,7 @@ export function usePrimeBuffer(firstBatchFromServer: readonly string[]): PrimeBu
         direction,
         from,
         count: BATCH_SIZE,
+        useGpu: gpuPreferred(),
       };
       worker.postMessage(request);
     },
@@ -433,6 +435,7 @@ export function usePrimeBuffer(firstBatchFromServer: readonly string[]): PrimeBu
         setBatches(update.batches);
       };
 
+      if (response.type === "stripping") return; // who strips curve orders (shown from step 11e)
       if (response.type === "proving") {
         pending.proving = true; // Stop can pause it now, keeping its proofs
         setProving({ direction: pending.direction, status: { elapsedMs: 0, digits: null, reachedDigits: null } });

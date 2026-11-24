@@ -5,6 +5,7 @@ import type { PrimeCheckAnswer } from "../primeCheck.ts";
 import type { ProvingStatus } from "../provingStatus.ts";
 import type { PrimeCheckRequest, PrimeCheckResponse } from "./primeChecker.ts";
 import { PRIME_CHECK_WORKER_NAME } from "./workerNames.ts";
+import { gpuPreferred } from "../gpuPreference.ts";
 
 type ProbablyPrime = Extract<PrimeCheckAnswer, { kind: "probably-prime" }>;
 
@@ -86,6 +87,8 @@ export function usePrimeCheck(): PrimeCheck {
         requestRef.current = null;
         setState({ kind: "error", message: response.message });
         return;
+      case "stripping":
+        return; // who strips curve orders (shown from step 11e)
     }
   }, []);
 
@@ -122,7 +125,8 @@ export function usePrimeCheck(): PrimeCheck {
       const worker = workerRef.current ?? startWorker();
       const id = nextIdRef.current++;
       requestRef.current = { id, type, value, provingMsBefore };
-      worker.postMessage({ type, id, value } satisfies PrimeCheckRequest);
+      const request: PrimeCheckRequest = type === "prove" ? { type, id, value, useGpu: gpuPreferred() } : { type, id, value };
+      worker.postMessage(request);
     },
     [startWorker],
   );

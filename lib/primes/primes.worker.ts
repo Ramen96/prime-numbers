@@ -8,6 +8,7 @@
 // threads and the verification workers are nested inside it.
 
 import { computeBatch } from "./computeBatch";
+import { GpuStrippingControl } from "./gpuStrippingControl";
 import { loadSieve, sievingThreadsFor } from "./loadSieve";
 import type { WorkerRequest, WorkerResponse } from "./protocol";
 import { ProvenPrimeCache } from "./provenPrimeCache";
@@ -41,6 +42,8 @@ function sendToMainThread(response: WorkerResponse) {
 // once, and the running request sees it between proving runs (requestStops.ts).
 let previousRequest: Promise<void> = Promise.resolve();
 let calibrator: SieveCalibrator | null = null;
+// The GPU's part in the proofs, made once the sieve (and its proof slots) are loaded.
+let stripping: GpuStrippingControl | null = null;
 const requestStops = new RequestStops();
 // Primes past a(13) proven and checked by this worker, so they aren't proven again.
 const provenPrimes = new ProvenPrimeCache();
@@ -57,6 +60,10 @@ self.onmessage = (event: MessageEvent<WorkerRequest>) => {
     try {
       const { sieve, threads, memoryBudgetBytes, proofSlots } = await sieveReady;
       calibrator ??= new SieveCalibrator(sieve, memoryBudgetBytes);
+      stripping ??= new GpuStrippingControl(proofSlots);
+      await stripping.prepare(request.useGpu ?? false, (status) =>
+        sendToMainThread({ type: "stripping", id: request.id, generation: request.generation, status }),
+      );
       await computeBatch(sieve, request, sendToMainThread, {
         memoryBudgetBytes,
         calibrator,

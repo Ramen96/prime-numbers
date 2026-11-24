@@ -26,7 +26,7 @@ describe("randomPrime", () => {
     assert.match((parseDigits("25") as { message: string }).message, /At least 26 digits/);
   });
 
-  it("asks for the first prime from the start itself, with its certificate", () => {
+  it("asks for the first prime from the start itself, with its certificate, on the GPU only if asked", () => {
     assert.deepEqual(randomPrimeRequest(7, 10n ** 99n), {
       type: "batch",
       id: 7,
@@ -35,7 +35,9 @@ describe("randomPrime", () => {
       from: 10n ** 99n - 1n,
       count: 1,
       includeCertificates: true,
+      useGpu: false,
     });
+    assert.equal(randomPrimeRequest(7, 10n ** 99n, true).useGpu, true);
   });
 
   it("is found only with the prime's own certificate, and draws again when it has a digit too many", () => {

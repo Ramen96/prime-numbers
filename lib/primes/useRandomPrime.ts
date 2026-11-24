@@ -7,6 +7,7 @@ import { randomNumberWithDigits } from "../randomStart.ts";
 import type { CertificateStep } from "./primalityCertificate.ts";
 import type { ProvenPrimeCertificate, WorkerResponse } from "./protocol.ts";
 import { PRIME_WORKER_NAME } from "./workerNames.ts";
+import { gpuPreferred } from "../gpuPreference.ts";
 
 export type RandomPrimeState =
   | { kind: "idle" }
@@ -48,7 +49,7 @@ export function useRandomPrime(): RandomPrime {
     if (!worker) return;
     const id = nextIdRef.current++;
     requestRef.current = { id, digits, startedAt, proving: false, primes: [], certificates: [] };
-    worker.postMessage(randomPrimeRequest(id, randomNumberWithDigits(digits)));
+    worker.postMessage(randomPrimeRequest(id, randomNumberWithDigits(digits), gpuPreferred()));
   }, []);
 
   const handleResponse = useCallback(
@@ -86,7 +87,7 @@ export function useRandomPrime(): RandomPrime {
           setState({ kind: "error", message: response.message });
           return;
         default:
-          return; // building base primes: nothing to show
+          return; // building base primes, or who strips curve orders: nothing to show (the GPU from step 11e)
       }
       const outcome = randomPrimeOutcome(request.digits, request.primes, request.certificates);
       if (outcome.kind === "draw-again") {

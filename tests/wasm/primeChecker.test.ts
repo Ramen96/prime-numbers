@@ -7,6 +7,8 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 import type { PrimeCheckAnswer } from "../../lib/primeCheck.ts";
+import { OddPrimeList, type StripHit } from "../../lib/primes/gpuStripping.ts";
+import { GpuStrippingControl } from "../../lib/primes/gpuStrippingControl.ts";
 import { NumberCheck, type RawNumberCheckExports } from "../../lib/primes/numberCheck.ts";
 import { checkCertificate } from "../../lib/primes/primalityCertificate.ts";
 import { PrimeChecker, type PrimeCheckEngine, type PrimeCheckResponse } from "../../lib/primes/primeChecker.ts";
@@ -63,6 +65,46 @@ describe("the prime checker's worker logic, on sieve.wasm", () => {
     const progress = sent.filter((response) => response.type === "proving-progress");
     assert.ok(progress.length > 0, "progress reported");
     for (const report of progress) assert.ok(report.digits === 80 && report.reachedDigits <= 80 && report.reachedDigits > 0);
+  });
+
+  it("with the GPU asked for (a stand-in): strips through it, says so, and the certificate checks", async () => {
+    const primes = [2, ...new OddPrimeList().upTo(1_000_000)];
+    let calls = 0;
+    const stripper = {
+      async strip(orders: readonly Uint32Array[], largestPrime: number) {
+        calls++;
+        const hits: StripHit[] = [];
+        orders.forEach((order, index) => {
+          const value = order.reduceRight((total, limb) => (total << 32n) | BigInt(limb), 0n);
+          for (const prime of primes) {
+            if (prime > largestPrime) break;
+            if (value % BigInt(prime) === 0n) hits.push({ order: index, prime });
+          }
+        });
+        return hits;
+      },
+      destroy() {},
+    };
+    const withGpu: PrimeCheckEngine = { ...engine, stripping: new GpuStrippingControl(engine.proofSlots, async () => stripper) };
+    const prime = nextPrimeAfter(10n ** 69n);
+    const { checker, sent } = checkerOn(withGpu, { workPerRun: 8, betweenRuns: () => new Promise<void>((resolve) => setTimeout(resolve, 0)) });
+    await checker.handle({ type: "prove", id: 1, value: prime, useGpu: true });
+    const answer = answerOf(sent.at(-1));
+    assert.ok(answer.kind === "prime" && answer.proof.by === "certificate");
+    assert.deepEqual(checkCertificate(prime, answer.proof.steps), { valid: true });
+    assert.ok(calls > 0, "the stand-in stripped");
+    const statuses = sent.flatMap((response) => (response.type === "stripping" ? [response.status.state] : []));
+    assert.equal(statuses[0], "gpu");
+    assert.ok(statuses.every((state) => state === "gpu"));
+    // and back to the CPU when it isn't asked for
+    const next = nextPrimeAfter(prime);
+    const before = calls;
+    await checker.handle({ type: "prove", id: 2, value: next });
+    assert.equal(calls, before);
+    assert.deepEqual(sent.findLast((response) => response.type === "stripping"), { type: "stripping", id: 2, status: { state: "cpu" } });
+    const nextAnswer = answerOf(sent.at(-1));
+    assert.ok(nextAnswer.kind === "prime" && nextAnswer.proof.by === "certificate");
+    assert.deepEqual(checkCertificate(next, nextAnswer.proof.steps), { valid: true });
   });
 
   it("pauses a proof, keeping its chain, and resumes it with the time so far", async () => {

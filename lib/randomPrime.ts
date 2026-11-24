@@ -35,8 +35,8 @@ export function parseDigits(typed: string): DigitsInput {
  * The request for the first prime from `start` on (the worker's "next" excludes
  * `from`, so it's one less), with its certificate.
  */
-export function randomPrimeRequest(id: number, start: bigint): BatchRequest {
-  return { type: "batch", id, generation: 1, direction: "next", from: start - 1n, count: 1, includeCertificates: true };
+export function randomPrimeRequest(id: number, start: bigint, useGpu = false): BatchRequest {
+  return { type: "batch", id, generation: 1, direction: "next", from: start - 1n, count: 1, includeCertificates: true, useGpu };
 }
 
 export type RandomPrimeOutcome =

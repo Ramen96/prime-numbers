@@ -4,6 +4,7 @@
 // cost memory and start-up, and this way it runs the same in every browser.
 // The logic is in primeChecker.ts.
 
+import { GpuStrippingControl } from "./gpuStrippingControl.ts";
 import { NumberCheck, type RawNumberCheckExports } from "./numberCheck.ts";
 import { PrimeChecker, type PrimeCheckEngine, type PrimeCheckRequest } from "./primeChecker.ts";
 import { ProofSlots, type RawProofSlotExports } from "./proofSlots.ts";
@@ -17,9 +18,11 @@ async function loadEngine(): Promise<PrimeCheckEngine> {
     env: { emscripten_notify_memory_growth: () => {} },
   });
   (instance.exports._initialize as (() => void) | undefined)?.();
+  const proofSlots = new ProofSlots(instance.exports as unknown as RawProofSlotExports);
   return {
     numberCheck: new NumberCheck(instance.exports as unknown as RawNumberCheckExports),
-    proofSlots: new ProofSlots(instance.exports as unknown as RawProofSlotExports),
+    proofSlots,
+    stripping: new GpuStrippingControl(proofSlots),
   };
 }
 

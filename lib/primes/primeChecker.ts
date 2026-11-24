@@ -7,12 +7,14 @@
 import { answerHolds, type PrimeCheckAnswer } from "../primeCheck.ts";
 import { digitsOfBitLength, PROGRESS_INTERVAL_MS } from "./computeBatch.ts";
 import { settleNumber, type NumberCheck } from "./numberCheck.ts";
+import type { GpuStrippingControl } from "./gpuStrippingControl.ts";
+import type { GpuStrippingStatus } from "./protocol.ts";
 import type { ProofSlots } from "./proofSlots.ts";
 
 export type PrimeCheckRequest =
   | { type: "check"; id: number; value: bigint }
   /** Prove a number "check" found probably prime. It's checked again first: a proof slot only takes a BPSW pass. */
-  | { type: "prove"; id: number; value: bigint }
+  | { type: "prove"; id: number; value: bigint; useGpu?: boolean }
   /** Stop proving request `id`, keeping its chain: a later "prove" of the same number resumes it. */
   | { type: "pause"; id: number };
 
@@ -20,6 +22,8 @@ export type PrimeCheckResponse =
   /** `elapsedMs`: time spent on it, a proof's across pauses included. */
   | { type: "answer"; id: number; answer: PrimeCheckAnswer; elapsedMs: number }
   | { type: "proving-progress"; id: number; elapsedMs: number; digits: number; reachedDigits: number }
+  /** Who strips curve orders for the proof (step 11d), when it changes. */
+  | { type: "stripping"; id: number; status: GpuStrippingStatus }
   | { type: "paused"; id: number }
   /** Memory ran out: nothing is settled. */
   | { type: "memory-limit"; id: number }
@@ -33,6 +37,8 @@ export type PrimeCheckResponse =
 export interface PrimeCheckEngine {
   numberCheck: NumberCheck;
   proofSlots: ProofSlots;
+  /** The GPU's part in proofs; without it, the CPU strips. */
+  stripping?: GpuStrippingControl;
 }
 
 export interface PrimeCheckerOptions {
@@ -72,7 +78,7 @@ export class PrimeChecker {
       try {
         const engine = await this.#engine;
         if (request.type === "check") this.#check(engine, request.id, request.value);
-        else await this.#prove(engine, request.id, request.value);
+        else await this.#prove(engine, request.id, request.value, request.useGpu ?? false);
       } catch (error) {
         this.#send({ type: "error", id: request.id, message: error instanceof Error ? error.message : String(error) });
       }
@@ -88,7 +94,7 @@ export class PrimeChecker {
     else this.#send({ type: "disputed", id, value, stage: "check", claimed: settled.answer });
   }
 
-  async #prove(engine: PrimeCheckEngine, id: number, value: bigint): Promise<void> {
+  async #prove(engine: PrimeCheckEngine, id: number, value: bigint, useGpu: boolean): Promise<void> {
     const started = this.#now();
     const settled = settleNumber(value, engine.numberCheck);
     if (!settled.settled) {
@@ -106,6 +112,7 @@ export class PrimeChecker {
     const elapsed = () => elapsedBefore + this.#now() - started;
     const digits = value.toString().length;
     let lastProgress = -Infinity;
+    await engine.stripping?.prepare(useGpu, (status) => this.#send({ type: "stripping", id, status }));
     const proven = await engine.proofSlots.proveInOrder([value], {
       workPerRun: this.#options.workPerRun,
       betweenRuns: this.#options.betweenRuns,

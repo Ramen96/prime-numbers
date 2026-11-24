@@ -4,6 +4,7 @@
 // over as limbs and offsets (see wasmSieve.ts), never as JS numbers.
 
 import type { CertificateStep } from "./primalityCertificate.ts";
+import type { StripperFailure } from "./proofSlots.ts";
 
 export type Direction = "next" | "prev";
 
@@ -38,6 +39,12 @@ export interface BatchRequest extends RequestTags {
    * since the proven-prime cache keeps no certificates. Off for the list.
    */
   includeCertificates?: boolean;
+  /**
+   * Let the GPU strip curve orders for this request's proofs, where WebGPU runs
+   * (step 11d). Off if not given. Once the GPU fails or gives a wrong answer, the
+   * worker stays on the CPU whatever this says.
+   */
+  useGpu?: boolean;
 }
 
 /** A prime past a(13) and the certificate it was shown with, already checked by checkCertificate. */
@@ -164,6 +171,29 @@ export interface PausedResponse extends RequestTags {
   type: "paused";
 }
 
+/**
+ * Who strips curve orders for the proofs (step 11d), sent when it changes while
+ * a request is being worked on: the CPU (the GPU wasn't asked for), the GPU, or
+ * the CPU because the browser or device has no WebGPU, or because the GPU failed
+ * or gave a wrong answer (then for the rest of the worker's life).
+ */
+export type GpuStrippingStatus =
+  | { state: "cpu" }
+  | { state: "unavailable" }
+  | {
+      state: "gpu";
+      /** The largest prime it strips with, for the orders of the last strip call; null before the first. */
+      largestPrime: number | null;
+      /** 32-bit limbs times primes per second, measured on the last strip call; null before the first. */
+      limbStepsPerSecond: number | null;
+    }
+  | { state: "failed"; failure: StripperFailure };
+
+export interface GpuStrippingResponse extends RequestTags {
+  type: "stripping";
+  status: GpuStrippingStatus;
+}
+
 export interface ErrorResponse extends RequestTags {
   type: "error";
   message: string;
@@ -177,4 +207,5 @@ export type WorkerResponse =
   | PausedResponse
   | BatchResponse
   | MemoryLimitResponse
+  | GpuStrippingResponse
   | ErrorResponse;
