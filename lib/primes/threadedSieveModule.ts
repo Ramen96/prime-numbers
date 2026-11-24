@@ -45,6 +45,12 @@ export interface ThreadedSieveModule {
   _proof_output_buffer(): number;
   _proof_slot_clear(slot: number): void;
   _proof_slot_progress(slot: number): number;
+  _proof_slots_set_external_stripping(discriminantsPerBatch: number): void;
+  _proof_slot_strip_batch(slot: number): number;
+  _proof_slot_strip_request_count(slot: number): number;
+  _proof_slot_strip_request(slot: number, index: number): number;
+  _proof_slot_report_factors(slot: number, batch: number, pairCount: number): number;
+  _proof_slot_rejected_claims(slot: number): number;
   _number_check_input_buffer(limbCount: number): number;
   _check_number(limbCount: number): number;
   _number_check_evidence(): number;
@@ -101,6 +107,12 @@ export function rawProofSlotExportsOf(sieveModule: ThreadedSieveModule): RawProo
     proof_output_buffer: sieveModule._proof_output_buffer,
     proof_slot_clear: sieveModule._proof_slot_clear,
     proof_slot_progress: sieveModule._proof_slot_progress,
+    proof_slots_set_external_stripping: sieveModule._proof_slots_set_external_stripping,
+    proof_slot_strip_batch: sieveModule._proof_slot_strip_batch,
+    proof_slot_strip_request_count: sieveModule._proof_slot_strip_request_count,
+    proof_slot_strip_request: sieveModule._proof_slot_strip_request,
+    proof_slot_report_factors: sieveModule._proof_slot_report_factors,
+    proof_slot_rejected_claims: sieveModule._proof_slot_rejected_claims,
   };
 }
 

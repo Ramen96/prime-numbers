@@ -265,10 +265,12 @@ export class GpuStripper {
   /**
    * Every prime up to `largestPrime` that divides each order (limbs, least
    * significant first, any number of them), each reported once per order. 2 is
-   * found here from the lowest bit. Rejects with GpuStrippingError if the GPU fails.
+   * found here from the lowest bit. Rejects with GpuStrippingError if the GPU
+   * fails, or with the signal's reason once `signal` aborts (checked between
+   * chunks, so within about 30 ms).
    */
-  strip(orders: readonly Uint32Array[], largestPrime: number): Promise<StripHit[]> {
-    const run = this.queue.then(() => this.stripNow(orders, largestPrime));
+  strip(orders: readonly Uint32Array[], largestPrime: number, signal?: AbortSignal): Promise<StripHit[]> {
+    const run = this.queue.then(() => this.stripNow(orders, largestPrime, signal));
     this.queue = run.catch(() => undefined);
     return run;
   }
@@ -299,7 +301,8 @@ export class GpuStripper {
     this.device.destroy();
   }
 
-  private async stripNow(orders: readonly Uint32Array[], largestPrime: number): Promise<StripHit[]> {
+  private async stripNow(orders: readonly Uint32Array[], largestPrime: number, signal?: AbortSignal): Promise<StripHit[]> {
+    signal?.throwIfAborted();
     if (!Number.isInteger(largestPrime) || largestPrime < 2 || largestPrime > LARGEST_GPU_PRIME) {
       throw new RangeError(`largestPrime must be a whole number from 2 to ${LARGEST_GPU_PRIME}`);
     }
@@ -356,6 +359,7 @@ export class GpuStripper {
       const limbStepsPerPrime = orders.length * limbs;
       let start = 0;
       while (start < primes.length) {
+        signal?.throwIfAborted();
         const wanted = Math.floor(
           this.limbStepsPerMs === null
             ? FIRST_CHUNK_LIMB_STEPS / limbStepsPerPrime
@@ -402,7 +406,7 @@ export class GpuStripper {
       }
       return hits;
     } catch (error) {
-      if (error instanceof GpuStrippingError) throw error;
+      if (error instanceof GpuStrippingError || signal?.aborted) throw error;
       throw new GpuStrippingError(this.lostReason ?? (error instanceof Error ? error.message : String(error)));
     } finally {
       for (const created of buffers) created.destroy();

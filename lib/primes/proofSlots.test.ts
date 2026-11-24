@@ -66,6 +66,13 @@ function standInSlots(
     // like the C: the candidate's own size at the start, a little less after each run, 0 unless proving
     proof_slot_progress: (slot) =>
       states[slot] === 1 ? Math.max(1, candidates[slot]!.toString(2).length - (runsNeeded(candidates[slot]!) - runsLeft[slot])) : 0,
+    // external stripping isn't stood in for here: tests/wasm/proofSlots.test.ts runs it in the real builds
+    proof_slots_set_external_stripping: () => {},
+    proof_slot_strip_batch: () => 0,
+    proof_slot_strip_request_count: () => 0,
+    proof_slot_strip_request: () => 0,
+    proof_slot_report_factors: () => 1,
+    proof_slot_rejected_claims: () => 0,
   };
   return { raw, log };
 }
