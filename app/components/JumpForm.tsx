@@ -11,7 +11,7 @@ import {
 import Link from "next/link";
 import { destinationAt, pickDestination } from "@/lib/destinations";
 import { formatWholeNumber } from "@/lib/formatNumber";
-import { fitNumber, type GlyphWidths } from "@/lib/shortenNumber";
+import { fitNumber, textWidth, type GlyphWidths } from "@/lib/shortenNumber";
 import { jumpParameterFrom } from "@/lib/jumpUrl";
 import { parseJumpTarget } from "@/lib/primes/parseJumpTarget";
 import type { JumpResult } from "@/lib/primes/usePrimeBuffer";
@@ -22,6 +22,7 @@ import { GlyphRuler, readGlyphWidths } from "./GlyphRuler";
 const SURPRISE_LABEL = "Take me somewhere interesting";
 
 // The example only fits the desktop's wider box: on phones the box shares its row with the compass button.
+const DESKTOP_PLACEHOLDER = "Jump to… e.g. 2^127 − 1";
 const DESKTOP_MEDIA_QUERY = "(min-width: 64rem) and (min-height: 37.5rem)"; // the `desktop` variant in globals.css
 const subscribeToDesktopMedia = (onChange: () => void) => {
   const media = window.matchMedia(DESKTOP_MEDIA_QUERY);
@@ -37,7 +38,8 @@ const readServerIsDesktop = () => false;
  * (first prime ≥ …)” are too long for any line, so each is shortened in the
  * middle to fit one (lib/shortenNumber.ts), like the list's primes. Plain text,
  * not buttons: the line fades, the prime found is the list's first row (which
- * opens in full), and the number asked for is in the box.
+ * opens in full), and the number asked for is in the box. A number typed as an
+ * expression (“1e100”) also gets its digit count, kept on the number's line.
  */
 interface JumpLineSpace {
   lineWidthPx: number;
@@ -47,6 +49,13 @@ interface JumpLineSpace {
   jumpedToPx: number;
   /** “(first prime ≥ ” and “)”, around the number asked for. */
   firstPrimeAtLeastPx: number;
+  /** “, ” and “ digits”, around a digit count. */
+  digitsWordsPx: number;
+}
+
+/** “101”: how many digits a number shown with commas has, itself written with commas. */
+function digitCountOf(shownNumber: string): string {
+  return formatWholeNumber(BigInt(shownNumber.replace(/,/g, "").length));
 }
 
 function useJumpLineSpace() {
@@ -55,6 +64,7 @@ function useJumpLineSpace() {
   const requestedRulerRef = useRef<HTMLSpanElement>(null);
   const jumpedToRef = useRef<HTMLSpanElement>(null);
   const firstPrimeAtLeastRef = useRef<HTMLSpanElement>(null);
+  const digitsWordsRef = useRef<HTMLSpanElement>(null);
   const [space, setSpace] = useState<JumpLineSpace | null>(null);
 
   useLayoutEffect(() => {
@@ -70,6 +80,7 @@ function useJumpLineSpace() {
         requestedGlyphs,
         jumpedToPx: jumpedToRef.current?.getBoundingClientRect().width ?? 0,
         firstPrimeAtLeastPx: firstPrimeAtLeastRef.current?.getBoundingClientRect().width ?? 0,
+        digitsWordsPx: digitsWordsRef.current?.getBoundingClientRect().width ?? 0,
       };
       setSpace((previous) =>
         previous && previous.lineWidthPx === next.lineWidthPx && previous.primeGlyphs.digit === next.primeGlyphs.digit
@@ -95,14 +106,15 @@ function useJumpLineSpace() {
       {/* generated content, not text, so nothing on the page reads or finds them */}
       <span ref={jumpedToRef} data-text="Jumped to " className="absolute before:content-[attr(data-text)]" />
       <span ref={firstPrimeAtLeastRef} data-text=" (first prime ≥ )" className="absolute before:content-[attr(data-text)]" />
+      <span ref={digitsWordsRef} data-text=",  digits" className="absolute before:content-[attr(data-text)]" />
     </span>
   );
   return { lineRef, rulers, space };
 }
 
 interface Props {
-  /** Jumps, and updates the URL so it can be shared. */
-  onJump: (target: bigint) => void;
+  /** Jumps, and updates the URL so it can be shared; `written` is how it was typed, if not as a plain number. */
+  onJump: (target: bigint, written: string | null) => void;
   lastJump: JumpResult | null;
 }
 
@@ -117,6 +129,8 @@ export function JumpForm({ onJump, lastJump }: Props) {
   // null until the user types or submits; until then the box shows ?jump=.
   const [userInput, setUserInput] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  // the number last jumped to from an expression (“2^127 − 1”), so the jump line gives its digit count
+  const [expressionTarget, setExpressionTarget] = useState<bigint | null>(null);
 
   const isDesktop = useSyncExternalStore(subscribeToDesktopMedia, readIsDesktop, readServerIsDesktop);
   const queryString = useSyncExternalStore(subscribeToNothing, readQueryString, readServerQueryString);
@@ -137,7 +151,9 @@ export function JumpForm({ onJump, lastJump }: Props) {
     const urlJumpText = jumpParameterFrom(window.location.search);
     if (urlJumpText === null) return;
     const result = parseJumpTarget(urlJumpText);
-    if (result.valid) onJump(result.target);
+    if (!result.valid) return;
+    if (result.written !== null) setExpressionTarget(result.target); // eslint-disable-line react-hooks/set-state-in-effect -- once, on arrival
+    onJump(result.target, result.written);
   }, [onJump]);
 
   // A random place from lib/destinations.ts, through the same jump; the box shows where it went.
@@ -145,17 +161,26 @@ export function JumpForm({ onJump, lastJump }: Props) {
     const destination = pickDestination(lastJump?.requestedNumber ?? null);
     setUserInput(destination.value.toString());
     setErrorMessage(null);
-    onJump(destination.value);
+    setExpressionTarget(null);
+    onJump(destination.value, null);
   };
   const landedOn = lastJump ? destinationAt(lastJump.requestedNumber) : undefined;
 
   const { lineRef, rulers, space } = useJumpLineSpace();
   const shownFirstPrime = lastJump ? formatWholeNumber(lastJump.firstPrimeFound) : "";
   const shownRequested = lastJump ? formatWholeNumber(lastJump.requestedNumber) : "";
-  // each on a line of its own if it must be: the line wraps between the words around them
-  const fittedFirstPrime = space ? fitNumber(shownFirstPrime, space.lineWidthPx - space.jumpedToPx, space.primeGlyphs).text : shownFirstPrime;
+  const requestedIsFirstPrime = lastJump !== null && lastJump.firstPrimeFound === lastJump.requestedNumber;
+  // a place's name already says what it is
+  const digitCount = lastJump && !landedOn && expressionTarget === lastJump.requestedNumber ? digitCountOf(shownRequested) : null;
+  const digitCountText = digitCount && `, ${digitCount} digits`;
+  const digitCountPx = space && digitCount ? space.digitsWordsPx + textWidth(digitCount, space.requestedGlyphs) : 0;
+  // each on a line of its own if it must be, with the digit count beside the number it counts:
+  // the line wraps between the words around them
+  const fittedFirstPrime = space
+    ? fitNumber(shownFirstPrime, space.lineWidthPx - space.jumpedToPx - (requestedIsFirstPrime ? digitCountPx : 0), space.primeGlyphs).text
+    : shownFirstPrime;
   const fittedRequested = space
-    ? fitNumber(shownRequested, space.lineWidthPx - space.firstPrimeAtLeastPx, space.requestedGlyphs).text
+    ? fitNumber(shownRequested, space.lineWidthPx - space.firstPrimeAtLeastPx - digitCountPx, space.requestedGlyphs).text
     : shownRequested;
 
   const handleSubmit = (event: SubmitEvent) => {
@@ -167,7 +192,8 @@ export function JumpForm({ onJump, lastJump }: Props) {
       return;
     }
     setErrorMessage(null);
-    onJump(result.target);
+    setExpressionTarget(result.written !== null ? result.target : null);
+    onJump(result.target, result.written);
   };
 
   return (
@@ -179,9 +205,13 @@ export function JumpForm({ onJump, lastJump }: Props) {
         <input
           id="jump-target"
           type="text"
-          inputMode="numeric"
+          // the full keyboard: a phone's number pad has no e, ^ or +
+          inputMode="text"
           autoComplete="off"
-          placeholder={isDesktop ? "Jump to… e.g. 15,000,000" : "Jump to…"}
+          autoCapitalize="off"
+          autoCorrect="off"
+          spellCheck={false}
+          placeholder={isDesktop ? DESKTOP_PLACEHOLDER : "Jump to…"}
           value={shownInput}
           onChange={(event) => setUserInput(event.target.value)}
           aria-invalid={shownError !== null}
@@ -218,10 +248,16 @@ export function JumpForm({ onJump, lastJump }: Props) {
             <span key={lastJump.generation} className={`${fadingNotice.fadingNotice} ${landedOn ? fadingNotice.fadingNoticeLonger : ""} text-muted`}>
               Jumped to{" "}
               <span className="font-mono whitespace-nowrap text-foreground">{fittedFirstPrime}</span>
-              {lastJump.firstPrimeFound !== lastJump.requestedNumber && (
+              {requestedIsFirstPrime ? (
+                digitCountText && <span className="whitespace-nowrap">{digitCountText}</span>
+              ) : (
                 <>
                   {" (first prime ≥ "}
-                  <span className="whitespace-nowrap">{fittedRequested}</span>)
+                  <span className="whitespace-nowrap">
+                    {fittedRequested}
+                    {digitCountText}
+                  </span>
+                  )
                 </>
               )}
               {landedOn && `: ${landedOn.name}.`}

@@ -14,7 +14,7 @@ export default function IsPrimePage() {
   return (
     <Article
       title="Is it prime?"
-      lead="Type in any whole number, as long as you like. Your own computer works out whether it’s prime, and shows the evidence either way."
+      lead="Type in any whole number, as long as you like, or write it as 1e100 or 2^127 − 1. Your own computer works out whether it’s prime, and shows the evidence either way."
     >
       <PrimeChecker />
 
@@ -39,7 +39,7 @@ export default function IsPrimePage() {
       </p>
       <p>
         <strong>Sharing.</strong> The number goes in the address bar (up to 100,000 digits), so you can send someone
-        the link to your answer.
+        the link to your answer. A number written as a power, like 10^1000000, can be shared at any size.
       </p>
       <p>
         <Link href="/what-is-a-prime-number">New to primes? What is a prime number? →</Link>

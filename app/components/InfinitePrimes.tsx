@@ -99,11 +99,12 @@ export function InfinitePrimes({ intro, firstBatchFromServer }: Props) {
 
   /** Every jump goes through here: the jump form, ?jump= links and favorites. */
   const handleJump = useCallback(
-    (target: bigint) => {
+    (target: bigint, written: string | null = null) => {
       recordSessionRef.current = sessionAfterJump(target);
       jumpTo(target);
-      // Make the URL shareable without reloading or adding a history entry per jump.
-      window.history.replaceState(null, "", urlForJump(window.location.href, target));
+      // Make the URL shareable without reloading or adding a history entry per jump
+      // (as typed, “1e100”, when that's shorter than the digits).
+      window.history.replaceState(null, "", urlForJump(window.location.href, target, written));
     },
     [jumpTo],
   );

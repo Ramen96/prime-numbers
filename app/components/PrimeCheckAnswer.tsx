@@ -13,7 +13,7 @@ import { CopyButton } from "./CopyButton";
 import { StarIcon } from "./StarIcon";
 import { WrappableNumber } from "./WrappableNumber";
 
-/** Longer numbers aren't put in the address bar (browsers cap URLs at a few MB). */
+/** Longer numbers (as digits, or as typed: “10^1000000”) aren't put in the address bar (browsers cap URLs at a few MB). */
 export const MAX_DIGITS_IN_URL = 100_000;
 /** A headline shortens a number past 8 digit groups (shortNumber): then it's shown in full too. */
 const FULL_NUMBER_FROM_DIGITS = 25;

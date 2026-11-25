@@ -44,7 +44,7 @@ Three, not two, so that after every swap the view sits in the middle batch, far 
 
 Scrolling back up recomputes primes instead of storing them: memory stays flat forever and only compute grows, which is the point of the site. The exception is past 3.3 × 10^24, where a prime costs a proof: the worker keeps primes it has proven and checked (`lib/primes/provenPrimeCache.ts`, about 16 MB, oldest dropped first) so they aren't proven again. The list is virtualized with a fixed row height, so a prime too long for its row is shortened in the middle at comma groups and opens in full on tap.
 
-A jump can go anywhere (`?jump=` links are shareable), and `lib/destinations.ts` lists some places worth a visit: /fun-facts shows them, and “Take me somewhere interesting” picks one at random, never one where every prime takes seconds to prove.
+A jump can go anywhere (`?jump=` links are shareable), typed out or written as `1e100`, `1.5e3` or `2^127 - 1` (`lib/wholeNumberExpression.ts` reads them exactly, in BigInt; a link keeps that form when it's shorter than the digits), and `lib/destinations.ts` lists some places worth a visit: /fun-facts shows them, and “Take me somewhere interesting” picks one at random, never one where every prime takes seconds to prove.
 
 ### A memory budget, and partial sieving past it
 
@@ -80,7 +80,7 @@ Where it's used follows a rule measured on the device it was built on (`lib/prim
 
 ### Is it prime?
 
-`/is-prime` checks any number in a worker of its own (`primeCheck.worker.ts`, the single-threaded build): a factor below 65,536 found in BigInt, then `check_number` (`wasm/number_check.c`: deterministic Miller–Rabin below a(13), BPSW above). Every answer's evidence is checked again in BigInt (`answerHolds` in `lib/primeCheck.ts`) before it's shown. A BPSW pass is shown as almost certainly prime, and "Prove it" proves it with a proof slot, its certificate checked by `checkCertificate`. The number goes in `?n=`.
+`/is-prime` checks any number in a worker of its own (`primeCheck.worker.ts`, the single-threaded build): a factor below 65,536 found in BigInt, then `check_number` (`wasm/number_check.c`: deterministic Miller–Rabin below a(13), BPSW above). Every answer's evidence is checked again in BigInt (`answerHolds` in `lib/primeCheck.ts`) before it's shown. A BPSW pass is shown as almost certainly prime, and "Prove it" proves it with a proof slot, its certificate checked by `checkCertificate`. The number goes in `?n=`, and can be written the same ways as a jump.
 
 The numbers in `lib/listedNumbers.ts` (0 to 1,000, the years 1900 to 2100, and some notable ones) also have a page of their own, `/is-prime/<n>`, built ahead of time with the answer in the HTML. The build settles each one with `public/sieve.wasm` in Node and the same re-check (`lib/listedAnswers.ts`). A listed prime past a(13) is proven by its committed certificate in `data/listed-certificates/`, written by `npm run prove:listed` and checked by the build: a missing or wrong one fails it.
 

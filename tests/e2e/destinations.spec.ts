@@ -55,7 +55,7 @@ test.describe("Take me somewhere interesting", () => {
       await expect(icon).toBeHidden();
       await expect(textButton).toBeVisible();
       expect((await textButton.boundingBox())!.height).toBeGreaterThanOrEqual(MIN_TAP_TARGET_PX);
-      await expect(primeListPage.jumpInput).toHaveAttribute("placeholder", "Jump to… e.g. 15,000,000");
+      await expect(primeListPage.jumpInput).toHaveAttribute("placeholder", "Jump to… e.g. 2^127 − 1");
       await page.getByRole("link", { name: "All the places →" }).click();
       await expect(page).toHaveURL(/\/fun-facts#places-to-visit$/);
     }

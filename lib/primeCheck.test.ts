@@ -171,10 +171,15 @@ describe("describeAnswer", () => {
 
 describe("parseNumberToCheck", () => {
   it("reads as the jump box does, with its own message for an empty box", () => {
-    assert.deepEqual(parseNumberToCheck("1,000,003"), { valid: true, target: 1_000_003n });
-    assert.deepEqual(parseNumberToCheck("0"), { valid: true, target: 0n });
+    assert.deepEqual(parseNumberToCheck("1,000,003"), { valid: true, target: 1_000_003n, written: null });
+    assert.deepEqual(parseNumberToCheck("0"), { valid: true, target: 0n, written: null });
     assert.deepEqual(parseNumberToCheck("  "), { valid: false, message: "Type a number to check." });
     assert.deepEqual(parseNumberToCheck("2.5"), { valid: false, message: "Whole numbers only. Primes don’t do fractions." });
+  });
+
+  it("reads expressions too, with the checker's words for 0⁰", () => {
+    assert.deepEqual(parseNumberToCheck("2^127 - 1"), { valid: true, target: 2n ** 127n - 1n, written: "2^127-1" });
+    assert.deepEqual(parseNumberToCheck("0^0"), { valid: false, message: "0⁰ has no agreed value, so there’s nothing to check." });
   });
 });
 

@@ -8,7 +8,7 @@ import { shortNumber } from "./certificateCheck.ts";
 import { formatWholeNumber } from "./formatNumber.ts";
 import { estimatePrimeOrdinal } from "./primes/logarithmicIntegral.ts";
 import { checkCertificate, type CertificateStep } from "./primes/primalityCertificate.ts";
-import { parseJumpTarget, type JumpTargetResult } from "./primes/parseJumpTarget.ts";
+import { parseWholeNumber, type JumpTargetResult } from "./primes/parseJumpTarget.ts";
 import { primalityTableBelow } from "./primes/sieveOfEratosthenes.ts";
 import {
   compositeEvidenceHolds,
@@ -21,11 +21,9 @@ import {
 /** Factors are looked for among the primes below this; past it, a witness is the evidence. */
 export const SMALL_FACTOR_LIMIT = 65_536;
 
-/** What the box reads: the jump box's rules (digit separators, any size), with its own empty message. */
+/** What the box reads: the jump box's rules (1e100, 2^127 − 1, separators, any size), with its own messages. */
 export function parseNumberToCheck(userInput: string): JumpTargetResult {
-  const parsed = parseJumpTarget(userInput);
-  if (!parsed.valid && userInput.replace(/[\s,_]/g, "") === "") return { valid: false, message: "Type a number to check." };
-  return parsed;
+  return parseWholeNumber(userInput, "check");
 }
 
 /**

@@ -5,6 +5,7 @@ import { useEffect, useState, type SubmitEvent } from "react";
 import { shortNumber } from "@/lib/certificateCheck";
 import { formatWholeNumber } from "@/lib/formatNumber";
 import { formatDuration } from "@/lib/formatRate";
+import { queryParameterFrom } from "@/lib/jumpUrl";
 import { listedNumber } from "@/lib/listedNumbers";
 import {
   describeProofTime,
@@ -15,6 +16,7 @@ import {
 } from "@/lib/primeCheck";
 import { usePrimeCheck, type PrimeCheckState } from "@/lib/primes/usePrimeCheck";
 import { describeProving } from "@/lib/provingStatus";
+import { shortestWriting } from "@/lib/wholeNumberExpression";
 import { MAX_DIGITS_IN_URL, PrimeCheckAnswer } from "./PrimeCheckAnswer";
 
 /** The checking row shows the time from this long on. */
@@ -26,12 +28,28 @@ const BUTTON_CLASS =
 /** A listed number's own page: built ahead of time with its answer (app/is-prime/[n]). */
 const listedPage = (value: bigint) => `/is-prime/${value}`;
 
-/** The number in the address bar (`?n=`), read as the box reads it, or null. */
-function numberInAddress(): { typed: string; value: bigint } | null {
-  const typed = new URLSearchParams(window.location.search).get("n");
+/**
+ * The box's name in a form the browser sent itself, before the page's script
+ * ran: /is-prime?number=2%5E127+-+1. Form encoding writes a space as “+” (and a
+ * plus as %2B), so it's read that way, unlike `?n=`, where a typed “+” is a plus.
+ */
+const FORM_NUMBER_PARAMETER = "number";
+
+/** Where a number's answer lives: `?n=` as typed, if that's shorter than the digits, or /is-prime if it's too long. */
+function addressFor(value: bigint, written: string | null): string {
+  const writing = shortestWriting(value, written);
+  return writing.length <= MAX_DIGITS_IN_URL ? `/is-prime?n=${encodeURIComponent(writing)}` : "/is-prime";
+}
+
+/** The number in the address bar (`?n=`, or a form's `?number=`), read as the box reads it, or null. */
+function numberInAddress(): { typed: string; value: bigint; written: string | null; fromForm: boolean } | null {
+  const search = window.location.search;
+  const fromLink = queryParameterFrom(search, "n"); // keeps a typed “+”: lib/jumpUrl.ts
+  const fromForm = fromLink === null ? new URLSearchParams(search).get(FORM_NUMBER_PARAMETER) : null;
+  const typed = fromLink ?? fromForm;
   if (typed === null) return null;
   const parsed = parseNumberToCheck(typed);
-  return parsed.valid ? { typed, value: parsed.target } : null;
+  return parsed.valid ? { typed, value: parsed.target, written: parsed.written, fromForm: fromForm !== null } : null;
 }
 
 /** How long the current check has run, ticking once a second while it does. */
@@ -115,6 +133,8 @@ export function PrimeChecker({ onListedPage = false }: { onListedPage?: boolean 
         router.replace(listedPage(fromAddress.value)); // its own page has the answer already
         return;
       }
+      // a form sent before the script ran: given the address a link would have
+      if (fromAddress.fromForm) window.history.replaceState(null, "", addressFor(fromAddress.value, fromAddress.written));
       setTypedNumber(fromAddress.typed);
       setInputError(null);
       check(fromAddress.value);
@@ -132,18 +152,18 @@ export function PrimeChecker({ onListedPage = false }: { onListedPage?: boolean 
       return;
     }
     setInputError(null);
-    const digits = parsed.target.toString();
     if (listedNumber(parsed.target)) {
       router.push(listedPage(parsed.target));
       return;
     }
-    const fitsAddress = digits.length <= MAX_DIGITS_IN_URL;
+    // as typed (“2^127-1”) when that's shorter than the digits, so 10^1000000 has an address too
+    const address = addressFor(parsed.target, parsed.written);
+    const fitsAddress = address !== "/is-prime";
     if (onListedPage && fitsAddress) {
-      router.push(`/is-prime?n=${digits}`);
+      router.push(address);
       return;
     }
     // too long for an address: checked here (on a listed page, its address stays)
-    const address = fitsAddress ? `/is-prime?n=${digits}` : "/is-prime";
     if (!onListedPage && window.location.pathname + window.location.search !== address) window.history.pushState(null, "", address);
     check(parsed.target);
   };
@@ -153,13 +173,19 @@ export function PrimeChecker({ onListedPage = false }: { onListedPage?: boolean 
 
   return (
     <section className="my-6" data-testid="prime-checker">
-      <form onSubmit={handleSubmit} className="flex flex-wrap items-end gap-2">
+      {/* action and name only for a form sent before the script runs: then the browser goes to /is-prime?number=… */}
+      <form onSubmit={handleSubmit} action="/is-prime" className="flex flex-wrap items-end gap-2">
         <label className="flex min-w-0 grow flex-col text-sm">
           <span className="mb-1 text-muted">Number</span>
           <input
             type="text"
-            inputMode="numeric"
+            // the full keyboard: a phone's number pad has no e, ^ or +
+            inputMode="text"
             autoComplete="off"
+            autoCapitalize="off"
+            autoCorrect="off"
+            spellCheck={false}
+            name={FORM_NUMBER_PARAMETER}
             value={typedNumber}
             onChange={(event) => setTypedNumber(event.target.value)}
             aria-invalid={inputError !== null}
