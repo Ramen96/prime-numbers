@@ -43,9 +43,11 @@ test.describe("/about", () => {
       "What does the “≈” next to a number mean?",
       "Is there a largest number I can jump to?",
       "Will it break my computer?",
+      "Why does the GPU switch say “not available here”?",
     ]) {
       expect(html).toMatch(new RegExp(`<h3[^>]*>${question.replace("?", "\\?")}</h3>`));
     }
+    expect(html).toMatch(/<h3[^>]*id="why-does-the-gpu-switch-say-not-available-here"/);
     expect(html).toContain('<link rel="canonical" href="https://everyprimenumber.com/about"/>');
   });
 });

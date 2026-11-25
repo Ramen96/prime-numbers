@@ -93,8 +93,19 @@ const FREQUENTLY_ASKED_QUESTIONS = [
         No. It works your processor hard while it’s calculating, on every core but one, in
         background threads, so the page stays responsive and you can stop at any time. Past
         about 75 digits it also uses your graphics chip to help with proofs, where your
-        browser gives it a graphics chip through WebGPU; a switch in the stats turns that off. It only computes when
-        you scroll toward primes it doesn’t have yet; when you stop, it rests.
+        browser offers it through WebGPU; a switch in the stats turns that off. It only
+        computes when you scroll toward primes it doesn’t have yet; when you stop, it rests.
+      </>
+    ),
+  },
+  {
+    question: "Why does the GPU switch say “not available here”?",
+    answer: (
+      <>
+        Your browser either doesn’t offer WebGPU, or only offers a software version that runs
+        on your processor, which would be slower than proving there directly. So the CPU does
+        all the work. Every prime is still proven and checked exactly the same way; only very
+        large numbers take longer, up to about 1.8 times as long on the list near 200 digits.
       </>
     ),
   },
