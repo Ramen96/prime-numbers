@@ -15,3 +15,6 @@ export const CERTIFICATE_CHECK_WORKER_NAME = "certificate-check";
 
 /** The prime checker's worker (/is-prime, usePrimeCheck.ts), started on the first check. */
 export const PRIME_CHECK_WORKER_NAME = "prime-check";
+
+/** The GPU worker, started inside the prime or checker worker the first time a request asks for the GPU (remoteGpuStripper.ts). */
+export const GPU_STRIPPING_WORKER_NAME = "gpu-stripping";

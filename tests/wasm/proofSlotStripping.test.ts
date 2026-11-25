@@ -4,11 +4,12 @@
 // every certificate must pass the independent checker; with an exact stripper to
 // the CPU's own bound (10^5 below 830 bits), certificates must be exactly the
 // CPU's; and a stripper that's wrong or fails must be dropped, with the proof
-// finishing on the CPU.
+// finishing on the CPU. The same holds through the GPU worker's messages
+// (RemoteGpuStripper over a MessageChannel).
 
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { before, describe, it } from "node:test";
+import { after, before, describe, it } from "node:test";
 import { pathToFileURL } from "node:url";
 import { GpuStrippingError, OddPrimeList, type StripHit } from "../../lib/primes/gpuStripping.ts";
 import { checkCertificate, type CertificateStep } from "../../lib/primes/primalityCertificate.ts";
@@ -24,6 +25,8 @@ import {
   THREADED_INITIAL_MEMORY_BYTES,
   type CreateSieveModule,
 } from "../../lib/primes/threadedSieveModule.ts";
+import { RemoteGpuStripper } from "../../lib/primes/remoteGpuStripper.ts";
+import { closeGpuStrippingChannels, gpuStrippingChannel } from "../support/gpuStrippingChannel.ts";
 import { isPrime, nextPrimeAfter } from "../support/primality.ts";
 
 const A13 = 3_317_044_064_679_887_385_961_981n;
@@ -117,6 +120,8 @@ describe("external stripping through proof slots, in both shipped builds", () =>
   const all = candidates();
   /** The CPU's certificates for `all`, per build, to compare with. */
   const onTheCpu = new Map<string, CertificateStep[][]>();
+
+  after(closeGpuStrippingChannels);
 
   before(async () => {
     builds = await loadBuilds();
@@ -216,6 +221,36 @@ describe("external stripping through proof slots, in both shipped builds", () =>
         const { certificates, failures } = await proveWith(build().slots, stripper, { largestPrime: 1_000_000 });
         assert.deepEqual(failures, []);
         assertAllValid(all, certificates);
+      });
+
+      it("through the GPU worker's messages: the CPU's certificates exactly; a false factor is dropped", async () => {
+        const remoteOf = async (stripper: OrderStripper) => {
+          const { endpoint } = gpuStrippingChannel(async () => ({ ...stripper, destroy: () => {} }));
+          const remote = await RemoteGpuStripper.create(endpoint);
+          assert.ok(remote);
+          return remote;
+        };
+        const exact = await remoteOf(standIn().stripper);
+        const honest = await proveWith(build().slots, exact, { spotCheckEvery: 1 });
+        exact.destroy();
+        assert.deepEqual(honest.certificates, onTheCpu.get(build().name));
+        assert.deepEqual(honest.failures, []);
+        assert.ok(honest.reports.length > 0, "the stripper was used");
+
+        const lying = await remoteOf(
+          standIn(0, (hits, call, orders) => {
+            if (call !== 1) return hits;
+            let liar = 3;
+            const order = toBigInt(orders[0]);
+            while (order % BigInt(liar) === 0n) liar += 2;
+            return [...hits, { order: 0, prime: liar }];
+          }).stripper,
+        );
+        const dropped = await proveWith(build().slots, lying);
+        lying.destroy();
+        assert.deepEqual(dropped.failures, [{ kind: "wrong-factor" }]);
+        assert.equal(dropped.stillStripping, false);
+        assert.deepEqual(dropped.certificates, onTheCpu.get(build().name));
       });
 
       it("a pause with a strip on its way calls it off; resumed, the batches are sent again and the certificates are the same", async () => {

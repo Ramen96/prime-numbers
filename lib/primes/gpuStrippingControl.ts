@@ -1,13 +1,14 @@
-// The GPU's part in one worker's proofs (CLAUDE.md, step 11d): makes the
-// GpuStripper the first time a request asks for it, hands it to the proof slots
+// The GPU's part in one worker's proofs (CLAUDE.md, step 11d): starts the GPU
+// worker (RemoteGpuStripper, which owns the GpuStripper there) the first time a
+// request asks for it, hands it to the proof slots
 // with the depth controller (stripBound.ts), and tells the page who strips
 // (GpuStrippingStatus). Once the GPU fails or gives a wrong answer, it's never
 // used again in this worker: everything goes on on the CPU, and nothing wrong
 // was shown, since every factor and every certificate is checked.
 
-import { GpuStripper } from "./gpuStripping.ts";
 import type { GpuStrippingStatus } from "./protocol.ts";
 import type { OrderStripper, ProofSlots, StripperFailure } from "./proofSlots.ts";
+import { RemoteGpuStripper } from "./remoteGpuStripper.ts";
 import { StripBound } from "./stripBound.ts";
 
 /**
@@ -25,7 +26,7 @@ export const DISCRIMINANTS_PER_BATCH = 8;
  */
 export const EXTERNAL_FROM_BITS = 246;
 
-/** A stripper that can be thrown away: GpuStripper, or a stand-in in tests. */
+/** A stripper that can be thrown away: RemoteGpuStripper, GpuStripper (in the GPU worker), or a stand-in in tests. */
 export interface DisposableStripper extends OrderStripper {
   destroy(): void;
 }
@@ -45,7 +46,7 @@ export class GpuStrippingControl {
   #send: (status: GpuStrippingStatus) => void = () => {};
   #lastSent = "";
 
-  constructor(slots: ProofSlots, create: () => Promise<DisposableStripper | null> = () => GpuStripper.create()) {
+  constructor(slots: ProofSlots, create: () => Promise<DisposableStripper | null> = () => RemoteGpuStripper.create()) {
     this.#slots = slots;
     this.#create = create;
   }
