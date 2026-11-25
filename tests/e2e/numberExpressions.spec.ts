@@ -5,13 +5,16 @@ import { PrimeListPage } from "./primeListPage";
 // Numbers written as 1e100, 1.5e3 or 2^100 + 7 (lib/wholeNumberExpression.ts), in
 // the jump box, ?jump=, the prime checker and its ?n=.
 
-/** Where the browser itself sends /is-prime's form with `typed` in it, as it would before the page's script runs. */
-async function nativelySubmitted(browser: Browser, typed: string): Promise<string> {
+/**
+ * Where the browser itself sends a form with `typed` in it, as it would before the
+ * page's script runs: /is-prime's (the default) or the jump box on /.
+ */
+async function nativelySubmitted(browser: Browser, typed: string, form: "checker" | "jump" = "checker"): Promise<string> {
   const context = await browser.newContext({ javaScriptEnabled: false });
   const page = await context.newPage();
-  await page.goto("/is-prime");
-  await page.getByRole("textbox", { name: "Number" }).fill(typed);
-  await page.getByRole("button", { name: "Check", exact: true }).click();
+  await page.goto(form === "checker" ? "/is-prime" : "/");
+  await page.getByRole("textbox", { name: form === "checker" ? "Number" : "Jump to number" }).fill(typed);
+  await page.getByRole("button", { name: form === "checker" ? "Check" : "Jump", exact: true }).click();
   await page.waitForURL(/\?number=/);
   const address = new URL(page.url());
   await context.close();
@@ -138,5 +141,22 @@ test.describe("numbers written as expressions", () => {
 
     await page.goto(await nativelySubmitted(browser, "2^127 - 1"));
     await expect(page).toHaveURL(`/is-prime/${2n ** 127n - 1n}`);
+  });
+
+  test("so does a jump the browser sent before the script ran, and it becomes ?jump=", async ({ browser, page }) => {
+    const address = await nativelySubmitted(browser, "2^100 + 7", "jump");
+    expect(address).toBe("/?number=2%5E100+%2B+7");
+    const primeListPage = new PrimeListPage(page);
+    await primeListPage.open(address);
+    await expect(primeListPage.jumpFeedback).toContainText("31 digits", { timeout: 60_000 });
+    await primeListPage.waitForWorkerToFinish();
+    expect((await primeListPage.visiblePrimesExact())[0]).toBe(firstPrimeFrom(2n ** 100n + 7n));
+    await expect(page).toHaveURL("/?jump=2%5E100%2B7");
+    // as typed, or as the rewritten ?jump= has it once the box reads the address again
+    await expect(primeListPage.jumpInput).toHaveValue(/^2\^100( \+ |\+)7$/);
+
+    await primeListPage.open(await nativelySubmitted(browser, "1 000 001", "jump"));
+    await expect(primeListPage.jumpFeedback).toHaveText("Jumped to 1,000,003 (first prime ≥ 1,000,001)", { timeout: 60_000 });
+    await expect(page).toHaveURL("/?jump=1000001");
   });
 });

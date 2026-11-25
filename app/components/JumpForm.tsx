@@ -12,7 +12,7 @@ import Link from "next/link";
 import { destinationAt, pickDestination } from "@/lib/destinations";
 import { formatWholeNumber } from "@/lib/formatNumber";
 import { fitNumber, textWidth, type GlyphWidths } from "@/lib/shortenNumber";
-import { jumpParameterFrom } from "@/lib/jumpUrl";
+import { FORM_NUMBER_PARAMETER, typedJumpFrom } from "@/lib/jumpUrl";
 import { parseJumpTarget } from "@/lib/primes/parseJumpTarget";
 import type { JumpResult } from "@/lib/primes/usePrimeBuffer";
 import { CompassIcon } from "./CompassIcon";
@@ -134,7 +134,7 @@ export function JumpForm({ onJump, lastJump }: Props) {
 
   const isDesktop = useSyncExternalStore(subscribeToDesktopMedia, readIsDesktop, readServerIsDesktop);
   const queryString = useSyncExternalStore(subscribeToNothing, readQueryString, readServerQueryString);
-  const jumpFromUrl = jumpParameterFrom(queryString);
+  const jumpFromUrl = typedJumpFrom(queryString); // ?jump=, or a form sent before the script ran
   const shownInput = userInput ?? jumpFromUrl ?? "";
   const invalidUrlJumpMessage = (() => {
     if (userInput !== null || jumpFromUrl === null) return null;
@@ -143,12 +143,12 @@ export function JumpForm({ onJump, lastJump }: Props) {
   })();
   const shownError = errorMessage ?? invalidUrlJumpMessage;
 
-  // Follow a shared link: jump once on load if ?jump= holds a valid number.
+  // Follow a shared link: jump once on load if ?jump= (or a form's ?number=) holds a valid number.
   const hasFollowedUrlJumpRef = useRef(false);
   useEffect(() => {
     if (hasFollowedUrlJumpRef.current) return;
     hasFollowedUrlJumpRef.current = true;
-    const urlJumpText = jumpParameterFrom(window.location.search);
+    const urlJumpText = typedJumpFrom(window.location.search);
     if (urlJumpText === null) return;
     const result = parseJumpTarget(urlJumpText);
     if (!result.valid) return;
@@ -197,7 +197,8 @@ export function JumpForm({ onJump, lastJump }: Props) {
   };
 
   return (
-    <form onSubmit={handleSubmit} className="border-b border-rule px-5 py-3 desktop:px-0">
+    // action and name only for a form sent before the script runs: then the browser goes to /?number=…
+    <form onSubmit={handleSubmit} action="/" className="border-b border-rule px-5 py-3 desktop:px-0">
       <div className="flex gap-2">
         <label htmlFor="jump-target" className="sr-only">
           Jump to number
@@ -211,6 +212,7 @@ export function JumpForm({ onJump, lastJump }: Props) {
           autoCapitalize="off"
           autoCorrect="off"
           spellCheck={false}
+          name={FORM_NUMBER_PARAMETER}
           placeholder={isDesktop ? DESKTOP_PLACEHOLDER : "Jump to…"}
           value={shownInput}
           onChange={(event) => setUserInput(event.target.value)}

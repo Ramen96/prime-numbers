@@ -31,6 +31,24 @@ export function jumpParameterFrom(queryString: string): string | null {
 }
 
 /**
+ * The name of the jump box and the prime checker's box in a form the browser
+ * sent itself, before the page's script ran: /?number=2%5E127+-+1. Form encoding
+ * writes a space as “+” (and a plus as %2B), so it's read that way, unlike
+ * ?jump= and ?n=, where a typed “+” is a plus. The page then writes the usual address.
+ */
+export const FORM_NUMBER_PARAMETER = "number";
+
+/** The number a form sent itself (?number=), read with form encoding, or null. */
+export function formNumberFrom(queryString: string): string | null {
+  return new URLSearchParams(queryString).get(FORM_NUMBER_PARAMETER);
+}
+
+/** What to jump to from the address: ?jump=, or else a form's ?number=, or null. */
+export function typedJumpFrom(queryString: string): string | null {
+  return jumpParameterFrom(queryString) ?? formNumberFrom(queryString);
+}
+
+/**
  * The current URL with ?jump= set to `target`, or removed when the jump goes
  * back to the start of the list (anything up to 2, the first prime). `written`
  * is how it was typed, if not as a plain number (“1e100”): it's used when it's
@@ -38,6 +56,7 @@ export function jumpParameterFrom(queryString: string): string | null {
  */
 export function urlForJump(currentUrl: string, target: bigint, written: string | null = null): string {
   const url = new URL(currentUrl);
+  url.searchParams.delete(FORM_NUMBER_PARAMETER); // a form's ?number= becomes ?jump=
   if (target <= 2n) url.searchParams.delete(JUMP_PARAMETER);
   else url.searchParams.set(JUMP_PARAMETER, shortestWriting(target, written));
   return url.pathname + url.search + url.hash;

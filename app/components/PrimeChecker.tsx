@@ -5,7 +5,7 @@ import { useEffect, useState, type SubmitEvent } from "react";
 import { shortNumber } from "@/lib/certificateCheck";
 import { formatWholeNumber } from "@/lib/formatNumber";
 import { formatDuration } from "@/lib/formatRate";
-import { queryParameterFrom } from "@/lib/jumpUrl";
+import { FORM_NUMBER_PARAMETER, formNumberFrom, queryParameterFrom } from "@/lib/jumpUrl";
 import { listedNumber } from "@/lib/listedNumbers";
 import {
   describeProofTime,
@@ -28,13 +28,6 @@ const BUTTON_CLASS =
 /** A listed number's own page: built ahead of time with its answer (app/is-prime/[n]). */
 const listedPage = (value: bigint) => `/is-prime/${value}`;
 
-/**
- * The box's name in a form the browser sent itself, before the page's script
- * ran: /is-prime?number=2%5E127+-+1. Form encoding writes a space as “+” (and a
- * plus as %2B), so it's read that way, unlike `?n=`, where a typed “+” is a plus.
- */
-const FORM_NUMBER_PARAMETER = "number";
-
 /** Where a number's answer lives: `?n=` as typed, if that's shorter than the digits, or /is-prime if it's too long. */
 function addressFor(value: bigint, written: string | null): string {
   const writing = shortestWriting(value, written);
@@ -45,7 +38,8 @@ function addressFor(value: bigint, written: string | null): string {
 function numberInAddress(): { typed: string; value: bigint; written: string | null; fromForm: boolean } | null {
   const search = window.location.search;
   const fromLink = queryParameterFrom(search, "n"); // keeps a typed “+”: lib/jumpUrl.ts
-  const fromForm = fromLink === null ? new URLSearchParams(search).get(FORM_NUMBER_PARAMETER) : null;
+  // a form sent before the script ran (lib/jumpUrl.ts): /is-prime?number=2%5E127+-+1
+  const fromForm = fromLink === null ? formNumberFrom(search) : null;
   const typed = fromLink ?? fromForm;
   if (typed === null) return null;
   const parsed = parseNumberToCheck(typed);
