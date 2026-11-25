@@ -12,7 +12,7 @@ const PAGE_PATH = "/how-it-works";
 const PAGE_TITLE = "How It Works: Sieves, Prime Counting and Big Numbers | Every Prime Number";
 const PAGE_HEADLINE = "How Every Prime Number works";
 const PAGE_DESCRIPTION =
-  "How Every Prime Number finds primes live in your browser: the segmented sieve of Eratosthenes on several threads, a constant-memory infinite scroll, estimating π(x) with li(x), numbers bigger than 64 bits as 32-bit limbs, and proving huge primes with elliptic curve certificates.";
+  "How Every Prime Number finds primes live in your browser: the segmented sieve of Eratosthenes on several threads, a constant-memory infinite scroll, estimating π(x) with li(x), numbers bigger than 64 bits as 32-bit limbs, and proving huge primes with elliptic curve certificates, with help from the GPU.";
 
 export const metadata = pageMetadata({
   title: PAGE_TITLE,
@@ -41,6 +41,7 @@ const SECTIONS = [
   { id: "javascript-number-limit", title: "What is the largest number JavaScript can store exactly?" },
   { id: "numbers-bigger-than-64-bits", title: "How to work with numbers bigger than 64 bits: 32-bit limbs" },
   { id: "proving-huge-primes", title: "How to prove a huge number is prime: elliptic curve certificates" },
+  { id: "gpu-proofs", title: "Can a GPU help prove a number is prime?" },
   { id: "displaying-long-primes", title: "How the list shows primes too long for the screen" },
   { id: "measuring-speed", title: "Why measuring speed in a browser is harder than it looks" },
 ] as const;
@@ -747,9 +748,9 @@ for (size_t index = limb_count; index-- > 0;)
         batch on one thread about five times faster: from 2.6 seconds to under half a second.
       </p>
       <p>
-        <strong>Planned, not built yet:</strong> a GPU version, using WebGPU, to test candidates
-        further out. GPU shaders only have 32-bit integers, which is one reason the limbs are
-        32 bits: the same representation will work there.
+        GPU shaders only have 32-bit integers, which is one reason the limbs are 32 bits: the
+        GPU works on the very same limbs (see{" "}
+        <a href="#gpu-proofs">can a GPU help prove a number is prime?</a>).
       </p>
 
       {/* 11 */}
@@ -886,6 +887,133 @@ for (size_t index = limb_count; index-- > 0;)
       </p>
 
       {/* 12 */}
+      <SectionHeading id="gpu-proofs" />
+      <p>
+        Yes, with one part of the job. Each step of a proof needs a curve whose number of
+        points, its <em>order</em>, is a large prime <em>q</em> times small factors. The prover
+        finds many candidate orders, divides out their small prime factors, and keeps looking
+        until what’s left is a big enough probable prime. That dividing, called{" "}
+        <strong>stripping</strong>, is the same small sum over and over: one order, one small
+        prime, does it divide? That’s exactly what a GPU is good at.
+      </p>
+      <p>
+        Stripping deeper pays twice. More orders turn out usable, so the prover tries fewer
+        curves, and each usable <em>q</em> tends to be smaller, so the chain is shorter. On
+        one 300-digit prime, stripping to 10⁷ instead of 10⁵ took the chain from 30 steps to
+        22. On the CPU, though, deeper stripping costs more than it saves. So the site hands it
+        to the GPU, through <strong>WebGPU</strong>: a shader, written in WGSL, gives each GPU
+        thread one prime and runs it along an order one 32-bit limb at a time, using Montgomery
+        reduction so it never needs a division. On a laptop’s Apple M4 GPU, that’s about
+        50 billion limb steps a second.
+      </p>
+      <p>
+        The GPU runs in a worker of its own, and the CPU never sits waiting for it if it can
+        help it: each thread runs two provers, so while one waits for its orders to come back,
+        the other works. Nothing the GPU says is trusted. Every factor it reports is checked
+        with one division on the CPU, and one order in 64 is also divided by every prime up to
+        10,000 on the CPU, to catch a factor it missed. If either check fails, or the GPU
+        reports an error, it’s switched off until the page reloads, and the CPU carries on.
+        Even a wrong answer could only slow a proof down: the certificate is still checked
+        step by step, as above.
+      </p>
+      <h3 id="gpu-small-numbers">Why the CPU wins for small numbers</h3>
+      <p>
+        For a small number, stripping is only a small part of a proof, and every trip to the
+        GPU and back costs about 2 milliseconds, even for a small batch. So below about 75
+        digits, every step of every proof stays on the CPU. From there the GPU strips to a
+        million, and from about 145 digits to ten million. Going deeper costs more GPU time
+        than it saves.
+      </p>
+      <p>
+        A single proof, on <Link href="/is-prime">the prime checker</Link> or{" "}
+        <Link href="/random-prime">a random prime</Link>, has nothing else to do while it
+        waits for the GPU, so it only pays further out. Measured on <code>/is-prime</code>,
+        one proof per freshly loaded page, 12 primes of each size: with the GPU, 100-digit
+        proofs took 5–8% longer and 110-digit ones 8% longer, while 135-digit ones were 5%
+        faster and 150-digit ones 16% faster. So a single proof uses the GPU only from 135
+        digits.
+      </p>
+      <ScrollableTable label="Speed with and without the GPU">
+        <table>
+          <thead>
+            <tr>
+              <th scope="col">Where</th>
+              <th scope="col">CPU only</th>
+              <th scope="col">With the GPU</th>
+              <th scope="col">Faster by</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>The list, near 10⁶⁰</td>
+              <td>292 primes/s</td>
+              <td>293 primes/s</td>
+              <td>— (not used)</td>
+            </tr>
+            <tr>
+              <td>The list, near 10⁸⁰</td>
+              <td>83 primes/s</td>
+              <td>89 primes/s</td>
+              <td>1.07×</td>
+            </tr>
+            <tr>
+              <td>The list, near 10¹⁰⁰</td>
+              <td>31 primes/s</td>
+              <td>41 primes/s</td>
+              <td>1.30×</td>
+            </tr>
+            <tr>
+              <td>The list, near 10¹⁵⁰</td>
+              <td>4.9 primes/s</td>
+              <td>7.7 primes/s</td>
+              <td>1.56×</td>
+            </tr>
+            <tr>
+              <td>The list, near 10²⁰⁰</td>
+              <td>1.1 primes/s</td>
+              <td>2.0 primes/s</td>
+              <td>1.81×</td>
+            </tr>
+            <tr>
+              <td>One 135-digit proof</td>
+              <td>0.30 s</td>
+              <td>0.29 s</td>
+              <td>1.06×</td>
+            </tr>
+            <tr>
+              <td>One 150-digit proof</td>
+              <td>0.51 s</td>
+              <td>0.44 s</td>
+              <td>1.16×</td>
+            </tr>
+            <tr>
+              <td>One 200-digit proof</td>
+              <td>1.6 s</td>
+              <td>1.2 s</td>
+              <td>1.33×</td>
+            </tr>
+            <tr>
+              <td>One 300-digit proof</td>
+              <td>10.1 s</td>
+              <td>6.7 s</td>
+              <td>1.51×</td>
+            </tr>
+          </tbody>
+        </table>
+      </ScrollableTable>
+      <p>
+        Measured on one laptop with an Apple M4 chip, in Chromium, with 9 threads for the
+        list; the single proofs are averages over 12 primes (3 at 200 and 300 digits). Your
+        device will differ, so the gap may be bigger or smaller.
+      </p>
+      <p>
+        The GPU is on by default wherever the browser has WebGPU, and a switch in the stats
+        on the home page turns it off, so the CPU does everything. The choice is kept in this
+        browser and applies to the prime checker and random primes too. Where WebGPU isn’t
+        available, the switch is greyed out and the CPU does it all, exactly as before.
+      </p>
+
+      {/* 13 */}
       <SectionHeading id="displaying-long-primes" />
       <p>
         Every row in the list has the same height, 44 pixels. That’s what lets the list draw
@@ -903,7 +1031,7 @@ for (size_t index = limb_count; index-- > 0;)
         frontier and records under the counter work the same way.
       </p>
 
-      {/* 13 */}
+      {/* 14 */}
       <SectionHeading id="measuring-speed" />
       <p>
         The primes-per-second counter is the joke of the site: it starts huge and sinks as the

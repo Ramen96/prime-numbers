@@ -29,7 +29,7 @@ const median = (values: number[]) => [...values].sort((a, b) => a - b)[Math.floo
 async function recordTimings(page: Page, label: string) {
   const primeListPage = new PrimeListPage(page);
   await primeListPage.open();
-  const lines = [`${label}: ${await statValue(page, "threads")} thread(s)`];
+  const lines = [`${label}: ${await page.getByTestId("thread-count").innerText()} thread(s)`];
   for (const [name, target] of PLACES) {
     const jumpStart = Date.now();
     await primeListPage.jumpTo(target);

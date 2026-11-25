@@ -2,17 +2,13 @@ import { expect, test, type Page, type Worker } from "@playwright/test";
 import { nextPrimeAfter } from "../support/primality";
 import { collectPrimeWorkers, collectSieveThreads, PrimeListPage, serveLoaderStartingThreadsWith } from "./primeListPage";
 
-async function statValue(page: Page, label: string): Promise<string> {
-  return page.locator("dt", { hasText: label }).locator("xpath=following-sibling::dd[1]").innerText();
-}
-
 const workerClosed = (worker: Worker) => new Promise<void>((resolve) => worker.once("close", () => resolve()));
 
 /** After a fallback: one thread, no error, and the list still right past 2^53. */
 async function expectSingleThreadedListToWork(page: Page) {
   const primeListPage = new PrimeListPage(page);
   await primeListPage.open();
-  await expect.poll(() => statValue(page, "threads")).toBe("1");
+  await expect.poll(() => page.getByTestId("thread-count").innerText()).toBe("1");
   await primeListPage.jumpTo("9,007,199,254,740,000");
   await primeListPage.scrollByRows(600);
   const primes = await primeListPage.visiblePrimesExact();
@@ -39,7 +35,7 @@ test.describe("sieve threads", () => {
     const primeListPage = new PrimeListPage(page);
     await primeListPage.open();
     const cores = await page.evaluate(() => navigator.hardwareConcurrency);
-    await expect.poll(() => statValue(page, "threads")).toBe(String(Math.max(1, cores - 1)));
+    await expect.poll(() => page.getByTestId("thread-count").innerText()).toBe(String(Math.max(1, cores - 1)));
     // the prime worker sieves too, so it starts one thread fewer than that
     expect(threads).toHaveLength(Math.max(0, cores - 2));
   });

@@ -25,8 +25,14 @@
 //   1.5×. So a lone proof uses the GPU only from 135 digits; below that it
 //   doesn't touch the GPU at all.
 
-/** What a request proves: the list's primes, or one number on its own (the checker, /random-prime). */
-export type ProofWork = { kind: "list" } | { kind: "lone"; bits: number };
+/**
+ * What a request proves: a batch of the list's primes, or one number on its own
+ * (the checker, /random-prime), with the bit length of where it starts.
+ */
+export interface ProofWork {
+  kind: "list" | "lone";
+  bits: number;
+}
 
 /** Numbers below this many bits (246 bits, 75 digits) strip on the CPU. */
 export const GPU_STRIPPING_FROM_BITS = 246;
@@ -35,12 +41,15 @@ export const GPU_STRIPPING_FROM_BITS = 246;
 export const LONE_GPU_FROM_BITS = 446;
 
 /**
- * Whether the GPU strips for this work at all. The list always may, whatever the
- * size of its numbers (the node rule then keeps small nodes on the CPU); a lone
- * proof only from LONE_GPU_FROM_BITS. Anything that doesn't say it's lone is the list.
+ * Whether the GPU strips for this work at all, so whether its worker is even
+ * started. The list from GPU_STRIPPING_FROM_BITS: below it no node of the batch
+ * would go to the GPU. A batch's primes can be one bit longer than where it
+ * starts (500 primes span far less than a doubling), hence the + 1. A lone proof
+ * only from LONE_GPU_FROM_BITS. Anything that doesn't say it's lone is the list.
  */
 export function gpuStripsFor(work: ProofWork): boolean {
-  return work.kind === "list" || work.bits >= LONE_GPU_FROM_BITS;
+  if (work.kind === "lone") return work.bits >= LONE_GPU_FROM_BITS;
+  return work.bits + 1 >= GPU_STRIPPING_FROM_BITS;
 }
 
 /** Orders of this many limbs (481 bits, about 145 digits) or more are stripped to 10^7. */

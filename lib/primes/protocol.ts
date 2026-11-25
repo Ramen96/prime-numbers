@@ -71,7 +71,17 @@ export interface PauseRequest {
   id: number;
 }
 
-export type WorkerRequest = BatchRequest | PauseRequest;
+/**
+ * The visitor switched the GPU on or off: taken at once, like `pause`, so it
+ * applies to the batch being proven from its next run, and to later requests
+ * through their own `useGpu`.
+ */
+export interface GpuSwitchRequest {
+  type: "gpu";
+  useGpu: boolean;
+}
+
+export type WorkerRequest = BatchRequest | PauseRequest | GpuSwitchRequest;
 
 /** Sent before a batch whose base primes have to be built first, which can take a while. */
 export interface BuildingBasePrimesNotice extends RequestTags {

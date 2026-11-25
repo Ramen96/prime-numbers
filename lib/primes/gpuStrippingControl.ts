@@ -35,6 +35,8 @@ export class GpuStrippingControl {
   #failure: StripperFailure | null = null;
   #largestPrime: number | null = null;
   #limbStepsPerSecond: number | null = null;
+  /** What the request being worked on proves, for the rule. */
+  #work: ProofWork = { kind: "list", bits: 0 };
   /** Whether the request being worked on strips on the GPU: it asked, and the rule says it pays. */
   #wanted = false;
   /** Where status changes go: the request being worked on. */
@@ -56,7 +58,17 @@ export class GpuStrippingControl {
    */
   prepare(useGpu: boolean, work: ProofWork, send: (status: GpuStrippingStatus) => void): void {
     this.#send = send;
-    this.#wanted = useGpu && gpuStripsFor(work);
+    this.#work = work;
+    this.setUseGpu(useGpu);
+  }
+
+  /**
+   * The visitor switched the GPU on or off (the home page's switch) while a
+   * request runs: from the next run of its proofs. Off goes back to the CPU at
+   * once, which strips anything still out.
+   */
+  setUseGpu(useGpu: boolean): void {
+    this.#wanted = useGpu && gpuStripsFor(this.#work);
     if (this.#wanted && this.#failure === null && !this.#started) {
       this.#started = true;
       void this.#create()

@@ -18,4 +18,12 @@ test.describe("GPU stripping, without WebGPU", () => {
     expect(await states()).toEqual(["cpu", "unavailable"]);
     expect(errors).toEqual([]);
   });
+
+  test("the switch is greyed out, and says why", async ({ page }) => {
+    await page.goto("/");
+    const gpuSwitch = page.getByRole("switch", { name: "Use the GPU for proofs" });
+    await expect(page.getByTestId("gpu-row-text")).toHaveText("not available here");
+    await expect(gpuSwitch).toBeDisabled();
+    await expect(gpuSwitch).toHaveAttribute("aria-checked", "false");
+  });
 });

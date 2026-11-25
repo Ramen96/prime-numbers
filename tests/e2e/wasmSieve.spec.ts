@@ -77,8 +77,12 @@ test.describe("WebAssembly sieve", () => {
     const primeListPage = new PrimeListPage(page);
     await primeListPage.open();
     await primeListPage.jumpTo("3,317,044,064,679,887,385,958,000");
-    // the last prime below a(13) is about 70 rows in: bring it and the first prime past it into view
-    await primeListPage.scrollByRows(60);
+    // bring the last prime below a(13) to the second row, so the first prime past it is just under it,
+    // however many rows the screen shows: count the primes from the top row to it with the test reference
+    const lastBelowTheBound = previousPrimeBefore(provenBound)!;
+    let rowsDown = 0;
+    for (let prime = (await primeListPage.visiblePrimesExact())[0]; prime < lastBelowTheBound; prime = nextPrimeAfter(prime)) rowsDown++;
+    await primeListPage.scrollByRows(rowsDown - 1);
     const acrossTheBound = await primeListPage.visiblePrimesExact();
     expect(acrossTheBound).toContain(previousPrimeBefore(provenBound));
     expect(acrossTheBound).toContain(nextPrimeAfter(provenBound));

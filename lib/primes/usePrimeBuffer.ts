@@ -17,7 +17,8 @@ import { estimatedBasePrimeBytes, shouldRestartWorkerToReleaseMemory } from "./m
 import { addBatch, extendBatch, MAX_BATCHES, type Batch } from "./rollingBuffer.ts";
 import { basePrimeLimitNeededFor } from "./wasmSieve.ts";
 import { PRIME_WORKER_NAME } from "./workerNames.ts";
-import { gpuPreferred } from "../gpuPreference.ts";
+import type { GpuStrippingStatus } from "./protocol.ts";
+import { gpuPreferred, setGpuPreferred } from "../gpuPreference.ts";
 import { heatFromRate, meltdownFromRate, primesTakeMinutes } from "../heat.ts";
 import type { ProvingStatus } from "../provingStatus.ts";
 
@@ -102,6 +103,10 @@ export interface PrimeBuffer {
   proving: { direction: Direction; status: ProvingStatus } | null;
   /** The most recent completed jump, or null if the user hasn't jumped. */
   lastJump: JumpResult | null;
+  /** Who strips curve orders for the list's proofs, as the worker last said; null until it has. */
+  gpuStatus: GpuStrippingStatus | null;
+  /** The visitor's GPU switch: remembered, and applied to the batch being proven from its next run. */
+  switchGpu: (on: boolean) => void;
   /** Throw the buffer away and restart it at the first prime ≥ `target`. */
   jumpTo: (target: bigint) => void;
   /**
@@ -156,6 +161,7 @@ export function usePrimeBuffer(firstBatchFromServer: readonly string[]): PrimeBu
   const [calculationIsSlow, setCalculationIsSlow] = useState(false);
   const [lastJump, setLastJump] = useState<JumpResult | null>(null);
   const [reachedMemoryLimit, setReachedMemoryLimit] = useState(false);
+  const [gpuStatus, setGpuStatus] = useState<GpuStrippingStatus | null>(null);
 
   // These refs hold the same values as state, but update instantly. The worker
   // message handler and the scroll handler read them, so they always see the
@@ -359,6 +365,11 @@ export function usePrimeBuffer(firstBatchFromServer: readonly string[]): PrimeBu
     [discardWorker, seedBuffer],
   );
 
+  const switchGpu = useCallback((on: boolean) => {
+    setGpuPreferred(on);
+    workerRef.current?.postMessage({ type: "gpu", useGpu: on } satisfies WorkerRequest);
+  }, []);
+
   const stop = useCallback(() => {
     abandonPendingRequest();
     pendingSeedRef.current = null;
@@ -399,6 +410,11 @@ export function usePrimeBuffer(firstBatchFromServer: readonly string[]): PrimeBu
 
   const handleWorkerMessage = useCallback(
     (response: WorkerResponse) => {
+      // the GPU's status belongs to the worker, not to a request: it can change after a batch ends
+      if (response.type === "stripping") {
+        setGpuStatus(response.status);
+        return;
+      }
       const isFromCurrentGeneration = response.generation === generationRef.current;
       const isAnswerToPendingRequest = response.id === pendingRequestRef.current?.id;
       if (!isFromCurrentGeneration || !isAnswerToPendingRequest) return;
@@ -435,7 +451,6 @@ export function usePrimeBuffer(firstBatchFromServer: readonly string[]): PrimeBu
         setBatches(update.batches);
       };
 
-      if (response.type === "stripping") return; // who strips curve orders (shown from step 11e)
       if (response.type === "proving") {
         pending.proving = true; // Stop can pause it now, keeping its proofs
         setProving({ direction: pending.direction, status: { elapsedMs: 0, digits: null, reachedDigits: null } });
@@ -657,6 +672,8 @@ export function usePrimeBuffer(firstBatchFromServer: readonly string[]): PrimeBu
     reachedMemoryLimit,
     proving,
     lastJump,
+    gpuStatus,
+    switchGpu,
     jumpTo,
     stop,
     reportView,

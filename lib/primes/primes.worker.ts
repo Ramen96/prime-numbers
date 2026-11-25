@@ -41,6 +41,7 @@ function sendToMainThread(response: WorkerResponse) {
 // One request at a time, in the order they arrived (computing is async while
 // verification runs in other workers). A pause isn't queued: it's noted at
 // once, and the running request sees it between proving runs (requestStops.ts).
+// Nor is the GPU switch.
 let previousRequest: Promise<void> = Promise.resolve();
 let calibrator: SieveCalibrator | null = null;
 // The GPU's part in the proofs, made once the sieve (and its proof slots) are loaded.
@@ -55,6 +56,11 @@ self.onmessage = (event: MessageEvent<WorkerRequest>) => {
     requestStops.paused(request.id);
     return;
   }
+  if (request.type === "gpu") {
+    // also not queued: the batch being proven switches from its next run (before the sieve loads, there's nothing to switch)
+    stripping?.setUseGpu(request.useGpu);
+    return;
+  }
   requestStops.arrived();
   previousRequest = previousRequest.then(async () => {
     requestStops.started();
@@ -63,7 +69,7 @@ self.onmessage = (event: MessageEvent<WorkerRequest>) => {
       calibrator ??= new SieveCalibrator(sieve, memoryBudgetBytes);
       stripping ??= new GpuStrippingControl(proofSlots);
       // the list unless the request says it's one prime on its own (/random-prime)
-      const work: ProofWork = request.loneProof ? { kind: "lone", bits: request.from.toString(2).length } : { kind: "list" };
+      const work: ProofWork = { kind: request.loneProof ? "lone" : "list", bits: request.from.toString(2).length };
       stripping.prepare(request.useGpu ?? false, work, (status) =>
         sendToMainThread({ type: "stripping", id: request.id, generation: request.generation, status }),
       );

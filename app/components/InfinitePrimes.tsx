@@ -13,6 +13,7 @@ import fadingNotice from "./FadingNotice.module.scss";
 import { JumpForm } from "./JumpForm";
 import { PrimeList } from "./PrimeList";
 import { FittedNumber } from "./FittedNumber";
+import { GpuSwitchAndStatus } from "./GpuSwitch";
 import { useNumberPopover } from "./NumberPopover";
 import { useMentatLine } from "./useMentatLine";
 
@@ -58,6 +59,8 @@ export function InfinitePrimes({ intro, firstBatchFromServer }: Props) {
     errorMessage,
     calculationIsSlow,
     reachedMemoryLimit,
+    gpuStatus,
+    switchGpu,
     proving,
     stop,
     lastJump,
@@ -190,8 +193,12 @@ export function InfinitePrimes({ intro, firstBatchFromServer }: Props) {
               <dd className="text-foreground">
                 {basePrimeMemoryBytes === null ? "—" : `${formatMemory(basePrimeMemoryBytes)} of base primes`}
               </dd>
-              <dt>threads</dt>
-              <dd className="text-foreground">{sievingThreads ?? "—"}</dd>
+              <dt>threads · GPU</dt>
+              {/* a size container: the GPU's words show only where they fit (GpuSwitch.tsx) */}
+              <dd className="@container flex min-w-0 items-center gap-2 text-foreground">
+                <span data-testid="thread-count">{sievingThreads ?? "—"}</span>
+                <GpuSwitchAndStatus status={gpuStatus} onSwitch={switchGpu} />
+              </dd>
               <dt>checked</dt>
               <dd className="text-foreground">
                 {lastVerificationMs === null ? "—" : `in ${formatBatchDuration(lastVerificationMs)}`}

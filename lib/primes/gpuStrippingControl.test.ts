@@ -5,7 +5,7 @@ import type { GpuStrippingStatus } from "./protocol.ts";
 import type { ProofSlots, StrippingSetup } from "./proofSlots.ts";
 import { LONE_GPU_FROM_BITS, type ProofWork } from "./stripDepth.ts";
 
-const LIST: ProofWork = { kind: "list" };
+const LIST: ProofWork = { kind: "list", bits: 300 };
 const LONE_BIG: ProofWork = { kind: "lone", bits: LONE_GPU_FROM_BITS };
 const LONE_SMALL: ProofWork = { kind: "lone", bits: LONE_GPU_FROM_BITS - 1 };
 
@@ -103,7 +103,7 @@ describe("GpuStrippingControl", () => {
     }
   });
 
-  it("a lone proof below 135 digits doesn't touch the GPU; from 135 digits, and the list at any size, use it", async () => {
+  it("a lone proof below 135 digits doesn't touch the GPU; from 135 digits, and the list, use it", async () => {
     const { slots, current } = standInSlots();
     const { stripper } = standInStripper();
     let created = 0;
@@ -120,8 +120,36 @@ describe("GpuStrippingControl", () => {
     control.prepare(true, LONE_SMALL, (status) => sent.push(status));
     assert.equal(current(), null, "back to the CPU for a small lone proof, the stripper kept");
     control.prepare(true, LIST, (status) => sent.push(status));
-    assert.equal(current()?.stripper, stripper, "the list: always the list's rule");
+    assert.equal(current()?.stripper, stripper, "the list: the list's rule, whatever its count");
     assert.equal(created, 1);
+  });
+
+  it("the switch applies to the request being worked on at once, within the rule", async () => {
+    const { slots, current } = standInSlots();
+    const { stripper } = standInStripper();
+    const control = new GpuStrippingControl(slots, async () => stripper);
+    const sent: GpuStrippingStatus[] = [];
+    control.prepare(true, LIST, (status) => sent.push(status));
+    await settled();
+    assert.equal(current()?.stripper, stripper);
+    control.setUseGpu(false);
+    assert.equal(current(), null, "off: the CPU at once");
+    assert.deepEqual(sent.at(-1), { state: "cpu" });
+    control.setUseGpu(true);
+    assert.equal(current()?.stripper, stripper, "on again");
+    control.prepare(true, LONE_SMALL, () => {});
+    control.setUseGpu(true);
+    assert.equal(current(), null, "on, but the rule still keeps a small lone proof on the CPU");
+  });
+
+  it("the list below 75 digits doesn't start the GPU worker", async () => {
+    const { slots, current } = standInSlots();
+    let created = 0;
+    const control = new GpuStrippingControl(slots, async () => (created++, standInStripper().stripper));
+    control.prepare(true, { kind: "list", bits: 200 }, () => {});
+    await settled();
+    assert.equal(created, 0);
+    assert.equal(current(), null);
   });
 
   it("after a failure or a wrong answer: the stripper is thrown away and never used again", async () => {

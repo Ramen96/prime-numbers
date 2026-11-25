@@ -7,10 +7,14 @@ import { certificateFromJson } from "../../lib/certificateExport.ts";
 import { checkCertificate } from "../../lib/primes/primalityCertificate.ts";
 import { nextPrimeAfter } from "../support/primality";
 
-/** Turns the GPU on (as 11e's switch will) and records every stripping status the page's workers send. */
-export async function watchStripping(page: Page) {
-  await page.addInitScript(() => {
-    localStorage.setItem("everyPrimeNumber.gpu", "on");
+/**
+ * Sets the GPU switch as the home page's switch stores it (null: left at the
+ * default) and records every stripping status the page's workers send; with
+ * `markBatches`, also "batch" each time a batch of the list ends.
+ */
+export async function watchStripping(page: Page, preference: "on" | "off" | null = "on", { markBatches = false } = {}) {
+  await page.addInitScript(({ preference, markBatches }) => {
+    if (preference) localStorage.setItem("everyPrimeNumber.gpu", preference);
     const states: string[] = [];
     (window as unknown as { strippingStates: string[] }).strippingStates = states;
     const PageWorker = window.Worker;
@@ -19,13 +23,14 @@ export async function watchStripping(page: Page) {
         super(url, options);
         this.addEventListener("message", (event: MessageEvent) => {
           const message = event.data as { type?: string; status?: { state: string; largestPrime?: number | null } };
+          if (markBatches && message?.type === "batch") states.push("batch");
           if (message?.type !== "stripping" || !message.status) return;
           const { state, largestPrime } = message.status;
           states.push(state === "gpu" && largestPrime ? `gpu ${largestPrime}` : state);
         });
       }
     };
-  });
+  }, { preference, markBatches });
   return () => page.evaluate(() => (window as unknown as { strippingStates: string[] }).strippingStates);
 }
 

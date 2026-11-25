@@ -17,8 +17,7 @@ async function openOnTheSingleThreadedBuild(page: Page): Promise<PrimeListPage> 
   await forceSingleThreadedBuild(page);
   const primeListPage = new PrimeListPage(page);
   await primeListPage.open();
-  const threads = page.locator("dt", { hasText: "threads" }).locator("xpath=following-sibling::dd[1]");
-  await expect(threads).toHaveText("1");
+  await expect(page.getByTestId("thread-count")).toHaveText("1");
   return primeListPage;
 }
 

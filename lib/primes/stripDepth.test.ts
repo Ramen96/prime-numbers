@@ -26,10 +26,12 @@ describe("the GPU's stripping rule", () => {
     assert.equal(digitsOfBits(32 * (DEEPEST_FROM_LIMBS - 1) + 1), 145);
   });
 
-  it("strips for the list at any size, and for a lone proof only from 135 digits", () => {
+  it("strips for the list from 75 digits (a batch may reach one bit further), and for a lone proof from 135", () => {
     assert.equal(digitsOfBits(LONE_GPU_FROM_BITS), 135);
     assert.equal(digitsOfBits(LONE_GPU_FROM_BITS - 1), 134);
-    assert.equal(gpuStripsFor({ kind: "list" }), true);
+    assert.equal(gpuStripsFor({ kind: "list", bits: GPU_STRIPPING_FROM_BITS - 2 }), false, "the GPU worker isn't started");
+    assert.equal(gpuStripsFor({ kind: "list", bits: GPU_STRIPPING_FROM_BITS - 1 }), true);
+    assert.equal(gpuStripsFor({ kind: "list", bits: LONE_GPU_FROM_BITS - 1 }), true);
     assert.equal(gpuStripsFor({ kind: "lone", bits: LONE_GPU_FROM_BITS - 1 }), false);
     assert.equal(gpuStripsFor({ kind: "lone", bits: LONE_GPU_FROM_BITS }), true);
     assert.equal((10n ** 134n).toString(2).length, LONE_GPU_FROM_BITS, "the smallest 135-digit number has 446 bits");

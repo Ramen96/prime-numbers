@@ -62,11 +62,17 @@ If the two ever disagree, the worker stops with an error and the disputed batch 
 
 ### Proofs past 3.3 × 10^24
 
-Past a(13), the sieve's survivors go through BPSW in C (`bpsw()` in `wasm/primality.c`): a base-2 strong test and a strong Lucas test. A fail is proof of a composite, re-checked in TypeScript; a pass is only a probable prime. Each one is then proven by elliptic curve primality proving (`wasm/ecpp_prover.c`): a chain of curves, each showing a point of prime order q > (N^¼ + 1)², down to a number below a(13). Curves come from Hilbert class polynomials computed at run time (`wasm/classpoly.c`), so there's no table to run out. One prover runs per thread (`wasm/proof_slots.c`), each on a different prime.
+Past a(13), the sieve's survivors go through BPSW in C (`bpsw()` in `wasm/primality.c`): a base-2 strong test and a strong Lucas test. A fail is proof of a composite, re-checked in TypeScript; a pass is only a probable prime. Each one is then proven by elliptic curve primality proving (`wasm/ecpp_prover.c`): a chain of curves, each showing a point of prime order q > (N^¼ + 1)², down to a number below a(13). Curves come from Hilbert class polynomials computed at run time (`wasm/classpoly.c`), so there's no table to run out. Each thread has two provers (`wasm/proof_slots.c`), each on a different prime; the second only works while the GPU strips numbers that big (below), so that one proves while the other waits.
 
 Every certificate is checked before the prime is shown by `lib/primes/primalityCertificate.ts`, a small checker that shares no code with the prover. A composite that passed BPSW never gets a proof, so it stays pending and the list waits rather than show it. Measured natively on one thread, a proof takes about 0.07 s at 100 digits, 1.1 s at 200 and 8.5 s at 300.
 
 Each prime is shown as soon as it and every prime before it are proven and checked: the worker sends a batch in pieces (`proven` messages, at most every 100 ms), after checking the batch's rejected composites first, since a wrong rejection would leave a gap. Meanwhile a "proving primality…" row shows how long the prime the list is waiting on has taken, and how far down its chain has got (`proof_slot_progress`). Stop pauses proving instead of ending the worker: unfinished chains stay in their slots, and a later request for the same numbers carries on from there. Once primes take a minute or more each (`primesTakeMinutes` in `lib/heat.ts`), the button reads "Give up"; it does the same thing. While the sieve itself is running, a Wasm call can't be interrupted, so Stop still ends the worker.
+
+### Stripping on the GPU
+
+Each step of a proof needs a curve whose order is a large prime times small factors, so the prover divides small primes out of many candidate orders ("stripping"). Stripping deeper means fewer curves to try and shorter chains, but on the CPU it costs more than it saves. With WebGPU it runs on the GPU instead (`lib/primes/gpuStripping.ts`): a WGSL shader gives each GPU thread one prime and runs it along an order a 32-bit limb at a time with Montgomery reduction, about 50 billion limb steps a second on an Apple M4 GPU. It runs in a worker of its own (`gpuStripping.worker.ts`, `remoteGpuStripper.ts`), and nothing it says is trusted: each factor is checked with one division, one order in 64 is trial-divided on the CPU up to 10,000 to catch a missed factor, and any error or wrong answer switches it off for the session. A missed factor can only slow a proof; the certificate is checked either way.
+
+Where it's used follows a rule measured on the device it was built on (`lib/primes/stripDepth.ts`): numbers below about 75 digits strip on the CPU, since a trip to the GPU costs about 2 ms; above that, to 10^6, and to 10^7 from about 145 digits. A single proof (`/is-prime`, `/random-prime`) has nothing to do while it waits, so it uses the GPU only from 135 digits. Measured in Chromium on an Apple M4 laptop, the list is 1.07× faster near 10^80, 1.30× near 10^100, 1.56× near 10^150 and 1.81× near 10^200, and a single proof is 1.06× faster at 135 digits and 1.51× at 300; below those sizes the GPU isn't used. It's on by default where WebGPU works, with a switch in the home page's stats (`lib/gpuPreference.ts`, kept in `localStorage`); where WebGPU isn't available the switch is greyed out and the CPU does everything. The e2e tests run the GPU path on SwiftShader, a software GPU (`--enable-unsafe-webgpu`, the `webgpu` Playwright project).
 
 ### A random prime, with its certificate
 
@@ -100,10 +106,6 @@ Browsers round `performance.now()` (0.1 ms or coarser) to blunt timing attacks, 
 - **Cross-origin isolation.** Already needed for threads, it also gives a finer timer: about 5 µs in Chrome.
 
 The counter measures the time spent finding primes, which includes proving past the full sieve: Miller–Rabin, and past 3.3 × 10^24, ECPP. Primes kept from an earlier proof don't count, and below one prime a second it shows the time per prime instead (`lib/formatRate.ts`). Building base primes, calibrating, timing thread splits and verification are measured separately and left out, so the counter shows steady speed and holds its value while you aren't scrolling. The CPU's heat follows the rate on a log scale, since the rate falls across orders of magnitude. Once heat is at its top (about 10^24), the chip starts melting, and it's a puddle at one prime every ten minutes (`lib/heat.ts`).
-
-## Roadmap
-
-- **GPU factor-finding.** Sieve deeper on WebGPU (32-bit limbs, with a CPU fallback), each removed composite reported with a factor that the CPU checks with one division. Fewer survivors, and more usable curve orders for ECPP.
 
 ## Setup
 

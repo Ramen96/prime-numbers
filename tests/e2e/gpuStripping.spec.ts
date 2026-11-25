@@ -85,4 +85,48 @@ test.describe("GPU stripping, on a software GPU", () => {
     expectStrippedOnTheGpu(await states());
     expect(errors).toEqual([]);
   });
+
+  test("the switch: on by default, helping once proofs reach 75 digits, and off at once, remembered", async ({ page }) => {
+    test.setTimeout(120_000);
+    const errors = collectErrors(page);
+    const states = await watchStripping(page, null, { markBatches: true });
+    const primeListPage = new PrimeListPage(page);
+    await primeListPage.open();
+    const gpuSwitch = page.getByRole("switch", { name: "Use the GPU for proofs" });
+    const rowText = page.getByTestId("gpu-row-text");
+    await expect(gpuSwitch).toHaveAttribute("aria-checked", "true");
+    await expect(gpuSwitch).toBeEnabled();
+    await expect(rowText).toHaveText("on, used from 75 digits");
+    expect(await page.evaluate(() => localStorage.getItem("everyPrimeNumber.gpu"))).toBeNull(); // the default, not a stored choice
+
+    await primeListPage.jumpInput.fill(String(10n ** 79n));
+    await primeListPage.jumpInput.press("Enter");
+    await expect(rowText).toHaveText("on, helping", { timeout: 90_000 });
+    const batchesBefore = (await states()).filter((state) => state === "batch").length;
+    await gpuSwitch.click(); // while the batch is still being proven
+    await expect(gpuSwitch).toHaveAttribute("aria-checked", "false");
+    await expect(rowText).toHaveText("off, CPU only");
+    expect(await page.evaluate(() => localStorage.getItem("everyPrimeNumber.gpu"))).toBe("off");
+    await expect(primeListPage.primeList).toHaveAttribute("data-status", /^(idle|stopped|overflow)$/, { timeout: 90_000 });
+    const primes = await primeListPage.visiblePrimesExact();
+    expectConsecutivePrimes(primes);
+    // the worker went back to the CPU before that batch ended, not at the next one
+    const seen = await states();
+    const switchedAt = seen.lastIndexOf("cpu");
+    expect(seen.slice(0, switchedAt).some((state) => state.startsWith("gpu")), seen.join(", ")).toBe(true);
+    expect(seen.slice(0, switchedAt).filter((state) => state === "batch").length, seen.join(", ")).toBe(batchesBefore);
+
+    await page.reload();
+    await expect(page.getByRole("switch", { name: "Use the GPU for proofs" })).toHaveAttribute("aria-checked", "false");
+    expect(errors).toEqual([]);
+  });
+
+  test("switched off, a 140-digit proof on /is-prime stays on the CPU", async ({ page }) => {
+    const states = await watchStripping(page, "off");
+    const prime = nextPrimeAfter(10n ** 139n);
+    await page.goto(`/is-prime?n=${prime}`);
+    await page.getByRole("button", { name: "Prove it" }).click();
+    await expect(page.getByTestId("prime-check-headline")).toContainText("is prime.", { timeout: 60_000 });
+    expect(await states()).toEqual(["cpu"]);
+  });
 });
