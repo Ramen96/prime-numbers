@@ -257,20 +257,35 @@ static void answer_requests(ecpp_prover *prover, stand_in kind, int times) {
 // stripper missing most factors needs many more curves, so more work.
 #define EXTERNAL_RUN_CALLS 500
 #define PARTIAL_RUN_CALLS 50000
+// Also checks, every call, that the prover reports the work it used, that it works
+// nothing ahead while a batch is out (the run after a hand-out waits at once), and
+// that only numbers of at least `from_bits` bits hand out batches.
 static ecpp_proof_status run_external(ecpp_prover *prover, stand_in kind, int times, int switch_at, size_t *batches) {
   *batches = 0;
   size_t budget = kind == STAND_IN_PARTIAL ? PARTIAL_RUN_CALLS : EXTERNAL_RUN_CALLS;
+  int batch_out = 0;
   for (size_t calls = 0; calls < budget; calls++) {
     ecpp_proof_status status = ecpp_prover_run(prover, 1000);
-    if (status == ECPP_PROOF_MORE)
+    expect(prover->work_done <= 1000, "a run uses no more than its work", prover->work_done);
+    if (status == ECPP_PROOF_MORE) {
+      expect(prover->work_done == 1000, "a run that goes on used all its work", prover->work_done);
+      expect(!batch_out, "nothing is worked ahead while a batch is out", calls);
       continue;
+    }
     if (status == ECPP_PROOF_NEEDS_STRIPPING) {
-      if (++*batches == (size_t)switch_at)
-        ecpp_prover_set_external_stripping(prover, 0);
-      continue; // work ahead while it's out
+      expect(ecpp_prover_current_bit_length(prover) >= prover->external_from_bits, "only numbers from from_bits hand out batches",
+             ecpp_prover_current_bit_length(prover));
+      batch_out = 1;
+      if (++*batches == (size_t)switch_at) {
+        ecpp_prover_set_external_stripping(prover, 0, 0);
+        batch_out = 0;
+      }
+      continue; // the next run waits for it
     }
     if (status == ECPP_PROOF_WAITING) {
+      expect(prover->work_done == 0, "a waiting prover does nothing", prover->work_done);
       answer_requests(prover, kind, times);
+      batch_out = 0;
       continue;
     }
     return status;
@@ -293,7 +308,7 @@ static void check_external_stripping(void) {
 
       // exactly: the same certificate as built in, a batch of 1 or 4 discriminants
       for (size_t per_batch = 1; per_batch <= 4; per_batch += 3) {
-        ecpp_prover_set_external_stripping(&external, per_batch);
+        ecpp_prover_set_external_stripping(&external, per_batch, 0);
         expect(ecpp_prover_reset(&external, &candidate) && run_external(&external, STAND_IN_EXACT, 1, 0, &batches) == ECPP_PROOF_DONE,
                "external, exact", detail);
         expect(same_certificate(&built_in, &external), "exact external stripping finds built-in's certificate", detail);
@@ -314,7 +329,17 @@ static void check_external_stripping(void) {
       expect(ecpp_prover_reset(&external, &candidate) && run_external(&external, STAND_IN_EXACT, 1, 2, &batches) == ECPP_PROOF_DONE,
              "switched to built in", detail);
       expect(same_certificate(&built_in, &external), "switching to built in mid-batch changes nothing", detail);
-      ecpp_prover_set_external_stripping(&external, 4);
+      ecpp_prover_set_external_stripping(&external, 4, 0);
+      // only numbers from a size hand out batches: the rest strip here; the same certificate
+      for (size_t from_bits = 120; from_bits <= 4000; from_bits = from_bits == 120 ? 4000 : 8000) {
+        ecpp_prover_set_external_stripping(&external, 4, from_bits);
+        expect(ecpp_prover_reset(&external, &candidate) && run_external(&external, STAND_IN_EXACT, 1, 0, &batches) == ECPP_PROOF_DONE,
+               "external from a size", detail);
+        expect(same_certificate(&built_in, &external), "a size threshold changes nothing", detail);
+        if (from_bits == 4000)
+          expect(batches == 0, "nothing below the threshold is handed out", batches);
+      }
+      ecpp_prover_set_external_stripping(&external, 4, 0);
       // partly (most factors missed): slower, but done, and a valid chain
       expect(ecpp_prover_reset(&external, &candidate) && run_external(&external, STAND_IN_PARTIAL, 1, 0, &batches) == ECPP_PROOF_DONE,
              "external, partial", detail);

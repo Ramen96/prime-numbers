@@ -17,6 +17,14 @@ import { StripBound } from "./stripBound.ts";
  */
 export const DISCRIMINANTS_PER_BATCH = 8;
 
+/**
+ * Numbers below this strip on the CPU, since for them the GPU's overhead costs more
+ * than it saves: 246 bits, 75 digits (step 11d, M1: the CPU won every node below 75
+ * digits, the GPU every band from 100). Interim, until the rule from the measurements
+ * (part 3) replaces StripBound.
+ */
+export const EXTERNAL_FROM_BITS = 246;
+
 /** A stripper that can be thrown away: GpuStripper, or a stand-in in tests. */
 export interface DisposableStripper extends OrderStripper {
   destroy(): void;
@@ -64,6 +72,7 @@ export class GpuStrippingControl {
       this.#slots.useStripper({
         stripper,
         discriminantsPerBatch: DISCRIMINANTS_PER_BATCH,
+        externalFromBits: EXTERNAL_FROM_BITS,
         largestPrimeFor: (limbs) => this.#bound.largestPrimeFor(limbs),
         onStripped: (report) => {
           this.#bound.record(report);

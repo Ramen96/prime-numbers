@@ -41,8 +41,8 @@ typedef enum {
   // is free; nothing is lost and nothing is decided.
   ECPP_PROOF_OUT_OF_MEMORY,
   // External stripping only (ecpp_prover_set_external_stripping): a batch of
-  // curve orders is ready to strip. Read it with ecpp_prover_strip_request, and
-  // call ecpp_prover_run again meanwhile: the prover works ahead.
+  // curve orders is ready to strip. Read it with ecpp_prover_strip_request; until
+  // it's stripped, ecpp_prover_run answers ECPP_PROOF_WAITING.
   ECPP_PROOF_NEEDS_STRIPPING,
   // External stripping only: nothing more can be done until the batch handed out
   // is stripped (ecpp_prover_report_factor, then ecpp_prover_stripping_done).
@@ -102,6 +102,12 @@ typedef struct {
   size_t step_count;
   // External stripping (step 11b): discriminants per batch, 0 for built in.
   size_t discriminants_per_batch;
+  // External stripping only for numbers of at least this many bits; smaller ones
+  // strip here (step 11d: below some size the GPU's overhead costs more than it saves).
+  size_t external_from_bits;
+  // Work units the last ecpp_prover_run used (it can stop early: done, waiting,
+  // a batch handed out, memory), so a thread can spend the rest on another prover.
+  size_t work_done;
   // Factors reported that don't divide their order: ignored, and counted.
   size_t rejected_claims;
 } ecpp_prover;
@@ -126,9 +132,11 @@ ecpp_proof_status ecpp_prover_run(ecpp_prover *prover, size_t work);
 // (the GPU) to find their small prime factors, and checks every factor reported:
 // one that doesn't divide its order is ignored and counted, and one that's missed
 // only leaves the order unusable. So a wrong stripper can only make proofs
-// slower, never wrong. Switching to built in at any time strips whatever is
-// handed out or worked out ahead here, at the next run.
-void ecpp_prover_set_external_stripping(ecpp_prover *prover, size_t discriminants_per_batch);
+// slower, never wrong. Only numbers of at least `from_bits` bits hand out their
+// orders; smaller ones strip here, since for them the overhead costs more than
+// deeper stripping saves (step 11d). Switching to built in at any time strips
+// whatever is handed out here, at the next run.
+void ecpp_prover_set_external_stripping(ecpp_prover *prover, size_t discriminants_per_batch, size_t from_bits);
 // The batch handed out: its orders, while one is out (0 otherwise). Requests stay
 // out across pauses until ecpp_prover_stripping_done, so they can be sent again.
 size_t ecpp_prover_strip_request_count(const ecpp_prover *prover);

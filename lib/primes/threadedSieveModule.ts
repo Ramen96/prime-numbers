@@ -45,7 +45,8 @@ export interface ThreadedSieveModule {
   _proof_output_buffer(): number;
   _proof_slot_clear(slot: number): void;
   _proof_slot_progress(slot: number): number;
-  _proof_slots_set_external_stripping(discriminantsPerBatch: number): void;
+  _proof_slots_set_external_stripping(discriminantsPerBatch: number, fromBits: number): void;
+  _proof_slots_per_thread(): number;
   _proof_slot_strip_batch(slot: number): number;
   _proof_slot_strip_request_count(slot: number): number;
   _proof_slot_strip_request(slot: number, index: number): number;
@@ -108,6 +109,7 @@ export function rawProofSlotExportsOf(sieveModule: ThreadedSieveModule): RawProo
     proof_slot_clear: sieveModule._proof_slot_clear,
     proof_slot_progress: sieveModule._proof_slot_progress,
     proof_slots_set_external_stripping: sieveModule._proof_slots_set_external_stripping,
+    proof_slots_per_thread: sieveModule._proof_slots_per_thread,
     proof_slot_strip_batch: sieveModule._proof_slot_strip_batch,
     proof_slot_strip_request_count: sieveModule._proof_slot_strip_request_count,
     proof_slot_strip_request: sieveModule._proof_slot_strip_request,

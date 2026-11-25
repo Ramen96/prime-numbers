@@ -139,6 +139,7 @@ describe("external stripping through proof slots, in both shipped builds", () =>
     slots.useStripper({
       stripper,
       discriminantsPerBatch: options.perBatch ?? 4,
+      externalFromBits: 0,
       largestPrimeFor: () => options.largestPrime ?? CPU_BOUND,
       onFailure: (failure) => failures.push(failure),
       onStripped: (report) => reports.push(report),
@@ -220,7 +221,7 @@ describe("external stripping through proof slots, in both shipped builds", () =>
       it("a pause with a strip on its way calls it off; resumed, the batches are sent again and the certificates are the same", async () => {
         const slow = standIn(50);
         const slots = build().slots;
-        slots.useStripper({ stripper: slow.stripper, discriminantsPerBatch: 4, largestPrimeFor: () => CPU_BOUND });
+        slots.useStripper({ stripper: slow.stripper, discriminantsPerBatch: 4, externalFromBits: 0, largestPrimeFor: () => CPU_BOUND });
         const paused = await slots.proveInOrder(all, { workPerRun: 8, betweenRuns: () => pause(0), shouldStop: () => slow.record.calls > 0 });
         assert.equal(paused.stopped, true);
         await pause(80);
@@ -230,6 +231,7 @@ describe("external stripping through proof slots, in both shipped builds", () =>
         slots.useStripper({
           stripper: exact.stripper,
           discriminantsPerBatch: 4,
+          externalFromBits: 0,
           largestPrimeFor: () => CPU_BOUND,
           onFailure: (failure) => failures.push(failure),
           spotCheckEvery: 1,

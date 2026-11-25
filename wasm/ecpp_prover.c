@@ -46,7 +46,7 @@ typedef struct {
 } proof_option;
 
 // A discriminant whose orders are found but not yet evaluated (external stripping):
-// worked out ahead, handed out to be stripped, or stripped and waiting its turn.
+// found and not yet handed out, handed out to be stripped, or stripped and waiting its turn.
 // A node takes them strictly in order, so options come out in the same order as
 // with built-in stripping.
 typedef enum { PENDING_FOUND, PENDING_HANDED_OUT, PENDING_STRIPPED } pending_state;
@@ -651,8 +651,9 @@ static ecpp_pending_discriminant *handed_out_order(const ecpp_prover *prover, si
   return NULL;
 }
 
-void ecpp_prover_set_external_stripping(ecpp_prover *prover, size_t discriminants_per_batch) {
+void ecpp_prover_set_external_stripping(ecpp_prover *prover, size_t discriminants_per_batch, size_t from_bits) {
   prover->discriminants_per_batch = discriminants_per_batch;
+  prover->external_from_bits = from_bits;
 }
 
 size_t ecpp_prover_strip_request_count(const ecpp_prover *prover) {
@@ -703,20 +704,19 @@ size_t ecpp_prover_rejected_claims(const ecpp_prover *prover) { return prover->r
 
 // One piece of work for a node that needs options, with external stripping:
 // evaluate the oldest queued discriminant once stripped; or hand out what's found
-// (NEEDS_STRIPPING); or, while a batch is out, work ahead up to a batch more; or
-// wait (WAITING). Discriminants are taken strictly in order and counted against
+// (NEEDS_STRIPPING); or, while a batch is out, wait (WAITING). Discriminants are taken strictly in order and counted against
 // the effort limit when queued, so the search spends its effort as built in.
 static ecpp_proof_status external_step(ecpp_prover *prover, ecpp_proof_node *node, const big_number *proven_bound) {
   if (node->pending_count > 0 && node->pending[0].state == PENDING_STRIPPED)
     return evaluate_oldest_pending(node, proven_bound) ? ECPP_PROOF_MORE : ECPP_PROOF_OUT_OF_MEMORY;
   size_t handed_out = pending_in_state(node, PENDING_HANDED_OUT), found = pending_in_state(node, PENDING_FOUND);
   int may_queue = node->discriminants_examined + node->pending_count < prover->effort_limit;
-  if (handed_out > 0) {
-    // the oldest is out: work ahead, at most a batch
-    if (found < prover->discriminants_per_batch && may_queue)
-      return queue_next_discriminant(prover, node) ? ECPP_PROOF_MORE : ECPP_PROOF_OUT_OF_MEMORY;
+  // a batch is out: wait for it. Working ahead meanwhile found orders a step often
+  // never needs (finding orders is most of a proof's work: step 11d measured a third
+  // to two fifths of them unused), so the thread's other prover gets the time instead
+  // (proof_slots.c).
+  if (handed_out > 0)
     return ECPP_PROOF_WAITING;
-  }
   if (found < prover->discriminants_per_batch && may_queue)
     return queue_next_discriminant(prover, node) ? ECPP_PROOF_MORE : ECPP_PROOF_OUT_OF_MEMORY;
   if (found == 0)
@@ -834,6 +834,7 @@ static int descend(ecpp_prover *prover, ecpp_proof_node *node) {
 }
 
 ecpp_proof_status ecpp_prover_run(ecpp_prover *prover, size_t work) {
+  prover->work_done = 0;
   if (prover->step_count > 0 || prover->depth == 0)
     return ECPP_PROOF_DONE;
   big_number proven_bound;
@@ -841,7 +842,8 @@ ecpp_proof_status ecpp_prover_run(ecpp_prover *prover, size_t work) {
   if (!big_number_set_limbs(&proven_bound, proven_bound_limbs, 3))
     return ECPP_PROOF_OUT_OF_MEMORY;
   ecpp_proof_status status = ECPP_PROOF_MORE;
-  for (size_t done = 0; done < work; done++) {
+  size_t done = 0;
+  for (; done < work; done++) {
     ecpp_proof_node *node = &prover->nodes[prover->depth - 1];
     if (big_number_compare(&node->n, &proven_bound) < 0) {
       status = collect_steps(prover) ? ECPP_PROOF_DONE : ECPP_PROOF_OUT_OF_MEMORY;
@@ -854,7 +856,8 @@ ecpp_proof_status ecpp_prover_run(ecpp_prover *prover, size_t work) {
       // counted against the effort limit when queued)
       ok = strip_pending_here(prover, node) && (node->pending_count == 0 || evaluate_oldest_pending(node, &proven_bound));
     } else if (untried < OPTIONS_WANTED && prover->discriminants_per_batch > 0 &&
-               (node->pending_count > 0 || node->discriminants_examined < prover->effort_limit)) {
+               (node->pending_count > 0 || (node->discriminants_examined < prover->effort_limit &&
+                                            big_number_bit_length(&node->n) >= prover->external_from_bits))) {
       ecpp_proof_status external = external_step(prover, node, &proven_bound);
       if (external == ECPP_PROOF_NEEDS_STRIPPING || external == ECPP_PROOF_WAITING) {
         status = external;
@@ -882,6 +885,7 @@ ecpp_proof_status ecpp_prover_run(ecpp_prover *prover, size_t work) {
     }
   }
   big_number_free(&proven_bound);
+  prover->work_done = done;
   return status;
 }
 

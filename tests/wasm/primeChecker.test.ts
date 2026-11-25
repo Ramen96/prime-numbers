@@ -86,7 +86,7 @@ describe("the prime checker's worker logic, on sieve.wasm", () => {
       destroy() {},
     };
     const withGpu: PrimeCheckEngine = { ...engine, stripping: new GpuStrippingControl(engine.proofSlots, async () => stripper) };
-    const prime = nextPrimeAfter(10n ** 69n);
+    const prime = nextPrimeAfter(10n ** 79n); // 80 digits: its top steps are past the GPU's threshold (75 digits)
     const { checker, sent } = checkerOn(withGpu, { workPerRun: 8, betweenRuns: () => new Promise<void>((resolve) => setTimeout(resolve, 0)) });
     await checker.handle({ type: "prove", id: 1, value: prime, useGpu: true });
     const answer = answerOf(sent.at(-1));

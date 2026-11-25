@@ -14,6 +14,7 @@ function standInSlots(
   slots: number,
   runsNeeded: (candidate: bigint) => number,
   outOfMemoryFor: (candidate: bigint) => boolean = () => false,
+  perThread = 1,
 ) {
   const memory = new WebAssembly.Memory({ initial: 1 });
   const inputPointer = 1024;
@@ -68,6 +69,7 @@ function standInSlots(
       states[slot] === 1 ? Math.max(1, candidates[slot]!.toString(2).length - (runsNeeded(candidates[slot]!) - runsLeft[slot])) : 0,
     // external stripping isn't stood in for here: tests/wasm/proofSlots.test.ts runs it in the real builds
     proof_slots_set_external_stripping: () => {},
+    proof_slots_per_thread: () => perThread,
     proof_slot_strip_batch: () => 0,
     proof_slot_strip_request_count: () => 0,
     proof_slot_strip_request: () => 0,
@@ -238,5 +240,30 @@ describe("ProofSlots progress on the candidate everything waits on", () => {
     // after runs 1 and 2, 11 is still going (4 bits, then 3 and 2 as its chain goes down); then 17 is next
     assert.deepEqual(progress.slice(0, 2), [[0, 3], [0, 2]]);
     assert.ok(progress.every(([index]) => index === 0 || index === 2), "never a candidate that isn't next");
+  });
+});
+
+describe("ProofSlots' second prover per thread (step 11d)", () => {
+  const candidates = Array.from({ length: 12 }, (_, index) => 10n ** 30n + BigInt(index));
+  const stripper = { strip: async () => [] };
+
+  it("isn't used on the CPU: one candidate per thread at a time", async () => {
+    const { raw, log } = standInSlots(8, () => 3, () => false, 2);
+    await new ProofSlots(raw).proveInOrder(candidates);
+    assert.equal(log.mostBusyAtOnce, 4);
+  });
+
+  it("is used when the GPU strips numbers this big, and not when they're below its threshold", async () => {
+    for (const [fromBits, expected] of [
+      [0, 8],
+      [100, 8], // the candidates have 100 bits
+      [101, 4],
+    ] as const) {
+      const { raw, log } = standInSlots(8, () => 3, () => false, 2);
+      const slots = new ProofSlots(raw);
+      slots.useStripper({ stripper, discriminantsPerBatch: 4, externalFromBits: fromBits, largestPrimeFor: () => 100_000 });
+      await slots.proveInOrder(candidates);
+      assert.equal(log.mostBusyAtOnce, expected, `from ${fromBits} bits`);
+    }
   });
 });

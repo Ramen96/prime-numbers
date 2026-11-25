@@ -36,7 +36,7 @@ describe("proof slots in the shipped builds, judged by the independent checker",
     });
     (instance.exports._initialize as (() => void) | undefined)?.();
     const slots = new ProofSlots(instance.exports as unknown as RawProofSlotExports);
-    assert.equal(slots.slotCount(), 1);
+    assert.equal(slots.slotCount(), 2, "two provers on its one thread");
     const all = candidates();
     const { certificates, outOfMemory } = await slots.proveInOrder(all);
     assert.equal(outOfMemory, false);
@@ -44,7 +44,7 @@ describe("proof slots in the shipped builds, judged by the independent checker",
     certificates.forEach((steps, index) => assert.deepEqual(checkCertificate(all[index], steps), { valid: true }));
   });
 
-  it("the threaded build (9 slots, proving at once)", async () => {
+  it("the threaded build (18 slots, two per thread, proving at once)", async () => {
     const { default: createSieveModule } = (await import(pathToFileURL("public/sieve-threads/sieve.mjs").href)) as {
       default: CreateSieveModule;
     };
@@ -56,7 +56,7 @@ describe("proof slots in the shipped builds, judged by the independent checker",
     const sieveModule = await createSieveModule({ wasmMemory, sieveHelperThreads: 8 });
     assert.equal(sieveModule._sieve_start_helpers(8), 8);
     const slots = new ProofSlots(rawProofSlotExportsOf(sieveModule));
-    assert.equal(slots.slotCount(), 9);
+    assert.equal(slots.slotCount(), 18);
     const all = candidates();
     const { certificates, outOfMemory } = await slots.proveInOrder(all, { workPerRun: 16 });
     assert.equal(outOfMemory, false);

@@ -23,7 +23,9 @@ export interface RawProofSlotExports {
   /** The bit length of the number the slot's chain has reached; 0 unless it's proving. */
   proof_slot_progress(slot: number): number;
   // External stripping (step 11d): the GPU finds the small factors of curve orders.
-  proof_slots_set_external_stripping(discriminantsPerBatch: number): void;
+  proof_slots_set_external_stripping(discriminantsPerBatch: number, fromBits: number): void;
+  /** Provers per thread (PROVERS_PER_THREAD): thread t's slots are t · this and the ones after it. */
+  proof_slots_per_thread(): number;
   proof_slot_strip_batch(slot: number): number;
   proof_slot_strip_request_count(slot: number): number;
   proof_slot_strip_request(slot: number, index: number): number;
@@ -63,6 +65,8 @@ export interface StrippingSetup {
   stripper: OrderStripper;
   /** Discriminants per batch a slot hands out (proof_slots_set_external_stripping). */
   discriminantsPerBatch: number;
+  /** Only numbers of at least this many bits hand out batches; smaller ones strip on the CPU. */
+  externalFromBits: number;
   /** How deep to strip, given the largest order's limb count in a call. */
   largestPrimeFor: (limbs: number) => number;
   /** The stripper was dropped: every slot is back on the CPU, which strips anything still out. */
@@ -161,7 +165,11 @@ export class ProofSlots {
   #keptCertificates = new Map<bigint, CertificateStep[]>();
   /** External stripping, while it's on. */
   #stripping: StrippingSetup | null = null;
-  /** The strip call on its way, if any (one at a time: batches that come out meanwhile go in the next). */
+  /**
+   * The strip call on its way, if any. One at a time: batches that come out meanwhile
+   * go in the next. (Step 11d measured several at once as slower: the GPU takes them
+   * in turn, and each call has a cost of its own.)
+   */
   #inFlight: StripInFlight | null = null;
   /** Per slot, the batch number sent in the call on its way (0: none), so it isn't sent twice. */
   #sentBatch: number[] = [];
@@ -191,7 +199,7 @@ export class ProofSlots {
   useStripper(setup: StrippingSetup | null): void {
     this.#abortInFlight();
     this.#stripping = setup;
-    this.#raw.proof_slots_set_external_stripping(setup ? setup.discriminantsPerBatch : 0);
+    this.#raw.proof_slots_set_external_stripping(setup ? setup.discriminantsPerBatch : 0, setup ? setup.externalFromBits : 0);
     this.#rejectedClaimsBefore = this.#rejectedClaims();
   }
 
@@ -213,6 +221,13 @@ export class ProofSlots {
     const workPerRun = options.workPerRun ?? DEFAULT_WORK_PER_RUN;
     const slotCount = this.slotCount();
     if (slotCount === 0) return { certificates: [], outOfMemory: candidates.length > 0, stopped: false };
+    // Every thread's second prover only when the GPU strips numbers this big: then
+    // one works while the other waits for its batch. Otherwise it would only share
+    // its thread's time, and the first primes in line would take longer.
+    const perThread = this.#raw.proof_slots_per_thread();
+    const setup = this.#stripping;
+    const useEverySlot = setup !== null && candidates.some((candidate) => candidate.toString(2).length >= setup.externalFromBits);
+    const startable = (slot: number) => useEverySlot || slot % perThread === 0;
 
     const indexOf = new Map(candidates.map((candidate, index) => [candidate, index]));
     const certificates: (CertificateStep[] | undefined)[] = candidates.map((candidate) =>
@@ -243,7 +258,7 @@ export class ProofSlots {
 
     for (;;) {
       for (let slot = 0; slot < slotCount; slot++) {
-        if (indexInSlot[slot] !== null) continue;
+        if (indexInSlot[slot] !== null || !startable(slot)) continue;
         while (nextCandidate < firstOutOfMemory && isStarted(nextCandidate)) nextCandidate++;
         if (nextCandidate >= firstOutOfMemory) break;
         if (this.#start(slot, candidates[nextCandidate])) indexInSlot[slot] = nextCandidate++;

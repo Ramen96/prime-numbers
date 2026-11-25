@@ -1,5 +1,7 @@
-// Proof slots (CLAUDE.md, Road to completion, step 4b): one ECPP prover per
-// thread, so several candidates are proven at once on the sieve's threads.
+// Proof slots (CLAUDE.md, Road to completion, step 4b): ECPP provers on the
+// sieve's threads, PROVERS_PER_THREAD each, so several candidates are proven at
+// once. A thread's provers share its work in each run (step 11d): while one
+// waits for the GPU to strip its batch, the thread goes on with the other.
 //
 // JavaScript starts a candidate in a slot, then calls proof_slots_run with a
 // bounded amount of work, again and again, so it can stop, report progress and
@@ -27,8 +29,16 @@ typedef enum {
   PROOF_SLOT_WAITING = 4,       // external stripping: can't go on until its batch is stripped
 } proof_slot_state;
 
-// How many slots there are: one per thread. 0 if memory runs out.
+// Two provers per thread: enough for one to work while the other waits for its
+// batch. Each keeps its own tables (about 0.3 MB of small primes, and the class
+// polynomials it has built), so a second costs a few MB per thread. The worker
+// uses the second only when the GPU strips (lib/primes/proofSlots.ts).
+#define PROVERS_PER_THREAD 2
+
+// How many slots there are: PROVERS_PER_THREAD per thread, thread t's being
+// t · PROVERS_PER_THREAD and the ones after it. 0 if memory runs out.
 int proof_slot_count(void);
+int proof_slots_per_thread(void);
 
 // Room for a candidate of `limb_count` limbs, for JavaScript to write into
 // before proof_slot_start. NULL if memory runs out.
@@ -65,8 +75,9 @@ size_t proof_slot_progress(int slot);
 // every slot's prover hands out its curve orders a batch at a time, for the GPU
 // to find their small factors, and checks every factor it's given. 0 (the
 // default) strips on the CPU, as before; switching to 0 with batches out strips
-// them on the CPU at the next run. For slots made or started later too.
-void proof_slots_set_external_stripping(size_t discriminants_per_batch);
+// them on the CPU at the next run. Only numbers of at least `from_bits` bits hand
+// out batches; smaller ones strip on the CPU. For slots made or started later too.
+void proof_slots_set_external_stripping(size_t discriminants_per_batch, size_t from_bits);
 
 // The slot's batch handed out to be stripped: a number that changes with every
 // new batch (0 when none is out), so JavaScript can tell a batch it hasn't sent

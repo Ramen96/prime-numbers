@@ -14,6 +14,7 @@
 #include "../../wasm/primality.h"
 #include "../../wasm/proof_slots.h"
 
+int sieve_thread_count(void);
 #ifdef SIEVE_THREADS
 int sieve_start_helpers(int count);
 #endif
@@ -222,9 +223,9 @@ static uint32_t run_until_batch(int slot) {
 
 static void check_external_stripping(ecpp_prover *lone, int slots) {
   build_stand_in_primes();
-  proof_slots_set_external_stripping(1);
+  proof_slots_set_external_stripping(1, 0);
   check_external_round(lone, slots, 1, 0, 0);
-  proof_slots_set_external_stripping(4);
+  proof_slots_set_external_stripping(4, 0);
   check_external_round(lone, slots, 1, 0, 1);
   check_external_round(lone, slots, 5, 0, 2); // slots wait between answers
   check_external_round(lone, slots, 3, 1, 3); // lying
@@ -267,7 +268,7 @@ static void check_external_stripping(ecpp_prover *lone, int slots) {
   }
   for (int slot = 0; slot < slots; slot++)
     batches[slot] = run_until_batch(slot);
-  proof_slots_set_external_stripping(0);
+  proof_slots_set_external_stripping(0, 0);
   for (int slot = 0; slot < slots; slot++) {
     expect(proof_slot_strip_batch(slot) == 0, "back on the CPU, no batch is out", (size_t)slot);
     rejected_before = proof_slot_rejected_claims(slot);
@@ -288,6 +289,62 @@ static void check_external_stripping(ecpp_prover *lone, int slots) {
   free(batches);
   big_number_free(&first);
   big_number_free(&second);
+}
+
+// A thread's two provers share each run's work (step 11d): while slot 0 waits for a
+// batch nobody answers, or is idle, slot 1, on the same thread, gets the whole run,
+// so with one unit a run it finishes in about as many runs as a lone prover needs
+// units, not twice as many.
+static void check_second_prover(ecpp_prover *lone) {
+  expect(proof_slots_per_thread() == PROVERS_PER_THREAD && proof_slot_count() == sieve_thread_count() * PROVERS_PER_THREAD,
+         "two provers per thread", (size_t)proof_slot_count());
+  big_number waiting, working;
+  big_number_init(&waiting);
+  big_number_init(&working);
+  probable_prime_near(&waiting, 110, 4242); // about 365 bits: hands out batches
+  probable_prime_near(&working, 85, 777);   // about 280 bits: below the threshold, strips here
+  proof_slots_set_external_stripping(4, 300);
+
+  // the units it needs, counted on a lone prover (nothing shares its thread)
+  int units = 0;
+  ecpp_prover_set_external_stripping(lone, 4, 300);
+  ecpp_prover_reset(lone, &working);
+  while (ecpp_prover_run(lone, 1) == ECPP_PROOF_MORE && units < EXTERNAL_RUNS_ALLOWED)
+    units++;
+  ecpp_prover_set_external_stripping(lone, 0, 0);
+
+  start(1, &working); // slot 0 idle
+  int alone = 0;
+  while (proof_slot_state_of(1) != PROOF_SLOT_DONE && alone < EXTERNAL_RUNS_ALLOWED) {
+    proof_slots_run(1);
+    alone++;
+  }
+  expect(alone <= units + 2, "an idle prover leaves its thread to the other", (size_t)alone * 100000 + (size_t)units);
+  check_against_lone_prover(lone, 1, &working);
+  proof_slot_clear(1);
+
+  start(0, &waiting);
+  start(1, &working);
+  int together = 0;
+  while (proof_slot_state_of(1) != PROOF_SLOT_DONE && together < EXTERNAL_RUNS_ALLOWED) {
+    proof_slots_run(1);
+    together++;
+  }
+  expect(proof_slot_state_of(0) == PROOF_SLOT_WAITING && proof_slot_strip_batch(0) != 0, "the first waits for its batch", 0);
+  // the first runs, until slot 0 hands out its batch, are shared: a few more (181 against
+  // 172 units when measured; one prover a run would take twice as many, 346)
+  expect(together <= units + 20, "a waiting prover leaves its thread to the other", (size_t)together * 100000 + (size_t)units);
+  expect(units > 50, "enough units to tell", (size_t)units);
+  check_against_lone_prover(lone, 1, &working);
+  proof_slot_clear(1);
+  int runs = 0;
+  while (proof_slots_run(2) > 0 && ++runs < EXTERNAL_RUNS_ALLOWED)
+    answer_batches(proof_slot_count(), 0);
+  check_against_lone_prover(lone, 0, &waiting);
+  proof_slot_clear(0);
+  proof_slots_set_external_stripping(0, 0);
+  big_number_free(&waiting);
+  big_number_free(&working);
 }
 
 int main(void) {
@@ -353,6 +410,7 @@ int main(void) {
   big_number_free(&candidates[0]);
 
   check_external_stripping(&lone, slots);
+  check_second_prover(&lone);
 
   // what doesn't exist: no slot, no step, no field
   expect(!proof_slot_start(slots, 1) && !proof_slot_start(-1, 1), "no such slot", 0);

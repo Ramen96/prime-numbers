@@ -20,14 +20,18 @@ typedef struct {
 
 static proof_slot *slots = NULL;
 static int slot_count = 0;
+// Which of its provers each thread runs first, alternating run by run, so both get
+// their turn when both have work. One entry per thread, touched only by that thread.
+static unsigned char *first_prover = NULL;
 
 static uint32_t *input_limbs = NULL;
 static size_t input_capacity = 0;
 static uint32_t *output_limbs = NULL;
 static size_t output_capacity = 0;
 
-// proof_slots_set_external_stripping's setting, for provers made later too.
+// proof_slots_set_external_stripping's settings, for provers made later too.
 static size_t discriminants_per_batch = 0;
+static size_t external_from_bits = 0;
 // The last batch number given out, by any slot, so an answer for an old batch isn't
 // taken for a newer one. Numbers go round from 1 to 2^32 − 2 (0 is none, 2^32 − 1
 // marks a batch not yet numbered): an answer would have to come back about four
@@ -35,12 +39,20 @@ static size_t discriminants_per_batch = 0;
 // by factor, so the worst it could do is be counted as rejected.
 static uint32_t last_batch = 0;
 
-// One slot per thread. Helpers start once, when the module loads, so this only
-// grows the first time (or if they started after the first call).
+// PROVERS_PER_THREAD slots per thread: thread t's are t · PROVERS_PER_THREAD and
+// the ones after it, so the layout holds if more threads start later. Helpers start
+// once, when the module loads, so this only grows the first time (or if they
+// started after the first call).
 static int ensure_slots(void) {
-  int wanted = sieve_thread_count();
+  int wanted = sieve_thread_count() * PROVERS_PER_THREAD;
   if (wanted <= slot_count)
     return 1;
+  unsigned char *grown_first = realloc(first_prover, (size_t)(wanted / PROVERS_PER_THREAD));
+  if (grown_first == NULL)
+    return 0;
+  for (int thread = slot_count / PROVERS_PER_THREAD; thread < wanted / PROVERS_PER_THREAD; thread++)
+    grown_first[thread] = 0;
+  first_prover = grown_first;
   proof_slot *grown = realloc(slots, (size_t)wanted * sizeof *grown);
   if (grown == NULL)
     return 0;
@@ -55,6 +67,8 @@ static int ensure_slots(void) {
 }
 
 int proof_slot_count(void) { return ensure_slots() ? slot_count : 0; }
+
+int proof_slots_per_thread(void) { return PROVERS_PER_THREAD; }
 
 // Grows a limb buffer to at least `limb_count`. NULL if memory runs out.
 static uint32_t *grow_buffer(uint32_t **buffer, size_t *capacity, size_t limb_count) {
@@ -83,7 +97,7 @@ int proof_slot_start(int slot, size_t limb_count) {
       return 0;
     target->prover_ready = 1;
   }
-  ecpp_prover_set_external_stripping(&target->prover, discriminants_per_batch);
+  ecpp_prover_set_external_stripping(&target->prover, discriminants_per_batch, external_from_bits);
   target->strip_batch = 0;
   big_number candidate;
   big_number_init(&candidate);
@@ -93,14 +107,11 @@ int proof_slot_start(int slot, size_t limb_count) {
   return ok;
 }
 
-// One thread's part of proof_slots_run: its own slot, and nothing else.
-static void run_own_slot(int thread_index, void *context) {
-  size_t work = *(const size_t *)context;
-  if (thread_index >= slot_count)
-    return;
-  proof_slot *slot = &slots[thread_index];
+// Runs one slot's prover for up to `work` units and records its state; returns the
+// units it used.
+static size_t run_slot(proof_slot *slot, size_t work) {
   if (slot->state != PROOF_SLOT_PROVING && slot->state != PROOF_SLOT_OUT_OF_MEMORY && slot->state != PROOF_SLOT_WAITING)
-    return;
+    return 0;
   ecpp_proof_status status = ecpp_prover_run(&slot->prover, work);
   switch (status) {
   case ECPP_PROOF_DONE:
@@ -121,6 +132,29 @@ static void run_own_slot(int thread_index, void *context) {
   default:
     slot->state = PROOF_SLOT_OUT_OF_MEMORY;
   }
+  return slot->prover.work_done;
+}
+
+// One thread's part of proof_slots_run: its own provers, and nothing else. They share
+// the run's `work`: when one hands out a batch and has to wait for it, the thread goes
+// on with the other instead of idling until the run ends (step 11d measured two
+// thirds of the threads idle that way). It stops when the work is used up, or when a
+// pass over both made no progress (each finished, waiting, or out of memory).
+static void run_own_slots(int thread_index, void *context) {
+  size_t budget = *(const size_t *)context;
+  if ((thread_index + 1) * PROVERS_PER_THREAD > slot_count)
+    return;
+  proof_slot *own = &slots[thread_index * PROVERS_PER_THREAD];
+  int first = first_prover[thread_index];
+  first_prover[thread_index] = (unsigned char)((first + 1) % PROVERS_PER_THREAD);
+  for (int progressed = 1; budget > 0 && progressed;) {
+    progressed = 0;
+    for (int turn = 0; turn < PROVERS_PER_THREAD && budget > 0; turn++) {
+      size_t used = run_slot(&own[(first + turn) % PROVERS_PER_THREAD], budget);
+      budget -= used < budget ? used : budget;
+      progressed |= used > 0;
+    }
+  }
 }
 
 // Numbers the batches handed out in the last run (marked UINT32_MAX by their
@@ -137,7 +171,7 @@ static void number_new_batches(void) {
 int proof_slots_run(size_t work) {
   if (!ensure_slots())
     return 0;
-  sieve_run_on_every_thread(run_own_slot, &work);
+  sieve_run_on_every_thread(run_own_slots, &work);
   number_new_batches();
   int unfinished = 0;
   for (int index = 0; index < slot_count; index++) {
@@ -185,11 +219,12 @@ size_t proof_slot_progress(int slot) {
   return ecpp_prover_current_bit_length(&slots[slot].prover);
 }
 
-void proof_slots_set_external_stripping(size_t per_batch) {
+void proof_slots_set_external_stripping(size_t per_batch, size_t from_bits) {
   discriminants_per_batch = per_batch;
+  external_from_bits = from_bits;
   for (int index = 0; index < slot_count; index++) {
     if (slots[index].prover_ready)
-      ecpp_prover_set_external_stripping(&slots[index].prover, per_batch);
+      ecpp_prover_set_external_stripping(&slots[index].prover, per_batch, from_bits);
     // back to the CPU: what's out is stripped here at the next run, so an answer
     // for it now would only be counted as rejected
     if (per_batch == 0)
