@@ -84,6 +84,7 @@ function standIn(
 interface Build {
   name: string;
   slots: ProofSlots;
+  raw: RawProofSlotExports;
 }
 
 async function loadBuilds(): Promise<Build[]> {
@@ -91,7 +92,8 @@ async function loadBuilds(): Promise<Build[]> {
     env: { emscripten_notify_memory_growth: () => {} },
   });
   (instance.exports._initialize as (() => void) | undefined)?.();
-  const single = new ProofSlots(instance.exports as unknown as RawProofSlotExports);
+  const singleRaw = instance.exports as unknown as RawProofSlotExports;
+  const single = new ProofSlots(singleRaw);
 
   const { default: createSieveModule } = (await import(pathToFileURL("public/sieve-threads/sieve.mjs").href)) as {
     default: CreateSieveModule;
@@ -103,10 +105,11 @@ async function loadBuilds(): Promise<Build[]> {
   });
   const sieveModule = await createSieveModule({ wasmMemory, sieveHelperThreads: 8 });
   assert.equal(sieveModule._sieve_start_helpers(8), 8);
-  const threaded = new ProofSlots(rawProofSlotExportsOf(sieveModule));
+  const threadedRaw = rawProofSlotExportsOf(sieveModule);
+  const threaded = new ProofSlots(threadedRaw);
   return [
-    { name: "sieve.wasm (one slot)", slots: single },
-    { name: "the threaded build (9 slots)", slots: threaded },
+    { name: "sieve.wasm (one slot)", slots: single, raw: singleRaw },
+    { name: "the threaded build (9 slots)", slots: threaded, raw: threadedRaw },
   ];
 }
 
@@ -170,6 +173,34 @@ describe("external stripping through proof slots, in both shipped builds", () =>
           assert.ok(record.calls > 0 && reports.length > 0, "the stripper was used");
           if (index === 1) assert.ok(reports.some((report) => report.orderCount > 6), "batches from several slots go in one call");
         }
+      });
+
+      it("a stripper that joins between runs (its worker started late) is used from then on, second provers too", async () => {
+        const { slots, raw } = build();
+        const { stripper, record } = standIn();
+        const perThread = raw.proof_slots_per_thread();
+        let runs = 0;
+        let secondProverBusy = false;
+        slots.useStripper(null);
+        const { certificates } = await slots.proveInOrder(all, {
+          workPerRun: 8,
+          betweenRuns: async () => {
+            if (runs++ === 0) {
+              assert.equal(record.calls, 0);
+              slots.useStripper({ stripper, discriminantsPerBatch: 4, externalFromBits: 0, largestPrimeFor: () => CPU_BOUND, spotCheckEvery: 1 });
+            }
+            for (let slot = 0; slot < raw.proof_slot_count(); slot++) {
+              if (slot % perThread !== 0 && raw.proof_slot_progress(slot) !== 0) secondProverBusy = true;
+            }
+            await pause(0);
+          },
+        });
+        const stillStripping = slots.stripping();
+        slots.useStripper(null);
+        assert.equal(stillStripping, true);
+        assert.ok(record.calls > 0, "the stripper was used");
+        assert.ok(secondProverBusy, "the second provers started once it joined");
+        assert.deepEqual(certificates, onTheCpu.get(build().name));
       });
 
       it("a slow stripper: slots wait for it, and the certificates are the same", async () => {

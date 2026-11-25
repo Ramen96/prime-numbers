@@ -45,6 +45,14 @@ export interface BatchRequest extends RequestTags {
    * worker stays on the CPU whatever this says.
    */
   useGpu?: boolean;
+  /**
+   * One prime wanted on its own (/random-prime), not a piece of the list: its
+   * proof has no others to work while it waits for the GPU, so the GPU follows
+   * the rule for lone proofs (stripDepth.ts: only from 135 digits). The list never
+   * sets it, so a list request is always the list's case, however few primes it
+   * still has to prove (after a jump, or mostly cached).
+   */
+  loneProof?: boolean;
 }
 
 /** A prime past a(13) and the certificate it was shown with, already checked by checkCertificate. */

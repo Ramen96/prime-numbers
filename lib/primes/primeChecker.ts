@@ -112,7 +112,9 @@ export class PrimeChecker {
     const elapsed = () => elapsedBefore + this.#now() - started;
     const digits = value.toString().length;
     let lastProgress = -Infinity;
-    await engine.stripping?.prepare(useGpu, (status) => this.#send({ type: "stripping", id, status }));
+    // a proof here is always on its own: no others to work while it waits for the GPU
+    const work = { kind: "lone", bits: value.toString(2).length } as const;
+    engine.stripping?.prepare(useGpu, work, (status) => this.#send({ type: "stripping", id, status }));
     const proven = await engine.proofSlots.proveInOrder([value], {
       workPerRun: this.#options.workPerRun,
       betweenRuns: this.#options.betweenRuns,

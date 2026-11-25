@@ -14,6 +14,7 @@ import type { WorkerRequest, WorkerResponse } from "./protocol";
 import { ProvenPrimeCache } from "./provenPrimeCache";
 import { RequestStops, yieldToMessages } from "./requestStops";
 import { SieveCalibrator } from "./sieveCalibrator";
+import type { ProofWork } from "./stripDepth";
 import { VerificationPool } from "./verificationPool";
 import { VERIFICATION_WORKER_NAME } from "./workerNames";
 
@@ -61,7 +62,9 @@ self.onmessage = (event: MessageEvent<WorkerRequest>) => {
       const { sieve, threads, memoryBudgetBytes, proofSlots } = await sieveReady;
       calibrator ??= new SieveCalibrator(sieve, memoryBudgetBytes);
       stripping ??= new GpuStrippingControl(proofSlots);
-      await stripping.prepare(request.useGpu ?? false, (status) =>
+      // the list unless the request says it's one prime on its own (/random-prime)
+      const work: ProofWork = request.loneProof ? { kind: "lone", bits: request.from.toString(2).length } : { kind: "list" };
+      stripping.prepare(request.useGpu ?? false, work, (status) =>
         sendToMainThread({ type: "stripping", id: request.id, generation: request.generation, status }),
       );
       await computeBatch(sieve, request, sendToMainThread, {

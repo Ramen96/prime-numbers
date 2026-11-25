@@ -36,7 +36,17 @@ export function parseDigits(typed: string): DigitsInput {
  * `from`, so it's one less), with its certificate.
  */
 export function randomPrimeRequest(id: number, start: bigint, useGpu = false): BatchRequest {
-  return { type: "batch", id, generation: 1, direction: "next", from: start - 1n, count: 1, includeCertificates: true, useGpu };
+  return {
+    type: "batch",
+    id,
+    generation: 1,
+    direction: "next",
+    from: start - 1n,
+    count: 1,
+    includeCertificates: true,
+    useGpu,
+    loneProof: true,
+  };
 }
 
 export type RandomPrimeOutcome =

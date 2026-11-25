@@ -49,7 +49,7 @@ export type StripperFailure =
   | { kind: "wrong-factor" } // it reported a factor that doesn't divide its order
   | { kind: "missed-factor"; prime: number }; // a spot check found a small factor it didn't report
 
-/** One strip call, for the depth controller (step 11d, part 3). */
+/** One strip call: the worker reports its depth and rate to the page (GpuStrippingControl). */
 export interface StripReport {
   orderCount: number;
   /** The largest limb count among the orders (they're padded to it on the GPU). */
@@ -194,7 +194,9 @@ export class ProofSlots {
   /**
    * Strips curve orders with `setup.stripper` from now on (the GPU), or, with
    * null, on the CPU again: anything handed out and not yet answered is stripped
-   * there at the next run, and an answer still on its way is ignored.
+   * there at the next run, and an answer still on its way is ignored. It may be
+   * called between two runs of proveInOrder (the GPU worker can be ready only
+   * after proofs began): the change applies from the next run.
    */
   useStripper(setup: StrippingSetup | null): void {
     this.#abortInFlight();
@@ -223,11 +225,12 @@ export class ProofSlots {
     if (slotCount === 0) return { certificates: [], outOfMemory: candidates.length > 0, stopped: false };
     // Every thread's second prover only when the GPU strips numbers this big: then
     // one works while the other waits for its batch. Otherwise it would only share
-    // its thread's time, and the first primes in line would take longer.
+    // its thread's time, and the first primes in line would take longer. Asked
+    // before each run, since the stripper can start or stop during the call.
     const perThread = this.#raw.proof_slots_per_thread();
-    const setup = this.#stripping;
-    const useEverySlot = setup !== null && candidates.some((candidate) => candidate.toString(2).length >= setup.externalFromBits);
-    const startable = (slot: number) => useEverySlot || slot % perThread === 0;
+    const largestBits = candidates.reduce((largest, candidate) => Math.max(largest, candidate.toString(2).length), 0);
+    const startable = (slot: number) =>
+      slot % perThread === 0 || (this.#stripping !== null && largestBits >= this.#stripping.externalFromBits);
 
     const indexOf = new Map(candidates.map((candidate, index) => [candidate, index]));
     const certificates: (CertificateStep[] | undefined)[] = candidates.map((candidate) =>

@@ -86,22 +86,31 @@ describe("the prime checker's worker logic, on sieve.wasm", () => {
       destroy() {},
     };
     const withGpu: PrimeCheckEngine = { ...engine, stripping: new GpuStrippingControl(engine.proofSlots, async () => stripper) };
-    const prime = nextPrimeAfter(10n ** 79n); // 80 digits: its top steps are past the GPU's threshold (75 digits)
     const { checker, sent } = checkerOn(withGpu, { workPerRun: 8, betweenRuns: () => new Promise<void>((resolve) => setTimeout(resolve, 0)) });
-    await checker.handle({ type: "prove", id: 1, value: prime, useGpu: true });
+    // 80 digits: a lone proof below 135 digits doesn't use the GPU (stripDepth.ts), even when asked
+    const small = nextPrimeAfter(10n ** 79n);
+    await checker.handle({ type: "prove", id: 1, value: small, useGpu: true });
+    assert.equal(calls, 0, "not stripped on the GPU");
+    const smallAnswer = answerOf(sent.at(-1));
+    assert.ok(smallAnswer.kind === "prime" && smallAnswer.proof.by === "certificate");
+    assert.deepEqual(checkCertificate(small, smallAnswer.proof.steps), { valid: true });
+    assert.deepEqual(sent.findLast((response) => response.type === "stripping"), { type: "stripping", id: 1, status: { state: "cpu" } });
+
+    const prime = nextPrimeAfter(10n ** 134n); // 135 digits: a lone proof that uses the GPU
+    await checker.handle({ type: "prove", id: 2, value: prime, useGpu: true });
     const answer = answerOf(sent.at(-1));
     assert.ok(answer.kind === "prime" && answer.proof.by === "certificate");
     assert.deepEqual(checkCertificate(prime, answer.proof.steps), { valid: true });
     assert.ok(calls > 0, "the stand-in stripped");
-    const statuses = sent.flatMap((response) => (response.type === "stripping" ? [response.status.state] : []));
-    assert.equal(statuses[0], "gpu");
-    assert.ok(statuses.every((state) => state === "gpu"));
+    // it began on the CPU (already said for id 1), and the GPU joined once its worker was ready
+    const statuses = sent.flatMap((response) => (response.type === "stripping" && response.id === 2 ? [response.status.state] : []));
+    assert.ok(statuses.length > 0 && statuses.every((state) => state === "gpu"));
     // and back to the CPU when it isn't asked for
     const next = nextPrimeAfter(prime);
     const before = calls;
-    await checker.handle({ type: "prove", id: 2, value: next });
+    await checker.handle({ type: "prove", id: 3, value: next });
     assert.equal(calls, before);
-    assert.deepEqual(sent.findLast((response) => response.type === "stripping"), { type: "stripping", id: 2, status: { state: "cpu" } });
+    assert.deepEqual(sent.findLast((response) => response.type === "stripping"), { type: "stripping", id: 3, status: { state: "cpu" } });
     const nextAnswer = answerOf(sent.at(-1));
     assert.ok(nextAnswer.kind === "prime" && nextAnswer.proof.by === "certificate");
     assert.deepEqual(checkCertificate(next, nextAnswer.proof.steps), { valid: true });
