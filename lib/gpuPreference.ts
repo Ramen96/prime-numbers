@@ -4,6 +4,7 @@
 // only where WebGPU works; off means the CPU does everything.
 
 import { useSyncExternalStore } from "react";
+import { requestHardwareAdapter } from "./gpuAdapter.ts";
 
 export const GPU_PREFERENCE_KEY = "everyPrimeNumber.gpu";
 
@@ -53,14 +54,14 @@ export function useGpuPreference(): boolean {
 let webGpuCheck: Promise<boolean> | null = null;
 
 /**
- * Whether this browser can give the page a WebGPU adapter: asked once. The
- * workers ask for their own, so they may still find none (then they say so,
- * and the CPU does everything).
+ * Whether this browser can give the page a hardware WebGPU adapter: asked once.
+ * A software one counts as none (lib/gpuAdapter.ts). The workers ask for their
+ * own, so they may still find none (then they say so, and the CPU does everything).
  */
 export function webGpuAvailable(): Promise<boolean> {
   webGpuCheck ??= (async () => {
     try {
-      return (await navigator.gpu?.requestAdapter()) != null;
+      return (await requestHardwareAdapter(navigator.gpu)) !== null;
     } catch {
       return false;
     }

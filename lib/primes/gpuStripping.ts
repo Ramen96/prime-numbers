@@ -10,6 +10,8 @@
 // (Apple Metal 3): about 50 to 58 billion limb-steps per second, 11× the
 // prototype's eight `%` per limb, and exact on Metal and SwiftShader.
 
+import { requestHardwareAdapter } from "../gpuAdapter.ts";
+
 /**
  * The largest prime the kernel takes: Montgomery's sum t + m·p stays below 2^64
  * only for p < 2^31 (and t < 2p must fit in 32 bits). The bound is how deep
@@ -246,7 +248,8 @@ export class GpuStripper {
   static async create(gpu: GPU | undefined = globalThis.navigator?.gpu): Promise<GpuStripper | null> {
     if (!gpu) return null;
     try {
-      const adapter = await gpu.requestAdapter();
+      // a software adapter (SwiftShader, llvmpipe…) counts as none: slower than the CPU's own proofs
+      const adapter = await requestHardwareAdapter(gpu);
       if (!adapter) return null;
       const device = await adapter.requestDevice();
       const shaderModule = device.createShaderModule({ code: MONTGOMERY_STRIPPING_SHADER });

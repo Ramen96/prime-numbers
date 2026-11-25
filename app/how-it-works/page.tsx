@@ -1007,10 +1007,11 @@ for (size_t index = limb_count; index-- > 0;)
         device will differ, so the gap may be bigger or smaller.
       </p>
       <p>
-        The GPU is on by default wherever the browser has WebGPU, and a switch in the stats
-        on the home page turns it off, so the CPU does everything. The choice is kept in this
-        browser and applies to the prime checker and random primes too. Where WebGPU isn’t
-        available, the switch is greyed out and the CPU does it all, exactly as before.
+        The GPU is on by default wherever the browser has WebGPU on a real graphics chip, and
+        a switch in the stats on the home page turns it off, so the CPU does everything. The
+        choice is kept in this browser and applies to the prime checker and random primes too.
+        Where WebGPU isn’t available, or only runs in software on the processor, the switch
+        is greyed out and the CPU does it all, exactly as before.
       </p>
 
       {/* 13 */}

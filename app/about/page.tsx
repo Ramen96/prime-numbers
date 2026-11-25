@@ -93,7 +93,7 @@ const FREQUENTLY_ASKED_QUESTIONS = [
         No. It works your processor hard while it’s calculating, on every core but one, in
         background threads, so the page stays responsive and you can stop at any time. Past
         about 75 digits it also uses your graphics chip to help with proofs, where your
-        browser supports WebGPU; a switch in the stats turns that off. It only computes when
+        browser gives it a graphics chip through WebGPU; a switch in the stats turns that off. It only computes when
         you scroll toward primes it doesn’t have yet; when you stop, it rests.
       </>
     ),

@@ -30,20 +30,23 @@ export default defineConfig({
   projects: [
     {
       name: "phone",
-      testIgnore: "gpuStripping.spec.ts",
+      testIgnore: ["gpuStripping.spec.ts", "gpuSoftwareOnly.spec.ts"],
       use: { ...devices["Desktop Chrome"], viewport: { width: 420, height: 800 } },
     },
     {
       name: "desktop",
-      testIgnore: "gpuStripping.spec.ts",
+      testIgnore: ["gpuStripping.spec.ts", "gpuSoftwareOnly.spec.ts"],
       use: { ...devices["Desktop Chrome"], viewport: { width: 1440, height: 900 } },
     },
     {
       // Headless Chromium has no WebGPU adapter; with this flag it gets SwiftShader, a
       // software GPU (about 15× slower than Apple Metal, step 11a): the GPU path's
-      // correctness, not its speed. Only gpuStripping.spec.ts runs here, and only here.
+      // correctness, not its speed. The site refuses software adapters (step 11f):
+      // gpuStripping.spec.ts makes SwiftShader say it's hardware from outside the app
+      // (hardwareGpuStandIn.ts), gpuSoftwareOnly.spec.ts checks it's refused as it is.
+      // Both run here, and only here.
       name: "webgpu",
-      testMatch: "gpuStripping.spec.ts",
+      testMatch: ["gpuStripping.spec.ts", "gpuSoftwareOnly.spec.ts"],
       use: {
         ...devices["Desktop Chrome"],
         viewport: { width: 1440, height: 900 },

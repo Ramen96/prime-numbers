@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./hardwareGpuStandIn";
 import { nextPrimeAfter } from "../support/primality";
 import {
   collectErrors,
@@ -13,17 +13,20 @@ import { PrimeListPage } from "./primeListPage";
 // with --enable-unsafe-webgpu, which gives headless Chromium a software GPU
 // (SwiftShader): slow, but the same WGSL and the same path through the GPU
 // worker, so these check that the GPU's answers lead to correct primes and
-// certificates. Speed is only measured headed, on a real GPU. Only the
-// "webgpu" project runs this file (playwright.config.ts); the phone and desktop
-// projects, with no adapter, run gpuUnavailable.spec.ts.
+// certificates. Speed is only measured headed, on a real GPU. The site refuses
+// a software adapter (step 11f), so here SwiftShader is made to say it's hardware
+// (hardwareGpuStandIn.ts, from outside the app); gpuSoftwareOnly.spec.ts checks it
+// refused as it is. Only the "webgpu" project runs these (playwright.config.ts);
+// the phone and desktop projects, with no adapter, run gpuUnavailable.spec.ts.
 //
 // What the workers report is read from their `stripping` messages, which reach
 // the page (it doesn't show them yet: that's step 11e).
 
 test.describe("GPU stripping, on a software GPU", () => {
-  test("this browser has a WebGPU adapter", async ({ page }) => {
+  test("this browser has a WebGPU adapter, made to say it's hardware", async ({ page }) => {
     await page.goto("/");
-    expect(await page.evaluate(async () => (await navigator.gpu?.requestAdapter()) != null)).toBe(true);
+    expect(await page.evaluate(async () => (await navigator.gpu?.requestAdapter())?.info.architecture)).toBe("stand-in-hardware");
+    await expect(page.getByTestId("gpu-switch")).toBeEnabled();
   });
 
   test("the list right after a jump to 10^79 (80 digits): stripped on the GPU, every prime proven, none skipped", async ({ page }) => {

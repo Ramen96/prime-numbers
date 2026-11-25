@@ -1,5 +1,6 @@
 // What the home page's GPU row says (CLAUDE.md, step 11e): the visitor's switch,
-// whether this browser has WebGPU, and what the worker last reported.
+// whether this browser has WebGPU on a hardware adapter (lib/gpuAdapter.ts), and
+// what the worker last reported.
 
 import type { GpuStrippingStatus } from "./primes/protocol.ts";
 
@@ -7,7 +8,7 @@ export interface GpuRow {
   text: string;
   /** Whether the switch shows on. */
   checked: boolean;
-  /** No WebGPU here (or not known yet): the switch can't be used. */
+  /** No WebGPU here, or only in software (or not known yet): the switch can't be used. */
   disabled: boolean;
 }
 
