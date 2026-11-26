@@ -634,6 +634,86 @@ static void check_ecpp_arithmetic(void) {
   }
 }
 
+// One square-root context kept for many values (as the ECPP prover keeps one per
+// number) answers exactly as big_number_square_root_mod does each time, and every
+// root squares back. Values below and above the modulus, squares and non-squares.
+// A number's low 128 bits, to name it in a failure message.
+static u128 label_of(const big_number *number) {
+  int too_big;
+  return get_u128(number, &too_big);
+}
+
+static void check_square_root_context_against(const big_number *modulus, int rounds) {
+  square_root_context roots;
+  expect_equal("a context for a prime is ready", label_of(modulus), 1, (u128)square_root_context_init(&roots, modulus));
+  big_number value, reduced, from_context, one_off, squared, quotient;
+  big_number *numbers[] = {&value, &reduced, &from_context, &one_off, &squared, &quotient};
+  for (size_t index = 0; index < sizeof numbers / sizeof *numbers; index++)
+    big_number_init(numbers[index]);
+  for (int round = 0; round < rounds; round++) {
+    set_u128(&value, random_value(128));
+    if (round % 2 == 0) { // a square
+      big_number_multiply(&squared, &value, &value);
+      big_number_divide(NULL, &value, &squared, modulus);
+    }
+    if (round == 0)
+      set_u128(&value, 0);
+    int status = big_number_square_root_with(&roots, &from_context, &value);
+    expect_equal("a context's root as the one-off function's", label_of(&value), (u128)(big_number_square_root_mod(&one_off, &value, modulus) + 1),
+                 (u128)(status + 1));
+    if (status != 1)
+      continue;
+    expect_equal("a context's root is the one-off function's", label_of(&value), 0, (u128)(big_number_compare(&from_context, &one_off) != 0));
+    big_number_multiply(&squared, &from_context, &from_context);
+    big_number_divide(NULL, &squared, &squared, modulus);
+    big_number_divide(NULL, &reduced, &value, modulus);
+    expect_equal("a context's root squares back", label_of(&value), 0, (u128)(big_number_compare(&squared, &reduced) != 0));
+  }
+  for (size_t index = 0; index < sizeof numbers / sizeof *numbers; index++)
+    big_number_free(numbers[index]);
+  square_root_context_free(&roots);
+}
+
+static void check_square_root_contexts(void) {
+  big_number modulus;
+  big_number_init(&modulus);
+  // small primes, some with p − 1 = odd · 2 (one exponentiation, then nothing to fix), some with
+  // many factors of 2; 3, 5 and 17 have odd = 1, so (odd − 1) / 2 = 0
+  static const uint64_t small_primes[] = {3, 5, 7, 11, 13, 17, 97, 193, 257, 769, 7681, 12289, 998244353ULL, 2305843009213693951ULL};
+  for (size_t index = 0; index < sizeof small_primes / sizeof *small_primes; index++) {
+    big_number_set_u64(&modulus, small_primes[index]);
+    check_square_root_context_against(&modulus, 400);
+  }
+  // multi-limb: 165 · 2^100 + 1 (2^100 divides p − 1) and 2^127 − 1
+  big_number_set_u64(&modulus, 165);
+  big_number_shift_left(&modulus, &modulus, 100);
+  big_number_add_small(&modulus, 1);
+  check_square_root_context_against(&modulus, 400);
+  set_u128(&modulus, ((u128)1 << 127) - 1);
+  check_square_root_context_against(&modulus, 400);
+
+  // A perfect square has no non-residue: the context says so, finds only 0's root,
+  // and nothing else; an even modulus gives no context at all.
+  square_root_context roots;
+  big_number value, root;
+  big_number_init(&value);
+  big_number_init(&root);
+  big_number_set_u64(&modulus, 1009ULL * 1009ULL);
+  expect_equal("no non-residue mod a perfect square: the context says so", 1009, 0, (u128)(square_root_context_init(&roots, &modulus) + 1));
+  big_number_set_u64(&value, 0);
+  expect_equal("mod a perfect square, 0's root is still 0", 1009, 2, (u128)(big_number_square_root_with(&roots, &root, &value) + 1));
+  big_number_set_u64(&value, 4);
+  expect_equal("mod a perfect square, nothing else is found", 1009, 0, (u128)(big_number_square_root_with(&roots, &root, &value) + 1));
+  square_root_context_free(&roots);
+  big_number_set_u64(&modulus, 1000);
+  expect_equal("no context for an even modulus", 1000, 1, (u128)(square_root_context_init(&roots, &modulus) + 1));
+  expect_equal("and no root from it", 1000, 1, (u128)(big_number_square_root_with(&roots, &root, &value) + 1));
+  square_root_context_free(&roots);
+  big_number_free(&value);
+  big_number_free(&root);
+  big_number_free(&modulus);
+}
+
 // big_number_first_non_residue for a prime: the first value from 2 up that fails
 // Euler's criterion. The reference just counts up, so it can take any prime below 2^64.
 static void check_first_non_residue_of_prime(uint64_t prime) {
@@ -741,6 +821,7 @@ static void check_non_residue_search(void) {
 int main(void) {
   check_block_cache();
   check_ecpp_arithmetic();
+  check_square_root_contexts();
   check_non_residue_search();
   for (size_t first = 0; first < EDGE_VALUE_COUNT; first++) {
     u128 value = EDGE_VALUES[first];

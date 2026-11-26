@@ -332,6 +332,22 @@ static void genus_clear(ecpp_prover *prover) {
   free(prover->genus_entries);
   prover->genus_entries = NULL;
   prover->genus_capacity = prover->genus_used = 0;
+  if (prover->genus_roots_built)
+    square_root_context_free(&prover->genus_roots); // it belongs to the number being left
+  prover->genus_roots_built = 0;
+}
+
+// The square-root context for n (the genus number), built the first time a root
+// is needed for it. 0 if memory runs out: nothing is kept, so it's built again.
+static int genus_roots_ready(ecpp_prover *prover, const big_number *n) {
+  if (prover->genus_roots_built)
+    return 1;
+  if (square_root_context_init(&prover->genus_roots, n) == 0) {
+    square_root_context_free(&prover->genus_roots);
+    return 0;
+  }
+  prover->genus_roots_built = 1; // also when n has no non-residue: then no root is found, as before
+  return 1;
 }
 
 // Where `key` goes in a table of `capacity` slots (a power of 2): open addressing.
@@ -415,7 +431,9 @@ static int discriminant_root(ecpp_prover *prover, const big_number *n, int64_t d
     }
     if (!entry->has_root) {
       big_number_init(&entry->root);
-      int found = prime_discriminant_mod(&value, factors[index], n) ? big_number_square_root_mod(&entry->root, &value, n) : 0;
+      int found = prime_discriminant_mod(&value, factors[index], n) && genus_roots_ready(prover, n)
+                      ? big_number_square_root_with(&prover->genus_roots, &entry->root, &value)
+                      : 0;
       if (found != 1) {
         big_number_free(&entry->root);
         if (found < 0)

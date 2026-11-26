@@ -97,6 +97,10 @@ typedef struct {
   ecpp_genus_entry *genus_entries;
   size_t genus_capacity, genus_used;
   big_number genus_number;
+  // Square roots modulo genus_number (bignum.h): what every root shares, worked
+  // out once for the number, the first time one is needed (genus_roots_built).
+  square_root_context genus_roots;
+  int genus_roots_built;
   // The finished certificate, once ECPP_PROOF_DONE.
   ecpp_certificate_step *steps;
   size_t step_count;

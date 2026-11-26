@@ -985,91 +985,128 @@ int big_number_test_first_non_residue_from(big_number *result, const big_number 
 }
 #endif
 
-// Tonelli–Shanks. Write modulus − 1 = odd · 2^twos. With z a non-residue, keep
+// Tonelli–Shanks. Write modulus − 1 = odd · 2^twos. With z a non-residue and
+// c = z^odd (the same for every value, so square_root_context keeps it), keep
 //   t = value^odd   (its order divides 2^twos)
 //   r = value^((odd + 1) / 2)   (so r² = t · value)
-// and repeatedly multiply t by squares of powers of z^odd to halve t's order,
-// keeping r² = t · value, until t = 1 and so r² = value. Works in Montgomery form.
-int big_number_square_root_mod(big_number *result, const big_number *value, const big_number *modulus) {
-  montgomery_context context;
-  big_number odd_part, exponent, base, one, t, r, c, value_form, probe, adjustment;
-  big_number *numbers[] = {&odd_part, &exponent, &base, &one, &t, &r, &c, &value_form, &probe, &adjustment};
+// and repeatedly multiply t by squares of powers of c to halve t's order,
+// keeping r² = t · value, until t = 1 and so r² = value. Both come from one
+// exponentiation, w = value^((odd − 1) / 2): r = w · value and t = w · r.
+// Works in Montgomery form.
+
+int square_root_context_init(square_root_context *roots, const big_number *modulus) {
+  big_number *numbers[] = {&roots->odd_part, &roots->half_odd, &roots->generator, &roots->one};
   for (size_t index = 0; index < sizeof numbers / sizeof *numbers; index++)
     big_number_init(numbers[index]);
-  int status = 0;
-  int context_ready = montgomery_init(&context, modulus);
-  if (!context_ready)
-    goto done;
-
-  if (!big_number_divide(NULL, &base, value, modulus))
-    goto done;
-  if (base.limb_count == 0) { // the root of 0 is 0
-    status = big_number_set_u64(result, 0);
-    goto done;
-  }
-  if (!big_number_copy(&odd_part, modulus) || !big_number_subtract_small(&odd_part, 1))
-    goto done;
-  size_t twos = 0;
-  while (!(odd_part.limbs[twos / LIMB_BITS] >> (twos % LIMB_BITS) & 1))
-    twos++;
-  if (!big_number_shift_right(&odd_part, &odd_part, twos))
-    goto done;
+  roots->twos = 0;
+  roots->status = 0;
+  roots->context_ready = montgomery_init(&roots->context, modulus);
+  if (!roots->context_ready)
+    return 0;
+  if (!big_number_copy(&roots->odd_part, modulus) || !big_number_subtract_small(&roots->odd_part, 1))
+    return 0;
+  while (!(roots->odd_part.limbs[roots->twos / LIMB_BITS] >> (roots->twos % LIMB_BITS) & 1))
+    roots->twos++;
+  // odd is odd, so halving it rounds down to (odd − 1) / 2
+  if (!big_number_shift_right(&roots->odd_part, &roots->odd_part, roots->twos) ||
+      !big_number_shift_right(&roots->half_odd, &roots->odd_part, 1))
+    return 0;
 
   // the first number whose symbol is −1. A perfect square has none, and then no
   // root is found here (never the case for a prime modulus)
-  int found_non_residue = big_number_first_non_residue(&probe, modulus);
-  if (found_non_residue <= 0) {
-    status = found_non_residue; // −1 none, 0 out of memory
+  big_number non_residue;
+  big_number_init(&non_residue);
+  int found_non_residue = big_number_first_non_residue(&non_residue, modulus);
+  if (found_non_residue == 1)
+    found_non_residue = montgomery_power(&roots->context, &roots->generator, &non_residue, &roots->odd_part) &&
+                        montgomery_to_form(&roots->context, &roots->generator, &roots->generator) &&
+                        big_number_set_u64(&roots->one, 1) && montgomery_to_form(&roots->context, &roots->one, &roots->one);
+  big_number_free(&non_residue);
+  roots->status = found_non_residue; // 1 ready, −1 none, 0 out of memory
+  return roots->status;
+}
+
+void square_root_context_free(square_root_context *roots) {
+  if (roots->context_ready)
+    montgomery_free(&roots->context);
+  roots->context_ready = 0;
+  roots->status = 0;
+  big_number *numbers[] = {&roots->odd_part, &roots->half_odd, &roots->generator, &roots->one};
+  for (size_t index = 0; index < sizeof numbers / sizeof *numbers; index++)
+    big_number_free(numbers[index]);
+}
+
+int big_number_square_root_with(square_root_context *roots, big_number *result, const big_number *value) {
+  if (!roots->context_ready)
+    return 0;
+  montgomery_context *context = &roots->context;
+  big_number base, w, t, r, c, value_form, probe, adjustment;
+  big_number *numbers[] = {&base, &w, &t, &r, &c, &value_form, &probe, &adjustment};
+  for (size_t index = 0; index < sizeof numbers / sizeof *numbers; index++)
+    big_number_init(numbers[index]);
+  int status = 0;
+
+  if (!big_number_divide(NULL, &base, value, &context->modulus))
+    goto done;
+  if (base.limb_count == 0) { // the root of 0 is 0, whatever the modulus
+    status = big_number_set_u64(result, 0);
+    goto done;
+  }
+  if (roots->status != 1) { // no non-residue (−1), or memory ran out (0)
+    status = roots->status;
     goto done;
   }
 
-  if (!big_number_set_u64(&one, 1) || !montgomery_to_form(&context, &one, &one) ||
-      !montgomery_to_form(&context, &value_form, &base) ||
-      !montgomery_power(&context, &c, &probe, &odd_part) || !montgomery_to_form(&context, &c, &c) ||
-      !montgomery_power(&context, &t, &base, &odd_part) || !montgomery_to_form(&context, &t, &t) ||
-      !big_number_copy(&exponent, &odd_part) || !big_number_add_small(&exponent, 1) ||
-      !big_number_shift_right(&exponent, &exponent, 1) || !montgomery_power(&context, &r, &base, &exponent) ||
-      !montgomery_to_form(&context, &r, &r))
+  // w = value^((odd − 1) / 2); r = w · value = value^((odd + 1) / 2); t = w · r = value^odd
+  if (!montgomery_power(context, &w, &base, &roots->half_odd) || !montgomery_to_form(context, &w, &w) ||
+      !montgomery_to_form(context, &value_form, &base) || !montgomery_multiply(context, &r, &w, &value_form) ||
+      !montgomery_multiply(context, &t, &w, &r) || !big_number_copy(&c, &roots->generator))
     goto done;
 
-  size_t order_bits = twos;
-  while (big_number_compare(&t, &one) != 0) {
+  size_t order_bits = roots->twos;
+  while (big_number_compare(&t, &roots->one) != 0) {
     // the smallest i with t^(2^i) = 1. None below order_bits: no root (or a composite)
     size_t smallest = 0;
     if (!big_number_copy(&probe, &t))
       goto done;
-    while (big_number_compare(&probe, &one) != 0) {
+    while (big_number_compare(&probe, &roots->one) != 0) {
       if (++smallest >= order_bits) {
         status = -1;
         goto done;
       }
-      if (!montgomery_multiply(&context, &probe, &probe, &probe))
+      if (!montgomery_multiply(context, &probe, &probe, &probe))
         goto done;
     }
     if (!big_number_copy(&adjustment, &c))
       goto done;
     for (size_t round = smallest + 1; round < order_bits; round++)
-      if (!montgomery_multiply(&context, &adjustment, &adjustment, &adjustment))
+      if (!montgomery_multiply(context, &adjustment, &adjustment, &adjustment))
         goto done;
-    if (!montgomery_multiply(&context, &r, &r, &adjustment) ||
-        !montgomery_multiply(&context, &c, &adjustment, &adjustment) ||
-        !montgomery_multiply(&context, &t, &t, &c))
+    if (!montgomery_multiply(context, &r, &r, &adjustment) ||
+        !montgomery_multiply(context, &c, &adjustment, &adjustment) ||
+        !montgomery_multiply(context, &t, &t, &c))
       goto done;
     order_bits = smallest;
   }
 
   // Proven by checking, whatever the modulus turned out to be.
-  if (!montgomery_multiply(&context, &probe, &r, &r))
+  if (!montgomery_multiply(context, &probe, &r, &r))
     goto done;
   if (big_number_compare(&probe, &value_form) != 0) {
     status = -1;
     goto done;
   }
-  status = montgomery_from_form(&context, result, &r);
+  status = montgomery_from_form(context, result, &r);
 done:
-  if (context_ready)
-    montgomery_free(&context);
   for (size_t index = 0; index < sizeof numbers / sizeof *numbers; index++)
     big_number_free(numbers[index]);
+  return status;
+}
+
+int big_number_square_root_mod(big_number *result, const big_number *value, const big_number *modulus) {
+  square_root_context roots;
+  square_root_context_init(&roots, modulus); // its status is the answer if no root can be looked for
+  int status = big_number_square_root_with(&roots, result, value);
+  square_root_context_free(&roots);
   return status;
 }

@@ -145,4 +145,27 @@ int big_number_test_first_non_residue_from(big_number *result, const big_number 
 // found (always the case for a non-residue of a prime), or 0 if memory runs out.
 int big_number_square_root_mod(big_number *result, const big_number *value, const big_number *modulus);
 
+// Square roots of many values mod one modulus: what doesn't depend on the value
+// (the Montgomery context, modulus − 1 = odd · 2^twos, and c = z^odd for the first
+// non-residue z) is worked out once, so each root costs one exponentiation instead
+// of three. A context is used by one thread at a time, like montgomery_context.
+typedef struct {
+  montgomery_context context;
+  int context_ready;
+  big_number odd_part;  // odd
+  big_number half_odd;  // (odd − 1) / 2
+  size_t twos;
+  big_number generator; // c = z^odd, in Montgomery form
+  big_number one;       // 1, in Montgomery form
+  // 1 ready; −1 the modulus has no non-residue (a perfect square: no root but 0's
+  // is found); 0 memory ran out or the modulus is even or below 3
+  int status;
+} square_root_context;
+
+// Returns the context's status (above). square_root_context_free is needed whatever it returns.
+int square_root_context_init(square_root_context *roots, const big_number *modulus);
+void square_root_context_free(square_root_context *roots);
+// big_number_square_root_mod's answer, with the context's modulus.
+int big_number_square_root_with(square_root_context *roots, big_number *result, const big_number *value);
+
 #endif
