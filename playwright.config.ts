@@ -30,12 +30,12 @@ export default defineConfig({
   projects: [
     {
       name: "phone",
-      testIgnore: ["gpuStripping.spec.ts", "gpuSoftwareOnly.spec.ts"],
+      testIgnore: ["gpuStripping.spec.ts", "gpuSoftwareOnly.spec.ts", "gpuTimeout.spec.ts"],
       use: { ...devices["Desktop Chrome"], viewport: { width: 420, height: 800 } },
     },
     {
       name: "desktop",
-      testIgnore: ["gpuStripping.spec.ts", "gpuSoftwareOnly.spec.ts"],
+      testIgnore: ["gpuStripping.spec.ts", "gpuSoftwareOnly.spec.ts", "gpuTimeout.spec.ts"],
       use: { ...devices["Desktop Chrome"], viewport: { width: 1440, height: 900 } },
     },
     {
@@ -43,10 +43,11 @@ export default defineConfig({
       // software GPU (about 15× slower than Apple Metal, step 11a): the GPU path's
       // correctness, not its speed. The site refuses software adapters (step 11f):
       // gpuStripping.spec.ts makes SwiftShader say it's hardware from outside the app
-      // (hardwareGpuStandIn.ts), gpuSoftwareOnly.spec.ts checks it's refused as it is.
+      // (hardwareGpuStandIn.ts), gpuSoftwareOnly.spec.ts checks it's refused as it is, and
+      // gpuTimeout.spec.ts gives up on a GPU whose answers never come back.
       // Both run here, and only here.
       name: "webgpu",
-      testMatch: ["gpuStripping.spec.ts", "gpuSoftwareOnly.spec.ts"],
+      testMatch: ["gpuStripping.spec.ts", "gpuSoftwareOnly.spec.ts", "gpuTimeout.spec.ts"],
       use: {
         ...devices["Desktop Chrome"],
         viewport: { width: 1440, height: 900 },

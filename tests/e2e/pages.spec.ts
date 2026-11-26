@@ -44,6 +44,7 @@ test.describe("/about", () => {
       "Is there a largest number I can jump to?",
       "Will it break my computer?",
       "Why does the GPU switch say “not available here”?",
+      "My computer has a gaming GPU. Is the site using it?",
     ]) {
       expect(html).toMatch(new RegExp(`<h3[^>]*>${question.replace("?", "\\?")}</h3>`));
     }

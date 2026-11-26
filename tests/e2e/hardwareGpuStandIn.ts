@@ -36,8 +36,8 @@ interface ProtocolMessage {
   params?: { sessionId?: string; targetInfo?: { type: string; targetId: string } };
 }
 
-/** Patches every worker of every page in the browser listening on `port`, until the returned function closes it. */
-async function patchEveryWorker(port: number): Promise<() => void> {
+/** Patches every worker of every page in the browser listening on `port` with `patch`, until the returned function closes it. */
+async function patchEveryWorker(port: number, patch: string): Promise<() => void> {
   const { webSocketDebuggerUrl } = (await (await fetch(`http://127.0.0.1:${port}/json/version`)).json()) as { webSocketDebuggerUrl: string };
   const socket = new WebSocket(webSocketDebuggerUrl);
   await new Promise((resolve, reject) => {
@@ -62,7 +62,7 @@ async function patchEveryWorker(port: number): Promise<() => void> {
         send("Runtime.runIfWaitingForDebugger", {}, params.sessionId);
       }
     } else if (method === "Debugger.paused" && sessionId) {
-      send("Runtime.evaluate", { expression: HARDWARE_STAND_IN }, sessionId);
+      send("Runtime.evaluate", { expression: patch }, sessionId);
       send("Debugger.resume", {}, sessionId);
       send("Debugger.disable", {}, sessionId); // and its breakpoint with it, so later scripts run straight on
     }
@@ -71,12 +71,23 @@ async function patchEveryWorker(port: number): Promise<() => void> {
   return () => socket.close();
 }
 
-export const test = base.extend<object, { browser: Browser }>({
+/**
+ * In every worker (the GPU worker included), the GPU's results never come back:
+ * mapAsync never settles, as Firefox was seen to do. For the call timeout's test.
+ */
+export const GPU_RESULTS_NEVER_COME_BACK = `(() => {
+  if (typeof GPUBuffer === "undefined") return;
+  GPUBuffer.prototype.mapAsync = () => new Promise(() => {});
+})()`;
+
+export const test = base.extend<object, { browser: Browser; furtherWorkerPatch: string }>({
+  // more to run in every worker after the stand-in (test.use({ furtherWorkerPatch }) starts a browser of its own)
+  furtherWorkerPatch: ["", { scope: "worker", option: true }],
   browser: [
-    async ({ playwright, launchOptions }, provide, workerInfo) => {
+    async ({ playwright, launchOptions, furtherWorkerPatch }, provide, workerInfo) => {
       const port = FIRST_DEBUGGING_PORT + workerInfo.parallelIndex;
       const browser = await playwright.chromium.launch({ ...launchOptions, args: [...(launchOptions.args ?? []), `--remote-debugging-port=${port}`] });
-      const stopPatching = await patchEveryWorker(port);
+      const stopPatching = await patchEveryWorker(port, `${HARDWARE_STAND_IN};${furtherWorkerPatch}`);
       await provide(browser);
       stopPatching();
       await browser.close();

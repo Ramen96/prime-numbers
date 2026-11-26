@@ -93,8 +93,9 @@ const FREQUENTLY_ASKED_QUESTIONS = [
         No. It works your processor hard while it’s calculating, on every core but one, in
         background threads, so the page stays responsive and you can stop at any time. Past
         about 75 digits it also uses your graphics chip to help with proofs, where your
-        browser offers it through WebGPU; a switch in the stats turns that off. It only
-        computes when you scroll toward primes it doesn’t have yet; when you stop, it rests.
+        browser offers it through WebGPU (off by default in Firefox for now); a switch in the
+        stats turns that off. It only computes when you scroll toward primes it doesn’t have
+        yet; when you stop, it rests.
       </>
     ),
   },
@@ -106,6 +107,18 @@ const FREQUENTLY_ASKED_QUESTIONS = [
         on your processor, which would be slower than proving there directly. So the CPU does
         all the work. Every prime is still proven and checked exactly the same way; only very
         large numbers take longer, up to about 1.8 times as long on the list near 200 digits.
+      </>
+    ),
+  },
+  {
+    question: "My computer has a gaming GPU. Is the site using it?",
+    answer: (
+      <>
+        Maybe not the one you think. On Windows computers with two graphics chips, the browser is
+        often given the built-in one, which still helps but is slower. To use the dedicated one,
+        open Settings, System, Display, Graphics, add your browser, set it to High performance,
+        and restart the browser. In Firefox the GPU is off by default for now; the switch in the
+        stats turns it on.
       </>
     ),
   },

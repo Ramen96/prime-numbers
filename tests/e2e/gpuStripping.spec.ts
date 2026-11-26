@@ -133,3 +133,33 @@ test.describe("GPU stripping, on a software GPU", () => {
     expect(await states()).toEqual(["cpu"]);
   });
 });
+
+test.describe("GPU stripping in Firefox, where the switch starts off", () => {
+  test.use({ userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:150.0) Gecko/20100101 Firefox/150.0" });
+
+  test("off by default: a proof stays on the CPU; switched on, it's used", async ({ page }) => {
+    const states = await watchStripping(page, null);
+    await page.goto("/");
+    const gpuSwitch = page.getByRole("switch", { name: "Use the GPU for proofs" });
+    await expect(gpuSwitch).toBeEnabled();
+    await expect(gpuSwitch).toHaveAttribute("aria-checked", "false");
+    await expect(page.getByTestId("gpu-row-text")).toHaveText("off, CPU only");
+    expect(await page.evaluate(() => localStorage.getItem("everyPrimeNumber.gpu"))).toBeNull(); // the default, not a stored choice
+
+    const prime = nextPrimeAfter(10n ** 139n);
+    await page.goto(`/is-prime?n=${prime}`);
+    await page.getByRole("button", { name: "Prove it" }).click();
+    await expect(page.getByTestId("prime-check-headline")).toContainText("is prime.", { timeout: 60_000 });
+    expect(await states()).toEqual(["cpu"]);
+
+    await page.goto("/");
+    await page.getByRole("switch", { name: "Use the GPU for proofs" }).click();
+    await expect(page.getByTestId("gpu-row-text")).toHaveText("on, used from 75 digits");
+    expect(await page.evaluate(() => localStorage.getItem("everyPrimeNumber.gpu"))).toBe("on");
+    const newStates = await watchStripping(page, null);
+    await page.goto(`/is-prime?n=${prime}`);
+    await page.getByRole("button", { name: "Prove it" }).click();
+    await expect(page.getByTestId("prime-check-headline")).toContainText("is prime.", { timeout: 60_000 });
+    expectStrippedOnTheGpu(await newStates());
+  });
+});

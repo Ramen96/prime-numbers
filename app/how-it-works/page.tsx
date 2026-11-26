@@ -911,8 +911,9 @@ for (size_t index = limb_count; index-- > 0;)
         help it: each thread runs two provers, so while one waits for its orders to come back,
         the other works. Nothing the GPU says is trusted. Every factor it reports is checked
         with one division on the CPU, and one order in 64 is also divided by every prime up to
-        10,000 on the CPU, to catch a factor it missed. If either check fails, or the GPU
-        reports an error, it’s switched off until the page reloads, and the CPU carries on.
+        10,000 on the CPU, to catch a factor it missed. If either check fails, the GPU reports
+        an error, or an answer doesn’t come back within 5 seconds, it’s switched off until the
+        page reloads, and the CPU carries on.
         Even a wrong answer could only slow a proof down: the certificate is still checked
         step by step, as above.
       </p>
@@ -1007,8 +1008,9 @@ for (size_t index = limb_count; index-- > 0;)
         device will differ, so the gap may be bigger or smaller.
       </p>
       <p>
-        The GPU is on by default wherever the browser has WebGPU on a real graphics chip, and
-        a switch in the stats on the home page turns it off, so the CPU does everything. The
+        The GPU is on by default wherever the browser has WebGPU on a real graphics chip
+        (except in Firefox for now, where it starts off), and a switch in the stats on the home
+        page turns it off, so the CPU does everything. The
         choice is kept in this browser and applies to the prime checker and random primes too.
         Where WebGPU isn’t available, or only runs in software on the processor, the switch
         is greyed out and the CPU does it all, exactly as before.

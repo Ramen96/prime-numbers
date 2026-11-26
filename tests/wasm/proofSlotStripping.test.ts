@@ -25,7 +25,7 @@ import {
   THREADED_INITIAL_MEMORY_BYTES,
   type CreateSieveModule,
 } from "../../lib/primes/threadedSieveModule.ts";
-import { RemoteGpuStripper } from "../../lib/primes/remoteGpuStripper.ts";
+import { GPU_CALL_TIMED_OUT_MESSAGE, RemoteGpuStripper } from "../../lib/primes/remoteGpuStripper.ts";
 import { closeGpuStrippingChannels, gpuStrippingChannel } from "../support/gpuStrippingChannel.ts";
 import { isPrime, nextPrimeAfter } from "../support/primality.ts";
 
@@ -282,6 +282,22 @@ describe("external stripping through proof slots, in both shipped builds", () =>
         assert.deepEqual(dropped.failures, [{ kind: "wrong-factor" }]);
         assert.equal(dropped.stillStripping, false);
         assert.deepEqual(dropped.certificates, onTheCpu.get(build().name));
+      });
+
+      it("through the GPU worker: a call that never comes back is given up on, and the proofs finish on the CPU, unchanged", async () => {
+        const honest = standIn().stripper;
+        let calls = 0;
+        const hanging: OrderStripper = {
+          strip: (orders, largestPrime, signal) => (++calls === 2 ? new Promise(() => {}) : honest.strip(orders, largestPrime, signal)),
+        };
+        const { endpoint } = gpuStrippingChannel(async () => ({ ...hanging, destroy: () => {} }));
+        const remote = await RemoteGpuStripper.create(endpoint, { callTimeoutMs: 100 });
+        assert.ok(remote);
+        const { certificates, failures, stillStripping } = await proveWith(build().slots, remote);
+        remote.destroy();
+        assert.deepEqual(failures, [{ kind: "error", message: GPU_CALL_TIMED_OUT_MESSAGE }]);
+        assert.equal(stillStripping, false);
+        assert.deepEqual(certificates, onTheCpu.get(build().name));
       });
 
       it("a pause with a strip on its way calls it off; resumed, the batches are sent again and the certificates are the same", async () => {

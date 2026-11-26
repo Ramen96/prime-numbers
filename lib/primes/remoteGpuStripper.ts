@@ -2,8 +2,8 @@
 // the GPU worker (gpuStrippingWorker.ts), one message out and one back, so its
 // answers arrive between runs at once instead of a few awaits later. ProofSlots
 // treats it like any stripper: every factor it reports is checked, a spot check
-// looks for missed ones, and any failure (a GPU error, or the worker stopping)
-// drops it, with everything going on on the CPU.
+// looks for missed ones, and any failure (a GPU error, the worker stopping, or a
+// call that doesn't come back in time) drops it, with everything going on on the CPU.
 
 import { GpuStrippingError, type StripHit } from "./gpuStripping.ts";
 import type { DisposableStripper } from "./gpuStrippingControl.ts";
@@ -25,16 +25,31 @@ export function startGpuStrippingWorker(): GpuStrippingEndpoint {
 /** Said when the GPU worker stops (it failed to load or crashed): the stripper is dropped. */
 export const GPU_WORKER_STOPPED_MESSAGE = "The GPU worker stopped.";
 
+/**
+ * How long a strip call may take before the GPU is given up on. In Firefox, calls
+ * were seen never to come back, and a single proof, waiting on its call, froze
+ * with no error. The longest calls measured take about 70 ms on an Apple M4 (the
+ * list near 10^200) and about 15 times that on SwiftShader, a software GPU, so a
+ * call this late isn't coming. The proof goes on on the CPU, and the GPU stays
+ * off for the session (GpuStrippingControl, as after any failure).
+ */
+export const GPU_CALL_TIMEOUT_MS = 5_000;
+
+/** Said when a call doesn't come back within GPU_CALL_TIMEOUT_MS. */
+export const GPU_CALL_TIMED_OUT_MESSAGE = "The GPU didn't answer in time.";
+
 export class RemoteGpuStripper implements DisposableStripper {
   readonly #endpoint: GpuStrippingEndpoint;
+  readonly #callTimeoutMs: number;
   #nextCall = 1;
   /** Calls on their way, by number. */
   readonly #waiting = new Map<number, { resolve: (hits: StripHit[]) => void; reject: (error: unknown) => void }>();
   /** Why every call fails from now on, once the worker stopped or this was destroyed. */
   #stopped: string | null = null;
 
-  private constructor(endpoint: GpuStrippingEndpoint) {
+  private constructor(endpoint: GpuStrippingEndpoint, callTimeoutMs: number) {
     this.#endpoint = endpoint;
+    this.#callTimeoutMs = callTimeoutMs;
     endpoint.onmessage = (event) => {
       const reply = event.data;
       if (reply.type === "ready") return;
@@ -48,7 +63,10 @@ export class RemoteGpuStripper implements DisposableStripper {
   }
 
   /** Starts the GPU worker; null (and the worker ended) if it has no GPU or fails to start. */
-  static async create(endpoint: GpuStrippingEndpoint = startGpuStrippingWorker()): Promise<RemoteGpuStripper | null> {
+  static async create(
+    endpoint: GpuStrippingEndpoint = startGpuStrippingWorker(),
+    { callTimeoutMs = GPU_CALL_TIMEOUT_MS } = {},
+  ): Promise<RemoteGpuStripper | null> {
     const available = await new Promise<boolean>((resolve) => {
       endpoint.onmessage = (event) => {
         if (event.data.type === "ready") resolve(event.data.available);
@@ -60,7 +78,7 @@ export class RemoteGpuStripper implements DisposableStripper {
       endpoint.terminate();
       return null;
     }
-    return new RemoteGpuStripper(endpoint);
+    return new RemoteGpuStripper(endpoint, callTimeoutMs);
   }
 
   strip(orders: readonly Uint32Array[], largestPrime: number, signal?: AbortSignal): Promise<StripHit[]> {
@@ -68,11 +86,18 @@ export class RemoteGpuStripper implements DisposableStripper {
     if (signal?.aborted) return Promise.reject(signal.reason);
     const call = this.#nextCall++;
     return new Promise<StripHit[]>((resolve, reject) => {
-      this.#waiting.set(call, { resolve, reject });
+      // too late: every call fails, and ProofSlots drops the stripper (GPU_CALL_TIMEOUT_MS)
+      const deadline = setTimeout(() => this.#waiting.has(call) && this.#stop(GPU_CALL_TIMED_OUT_MESSAGE), this.#callTimeoutMs);
+      const settle = <T,>(finish: (value: T) => void) => (value: T) => {
+        clearTimeout(deadline);
+        finish(value);
+      };
+      this.#waiting.set(call, { resolve: settle(resolve), reject: settle(reject) });
       signal?.addEventListener(
         "abort",
         () => {
           if (!this.#waiting.delete(call)) return;
+          clearTimeout(deadline);
           reject(signal.reason);
           this.#endpoint.postMessage({ type: "abort", call });
         },

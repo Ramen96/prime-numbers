@@ -3,7 +3,7 @@ import { afterEach, describe, it } from "node:test";
 import { closeGpuStrippingChannels, gpuStrippingChannel } from "../../tests/support/gpuStrippingChannel.ts";
 import { GpuStrippingError, type StripHit } from "./gpuStripping.ts";
 import type { DisposableStripper } from "./gpuStrippingControl.ts";
-import { GPU_WORKER_STOPPED_MESSAGE, RemoteGpuStripper } from "./remoteGpuStripper.ts";
+import { GPU_CALL_TIMED_OUT_MESSAGE, GPU_WORKER_STOPPED_MESSAGE, RemoteGpuStripper } from "./remoteGpuStripper.ts";
 
 const toBigInt = (limbs: Uint32Array) => limbs.reduceRight((value, limb) => (value << 32n) | BigInt(limb), 0n);
 
@@ -138,5 +138,33 @@ describe("RemoteGpuStripper and the GPU worker", () => {
     assert.equal(record.terminated, true);
     await assert.rejects(onItsWay, GpuStrippingError);
     await assert.rejects(remote.strip([limbsOf(15n)], 100), GpuStrippingError);
+  });
+
+  it("gives up on a call that doesn't come back in time: it and every later call fail as a GPU error", async () => {
+    let calls = 0;
+    const { stripper } = standIn(() => (++calls === 1 ? new Promise(() => {}) : Promise.resolve([])));
+    const { endpoint } = gpuStrippingChannel(async () => stripper);
+    const remote = await RemoteGpuStripper.create(endpoint, { callTimeoutMs: 50 });
+    assert.ok(remote);
+    const started = performance.now();
+    await assert.rejects(remote.strip([limbsOf(15n)], 100), (error) => error instanceof GpuStrippingError && error.message === GPU_CALL_TIMED_OUT_MESSAGE);
+    assert.ok(performance.now() - started >= 45, "not before its time");
+    await assert.rejects(remote.strip([limbsOf(15n)], 100), (error) => error instanceof GpuStrippingError && error.message === GPU_CALL_TIMED_OUT_MESSAGE);
+    remote.destroy();
+  });
+
+  it("a call that answers in time, or is called off, never times out afterwards", async () => {
+    const { stripper } = standIn();
+    const { endpoint } = gpuStrippingChannel(async () => stripper);
+    const remote = await RemoteGpuStripper.create(endpoint, { callTimeoutMs: 50 });
+    assert.ok(remote);
+    assert.deepEqual(await remote.strip([limbsOf(15n)], 100), [{ order: 0, prime: 3 }, { order: 0, prime: 5 }]);
+    const controller = new AbortController();
+    const calledOff = remote.strip([limbsOf(15n)], 100, controller.signal);
+    controller.abort(new Error("called off"));
+    await assert.rejects(calledOff, /called off/);
+    await new Promise((resolve) => setTimeout(resolve, 120)); // past both deadlines
+    assert.deepEqual(await remote.strip([limbsOf(21n)], 100), [{ order: 0, prime: 3 }, { order: 0, prime: 7 }]);
+    remote.destroy();
   });
 });
