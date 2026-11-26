@@ -10,13 +10,16 @@ test.describe("/how-it-works", () => {
 
     expect(html).toMatch(/<h1[^>]*>How Every Prime Number works<\/h1>/);
     for (const heading of [
-      "Why you only need to check divisors up to √n",
       "How the segmented sieve of Eratosthenes works",
       "How an infinite scroll can use constant memory",
-      "Computing li(x) with Ramanujan’s series",
       "What is the largest number JavaScript can store exactly?",
+      "How the site checks its own answers",
     ]) {
       expect(html).toContain(`>${heading}</h2>`);
+    }
+    // sections merged into others keep their headings, one level down (and every level is in the HTML)
+    for (const heading of ["Why you only need to check divisors up to √n", "Computing li(x) with Ramanujan’s series"]) {
+      expect(html).toContain(`>${heading}</h3>`);
     }
     expect(html).toContain('<math display="block">');
     expect(html).toContain("<msqrt>");

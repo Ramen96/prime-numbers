@@ -1,0 +1,78 @@
+// A section's deeper levels on /how-it-works (DepthSection.tsx): each a <details>
+// hanging off a rail, nested in the one before, so the depth reads at a glance.
+
+.level {
+  margin: 1.25rem 0;
+  border-left: 2px solid var(--rule);
+  padding-left: 1rem;
+
+  // three levels deep a phone has little room left: indent less there
+  @media (max-width: 30rem) {
+    padding-left: 0.6rem;
+  }
+
+  &[open] {
+    border-left-color: color-mix(in oklch, var(--heat-text) 45%, var(--rule));
+  }
+}
+
+.summary {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-height: 44px; // the tap target
+  width: fit-content;
+  cursor: pointer;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--muted);
+  list-style: none;
+
+  &::-webkit-details-marker {
+    display: none;
+  }
+
+  // the marker: a chevron that turns when open
+  &::before {
+    content: "";
+    width: 0.45rem;
+    height: 0.45rem;
+    border-right: 2px solid currentColor;
+    border-bottom: 2px solid currentColor;
+    transform: rotate(-45deg);
+    transition: transform 150ms ease;
+
+    @media (prefers-reduced-motion: reduce) {
+      transition: none;
+    }
+  }
+
+  details[open] > & {
+    color: var(--foreground);
+
+    &::before {
+      transform: rotate(45deg);
+    }
+  }
+
+  &:hover {
+    color: var(--foreground);
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--heat-text);
+    outline-offset: 2px;
+    border-radius: 2px;
+  }
+}
+
+.content {
+  padding-top: 0.25rem;
+  // a number too long for a nested line (3,317,044,064,679,887,385,961,981) breaks instead of widening the page
+  overflow-wrap: break-word;
+
+  // the deepest headings sit close under their toggle
+  > :first-child {
+    margin-top: 0.5rem;
+  }
+}
