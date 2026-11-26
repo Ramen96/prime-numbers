@@ -37,8 +37,8 @@ export default function RandomPrimePage() {
         after another prime.
       </p>
       <p>
-        <strong>How long does it take?</strong> On a laptop, under a second at 100 digits, a few seconds at 200, tens
-        of seconds at 300, minutes at 500 and hours at 1,000; a phone is slower. A proof runs on one thread: each step
+        <strong>How long does it take?</strong> On a laptop, under a second at 100 digits, a few seconds at 200, about
+        ten seconds at 300, minutes at 500 and over an hour at 1,000; a phone is slower. A proof runs on one thread: each step
         of the chain starts from the one before, so it can’t be spread across cores the way the list’s many primes
         are.
       </p>

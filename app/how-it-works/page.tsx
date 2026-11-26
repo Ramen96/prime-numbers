@@ -871,7 +871,7 @@ for (size_t index = limb_count; index-- > 0;)
       </p>
       <p>
         This is where the machine really starts losing. Measured natively on a laptop, on one
-        thread, a proof takes about 0.07 seconds at 100 digits, 1.1 seconds at 200 and 8.5
+        thread, a proof takes about 0.06 seconds at 100 digits, 0.8 seconds at 200 and 6
         seconds at 300. Each thread proves a different prime at once, and each prime appears as
         soon as it and every prime before it are proven and checked. Meanwhile the row at that
         end of the list says “proving primality…”, with how long the prime has taken and how far

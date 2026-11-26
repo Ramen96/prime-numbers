@@ -34,7 +34,7 @@ export default function IsPrimePage() {
       </p>
       <p>
         <strong>How long does a proof take?</strong> On a laptop, under a second at 100 digits, a few seconds at 200,
-        up to tens of seconds at 300, minutes at 500 and hours at 1,000; a phone is slower. A proof runs on one
+        up to tens of seconds at 300, minutes at 500 and over an hour at 1,000; a phone is slower. A proof runs on one
         thread, and the page will try any size.
       </p>
       <p>

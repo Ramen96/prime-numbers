@@ -289,16 +289,16 @@ export function describeAnswer(answer: PrimeCheckAnswer, { builtAhead = false }:
 }
 
 /**
- * Measured seconds per ECPP proof (CLAUDE.md, step 7a: native, one thread, an
- * M-series laptop), by digits. The browser's Wasm is slower; BROWSER_SLOWDOWN
- * allows for it.
+ * Measured seconds per ECPP proof (CLAUDE.md, step 13b: native, one thread, an
+ * M-series laptop, step 6's primes, 2026-11-26), by digits. The browser's Wasm is
+ * slower; BROWSER_SLOWDOWN allows for it. Past the last measurement, time grows
+ * about as digits^5 (PROOF_TIME_EXPONENT).
  */
 const MEASURED_PROOF_SECONDS: readonly [digits: number, seconds: number][] = [
-  [100, 0.07],
-  [200, 1.1],
-  [300, 8.5],
-  [500, 112],
-  [1000, 3334],
+  [100, 0.059],
+  [200, 0.79],
+  [300, 6.0],
+  [500, 73],
 ];
 // Measured in Chromium (2026-11-22, dev server, the checker's single-threaded
 // worker): 100 digits under 0.1 s; 200 digits 3.3 and 3.6 s (3× native); 300
